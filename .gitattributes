@@ -1,0 +1,16 @@
+# LF in the repository, always.
+#
+# `.editorconfig` already says `end_of_line = lf`, but an editorconfig is advice to
+# editors — it does not bind a script that writes a file, and several tools on Windows
+# default to CRLF. That mismatch produced whole-file diffs where two lines had changed,
+# which makes review useless exactly when it matters most.
+#
+# This binds it at the repository instead of asking every tool to behave.
+* text=auto eol=lf
+
+# Binary: never touched.
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.7z binary
