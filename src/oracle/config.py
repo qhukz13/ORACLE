@@ -61,6 +61,17 @@ class Settings(BaseSettings):
         return self.data_dir / "undo.jsonl"
 
     @property
+    def blobs_dir(self) -> Path:
+        # Full command output. The model gets structured fields; the human gets the
+        # whole log, linked from the result (docs/TOOLS.md rule 4).
+        return self.data_dir / "blobs"
+
+    @property
+    def apps_path(self) -> Path:
+        # App aliases, like policy: versioned, human-edited, never written by a tool.
+        return Path("config/apps.yaml")
+
+    @property
     def audit_path(self) -> Path:
         # Append-only, hash-chained, never rotated away (docs/LOGGING.md).
         return self.log_dir / "audit" / "audit.jsonl"

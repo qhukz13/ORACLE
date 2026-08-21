@@ -64,6 +64,10 @@ ignore = ["S101"]
 # fallback, and is documented as such in executor.py.
 "src/oracle/tools/readonly.py" = ["ASYNC240"]
 "src/oracle/tools/filesystem.py" = ["ASYNC240"]
+"src/oracle/tools/git.py" = ["ASYNC240"]
+"src/oracle/tools/dev.py" = ["ASYNC240"]
+"src/oracle/tools/apps.py" = ["ASYNC240"]
+"src/oracle/tools/terminal.py" = ["ASYNC240"]
 
 [tool.mypy]
 python_version = "3.12"

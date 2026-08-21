@@ -88,7 +88,7 @@ class TestWriteIsReversible:
         assert target.read_text(encoding="utf-8") == "replaced"
         assert out.undo_id, "a reversible write was not journalled"
 
-        ex._undo.undo(out.undo_id)  # type: ignore[union-attr]
+        await ex._undo.undo(out.undo_id)  # type: ignore[union-attr]
         assert target.read_text(encoding="utf-8") == "original"
 
     async def test_creating_a_file_then_undo_removes_it(
@@ -99,7 +99,7 @@ class TestWriteIsReversible:
         assert out.ok and target.exists()
         assert out.result.created is True  # type: ignore[union-attr]
 
-        ex._undo.undo(out.undo_id)  # type: ignore[union-attr,arg-type]
+        await ex._undo.undo(out.undo_id)  # type: ignore[union-attr,arg-type]
         assert not target.exists()
 
     async def test_patch_then_undo(self, ex: ToolExecutor, workspace: Path) -> None:
@@ -111,7 +111,7 @@ class TestWriteIsReversible:
         assert "x = 99" in target.read_text(encoding="utf-8")
         assert "@@" in out.result.diff  # type: ignore[union-attr]
 
-        ex._undo.undo(out.undo_id)  # type: ignore[union-attr,arg-type]
+        await ex._undo.undo(out.undo_id)  # type: ignore[union-attr,arg-type]
         assert target.read_text(encoding="utf-8") == "x = 1\ny = 2\nz = 1\n"
 
     async def test_move_then_undo(self, ex: ToolExecutor, workspace: Path) -> None:
@@ -119,14 +119,14 @@ class TestWriteIsReversible:
         out = await ex.execute("fs.move", {"path": str(src), "destination": str(dst)})
         assert out.ok and dst.exists() and not src.exists()
 
-        ex._undo.undo(out.undo_id)  # type: ignore[union-attr,arg-type]
+        await ex._undo.undo(out.undo_id)  # type: ignore[union-attr,arg-type]
         assert src.exists() and not dst.exists()
 
     async def test_undo_is_single_use(self, ex: ToolExecutor, workspace: Path) -> None:
         out = await ex.execute("fs.write", {"path": str(workspace / "a.txt"), "content": "x"})
-        ex._undo.undo(out.undo_id)  # type: ignore[union-attr,arg-type]
+        await ex._undo.undo(out.undo_id)  # type: ignore[union-attr,arg-type]
         with pytest.raises(UndoError, match="already been undone"):
-            ex._undo.undo(out.undo_id)  # type: ignore[union-attr,arg-type]
+            await ex._undo.undo(out.undo_id)  # type: ignore[union-attr,arg-type]
 
     async def test_undo_refuses_to_clobber_a_restored_move_target(
         self, ex: ToolExecutor, workspace: Path
@@ -137,7 +137,7 @@ class TestWriteIsReversible:
         src.write_text("someone recreated this", encoding="utf-8")
 
         with pytest.raises(UndoError, match="refusing to overwrite"):
-            ex._undo.undo(out.undo_id)  # type: ignore[union-attr,arg-type]
+            await ex._undo.undo(out.undo_id)  # type: ignore[union-attr,arg-type]
         assert src.read_text(encoding="utf-8") == "someone recreated this"
 
 
@@ -184,7 +184,7 @@ class TestDeleteGoesToTrash:
         assert trashed.exists(), "the file was destroyed, not trashed"
         assert trashed.read_text(encoding="utf-8") == "original"
 
-        ex._undo.undo(out.undo_id)  # type: ignore[union-attr,arg-type]
+        await ex._undo.undo(out.undo_id)  # type: ignore[union-attr,arg-type]
         assert target.read_text(encoding="utf-8") == "original"
 
     async def test_directory_delete_requires_explicit_recursive(
@@ -294,7 +294,7 @@ class TestJournalIntegrity:
         await ex.execute("fs.write", {"path": r"C:\Windows\x.txt", "content": "x"})
         assert ex._undo.records() == []  # type: ignore[union-attr]
 
-    def test_undoing_an_unknown_record_fails(self, tmp_path: Path) -> None:
+    async def test_undoing_an_unknown_record_fails(self, tmp_path: Path) -> None:
         j = UndoJournal(tmp_path / "u.jsonl")
         with pytest.raises(UndoError, match="no undo record"):
-            j.undo("u_nope")
+            await j.undo("u_nope")

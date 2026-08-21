@@ -151,6 +151,9 @@ tools:
   git.branch:  { tier: T1, scopes: [projects] }
   git.stash:   { tier: T1, scopes: [projects] }
   git.push:    { tier: T2, scopes: [projects] }   # visible to others, cannot be unpublished
+  # Executed by the undo journal, never selectable by the model (contract: hidden).
+  # Same tier as the mutations it reverses: undoing is not more privileged than doing.
+  git.undo:    { tier: T1, scopes: [projects] }
   git.reset_hard: { tier: T3, scopes: [projects] }
   git.clean:      { tier: T3, scopes: [projects] }
 

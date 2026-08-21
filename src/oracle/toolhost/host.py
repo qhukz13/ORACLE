@@ -28,7 +28,31 @@ log = get_logger(__name__)
 
 #: Environment handed to the child. Constructed, never inherited: secrets are absent
 #: rather than merely unused (docs/SECURITY.md#4b).
-_ENV_ALLOW = ("SystemRoot", "windir", "TEMP", "TMP", "PATHEXT", "NUMBER_OF_PROCESSORS", "OS")
+#
+# The location variables below are NOT secrets, and the tools in Phase 3 do not work
+# without them: `git` reads the global config from the user profile, and npm/uv/cargo
+# put their caches under APPDATA. Leaving them out does not make the child safer — it
+# makes `git commit` fail with "unable to auto-detect email address". The property that
+# matters is that credentials are ABSENT, and the child re-checks that on startup.
+_ENV_ALLOW = (
+    "SystemRoot",
+    "windir",
+    "TEMP",
+    "TMP",
+    "PATHEXT",
+    "NUMBER_OF_PROCESSORS",
+    "OS",
+    "ComSpec",
+    "PROCESSOR_ARCHITECTURE",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "ProgramData",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+)
 
 START_TIMEOUT_S = 20.0
 STOP_GRACE_S = 3.0

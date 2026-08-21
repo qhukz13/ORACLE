@@ -387,6 +387,20 @@ class ToolExecutor:
                         verdict=verdict,
                     )
                 result = contract.result_model.model_validate(response.result or {})
+            elif Capability.PROC_SPAWN in contract.capabilities:
+                # The in-process fallback exists for read-only tools and tests. A tool
+                # that spawns must never take it: without the Job Object, killing this
+                # process would not kill what the tool started, and HALT would be a
+                # lie. This is the rule ADR-0003 exists for, so it is enforced rather
+                # than merely documented.
+                return self._fail(
+                    tool_id,
+                    ToolErrorKind.EXECUTION_FAILED,
+                    f"{tool_id} spawns a process and requires the tool host, "
+                    "which is not configured",
+                    started,
+                    verdict=verdict,
+                )
             else:
                 ctx = ToolContext(
                     resolved={k: v.real for k, v in resolved.items()},

@@ -18,10 +18,12 @@ two leaves an unreferenced backup, which is harmless. The opposite ordering lose
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -39,6 +41,28 @@ class UndoKind(StrEnum):
     DELETE_CREATED = "delete_created"  # the file did not exist before
     MOVE_BACK = "move_back"  # undo a rename/move
     NONE = "none"  # nothing to reverse
+
+    # Git recipes. These cannot run on the parent side: reversing them means spawning
+    # a process, and the parent holds the API key (ADR-0003). They are dispatched back
+    # through the gate as `git.undo`, a tool the model cannot see.
+    GIT_UNCOMMIT = "git_uncommit"  # reset --soft HEAD~1, only if HEAD is still ours
+    GIT_UNSTAGE = "git_unstage"  # reset -- <path>
+    GIT_DELETE_BRANCH = "git_delete_branch"  # branch -D <name>
+    GIT_CHECKOUT = "git_checkout"  # switch back to the previous branch
+    GIT_STASH_POP = "git_stash_pop"  # restore what we stashed
+
+
+#: Kinds the parent cannot execute itself. Everything here needs a process, so it goes
+#: back across the boundary rather than being quietly special-cased into the runtime.
+GIT_KINDS = frozenset(
+    {
+        UndoKind.GIT_UNCOMMIT,
+        UndoKind.GIT_UNSTAGE,
+        UndoKind.GIT_DELETE_BRANCH,
+        UndoKind.GIT_CHECKOUT,
+        UndoKind.GIT_STASH_POP,
+    }
+)
 
 
 class UndoPlan(BaseModel):
@@ -120,12 +144,57 @@ class TrashStore:
         return sum(f.stat().st_size for f in self.root.rglob("*") if f.is_file())
 
 
+def _apply_file_plan(record_id: str, plan: UndoPlan) -> dict[str, Any]:
+    """The file-shaped recipes. Synchronous on purpose — the caller runs it off the
+    event loop, and mixing the ordering rules with thread dispatch would obscure them.
+    """
+    target = Path(plan.target)
+
+    if plan.kind is UndoKind.DELETE_CREATED:
+        if target.exists():
+            target.unlink()
+        return {"restored": None, "removed": str(target)}
+
+    if plan.kind is UndoKind.RESTORE_FILE:
+        if plan.backup is None:
+            raise UndoError(f"{record_id} has no backup to restore")
+        backup = Path(plan.backup)
+        if not backup.exists():
+            raise UndoError(f"backup {backup} is gone; cannot undo")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(backup, target)
+        return {"restored": str(target), "from": str(backup)}
+
+    if plan.kind is UndoKind.MOVE_BACK:
+        if plan.origin is None:
+            raise UndoError(f"{record_id} has no origin to move back to")
+        origin = Path(plan.origin)
+        if origin.exists():
+            raise UndoError(f"{origin} exists again; refusing to overwrite it")
+        shutil.move(str(target), str(origin))
+        return {"restored": str(origin)}
+
+    raise UndoError(f"unknown undo kind {plan.kind}")
+
+
+#: How a git-shaped undo gets executed. Supplied by the runtime, which routes it back
+#: through the policy gate as the hidden `git.undo` tool. Typed as a callback rather
+#: than an import so this module keeps no reference to the executor — the journal is a
+#: record of what happened, not a second way to make things happen.
+GitUndoRunner = Callable[[UndoPlan], Awaitable[dict[str, Any]]]
+
+
 class UndoJournal:
     """Append-only record of reversible mutations. Lives on the parent side."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, git_runner: GitUndoRunner | None = None) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._git_runner = git_runner
+
+    def set_git_runner(self, runner: GitUndoRunner) -> None:
+        """Wired after construction, because the executor needs the journal too."""
+        self._git_runner = runner
 
     def record(self, tool: str, plan: UndoPlan, *, trace_id: str) -> UndoRecord:
         rec = UndoRecord(
@@ -151,12 +220,16 @@ class UndoJournal:
     def latest(self, n: int = 10) -> list[UndoRecord]:
         return [r for r in self.records() if not r.undone][-n:]
 
-    def undo(self, record_id: str) -> dict[str, Any]:
+    async def undo(self, record_id: str) -> dict[str, Any]:
         """Reverse one recorded mutation.
 
         Refuses rather than guesses: if the file has changed since, the backup is not
         silently restored over it. Losing work while "undoing" would be the worst
         possible behaviour from a safety feature.
+
+        Async because some recipes cannot run here at all. Reversing a commit means
+        spawning `git`, and this process holds the API key — so those go back across
+        the boundary through the gate instead (ADR-0003).
         """
         records = self.records()
         match = next((r for r in records if r.id == record_id), None)
@@ -166,37 +239,23 @@ class UndoJournal:
             raise UndoError(f"{record_id} has already been undone")
 
         plan = match.plan
-        target = Path(plan.target)
 
         if plan.kind is UndoKind.NONE:
             raise UndoError(f"{match.tool} recorded nothing to reverse")
 
-        if plan.kind is UndoKind.DELETE_CREATED:
-            if target.exists():
-                target.unlink()
-            result = {"restored": None, "removed": str(target)}
-
-        elif plan.kind is UndoKind.RESTORE_FILE:
-            if plan.backup is None:
-                raise UndoError(f"{record_id} has no backup to restore")
-            backup = Path(plan.backup)
-            if not backup.exists():
-                raise UndoError(f"backup {backup} is gone; cannot undo")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(backup, target)
-            result = {"restored": str(target), "from": str(backup)}
-
-        elif plan.kind is UndoKind.MOVE_BACK:
-            if plan.origin is None:
-                raise UndoError(f"{record_id} has no origin to move back to")
-            origin = Path(plan.origin)
-            if origin.exists():
-                raise UndoError(f"{origin} exists again; refusing to overwrite it")
-            shutil.move(str(target), str(origin))
-            result = {"restored": str(origin)}
-
-        else:  # pragma: no cover - StrEnum is exhaustive
-            raise UndoError(f"unknown undo kind {plan.kind}")
+        if plan.kind in GIT_KINDS:
+            if self._git_runner is None:
+                raise UndoError(
+                    f"{match.tool} must be reversed by running git, and no tool host is "
+                    "available to do it"
+                )
+            result = await self._git_runner(plan)
+        else:
+            # Restoring a backup is a file copy of unbounded size, and this runs in the
+            # process serving every client's event stream. Off the loop it goes — the
+            # exemption that covers the tool handlers applies to the toolhost child,
+            # which has nothing else to starve, and this is not that process.
+            result = await asyncio.to_thread(_apply_file_plan, record_id, plan)
 
         self._mark_undone(record_id)
         log.info("undo.applied", record=record_id, tool=match.tool, kind=str(plan.kind))

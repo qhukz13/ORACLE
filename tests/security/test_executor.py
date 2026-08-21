@@ -383,12 +383,33 @@ class TestRegistryValidation:
         for c in build_registry().all():
             if not (c.capabilities & mutating):
                 continue
+            if c.hidden:
+                # The bargain is about what the MODEL gets to run unprompted. A hidden
+                # tool is an undo recipe: it exists only because the journal needs a way
+                # to reverse something, and it runs only when a human asks for that.
+                # Requiring an undo-of-an-undo would be theatre. The invariant that
+                # keeps this from being a loophole is asserted just below.
+                continue
             if c.risk <= Tier.T1:
                 assert c.reversible and c.undo, (
                     f"{c.id} mutates at {c.risk.label} but declares no undo"
                 )
             else:
                 assert c.dry_run, f"{c.id} is {c.risk.label} but cannot preview its effect"
+
+    def test_hidden_tools_are_unreachable_from_the_model(self) -> None:
+        """`hidden` exempts a tool from the reversibility bargain, so it must genuinely
+        be unreachable: not offered, and not surfaced by any intent filter."""
+        registry = build_registry()
+        hidden = [c for c in registry.all() if c.hidden]
+        assert hidden, "this test is pointless if nothing is hidden"
+        for c in hidden:
+            assert not c.intents, f"{c.id} is hidden but declares intents"
+            assert c not in registry.offerable(), f"{c.id} is hidden but offerable"
+        every_intent = {i for c in registry.all() for i in c.intents}
+        for intent in every_intent:
+            for c in registry.for_intent(intent):
+                assert not c.hidden, f"{c.id} is hidden but appears under intent {intent}"
 
     def test_every_registered_tool_has_a_policy_rule(self) -> None:
         """A tool with no rule is denied by default — correct, but silent. Catch the
