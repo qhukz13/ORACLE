@@ -15,7 +15,7 @@ doc, delete the marker.
 | [OQ-01](#oq-01) | Which router model actually fits and performs? | ~~`EXPERIMENT NEEDED`~~ | Phase 1 | **RESOLVED 2026-08-21 — 0.8b, 93.3% accuracy** |
 | [OQ-02](#oq-02) | Which embedding model for mixed RU/EN? | `EXPERIMENT NEEDED` | Phase 5 | open |
 | [OQ-03](#oq-03) | How long will Pascal keep GPU acceleration? | `UNKNOWN` | risk, not a phase | monitoring |
-| [OQ-04](#oq-04) | Does `realpath` resolve Windows junctions? | `TO VERIFY` | Phase 2 | open |
+| [OQ-04](#oq-04) | Does `realpath` resolve Windows junctions? | ~~`TO VERIFY`~~ | Phase 2 | **RESOLVED 2026-08-21 — yes; but `is_symlink()` lies** |
 | [OQ-05](#oq-05) | Does `agy -p` emit stdout when piped? | ~~`EXPERIMENT NEEDED`~~ | Phase 6 (Antigravity only) | **RESOLVED 2026-08-21 — yes, with `--output-format`** |
 | [OQ-06](#oq-06) | Can a PWA install over a self-signed cert? | `TO VERIFY` | Phase 8 (push only) | open |
 | [OQ-07](#oq-07) | Is the memory subsystem dual- or quad-channel? | `UNKNOWN` | CPU-fallback planning | open |
@@ -113,19 +113,31 @@ path is tested in Phase 1 rather than discovered in production; `LLMProvider` al
 ---
 
 ### OQ-04
-**Does Python's `os.path.realpath` fully resolve Windows junctions and mount points?** `TO VERIFY` · blocks **Phase 2**
+**Does Python's `os.path.realpath` fully resolve Windows junctions and mount points?**
+**RESOLVED 2026-08-21 — yes, and `GetFinalPathNameByHandleW` was not needed.**
 
-The path canonicaliser depends on step 8 of the algorithm in
-[SECURITY.md §4](SECURITY.md#4-path-safety-windows-specific). Symlinks are handled; **junctions**
-(`mklink /J`) and mount points are the uncertainty, and a junction that resolves incorrectly is a
-sandbox escape.
+Full write-up: [`logs/development/2026-08-21-oq04-windows-paths.md`](../logs/development/2026-08-21-oq04-windows-paths.md).
+Tested against a **real** `mklink /J` fixture tree, not mocks.
 
-**Check.** Create a fixture tree with a symlink, a junction and a mount point, each pointing outside an
-allowed root. Assert every one is resolved and denied. If `realpath` falls short, use
-`GetFinalPathNameByHandleW` via `ctypes`.
+`realpath` correctly resolves junctions, symlinks, 8.3 aliases (`PROGRA~1`), trailing dots and `..`.
+`os.path.abspath` resolves none of it and must never be substituted.
 
-**Note:** this fixture tree is required for `tests/security/test_symlink_escape.py` regardless of the
-outcome, so the work is not wasted either way.
+**Four findings that changed the implementation:**
+
+1. **`Path.is_symlink()` returns `False` for a junction** (`st_reparse_tag = 0xa0000003`). The natural
+   optimisation — "only resolve if it's a link" — walks straight past every junction. Detection must
+   use `st_file_attributes & FILE_ATTRIBUTE_REPARSE_POINT`. This is the bug that would have shipped.
+2. **Junctions need no admin; symlinks do.** Developer Mode is off here, so an unprivileged attacker
+   can create junctions but not symlinks — the junction is the *realistic* vector and the symlink the
+   theoretical one. The suite treats junction tests as required, symlink tests as skippable.
+3. **`realpath` does NOT strip an alternate data stream.** `normal.txt:hidden` writes a hidden stream
+   to a file whose size never changes. Rejected by inspection, before resolution.
+4. **UNC and device paths pass through `realpath` unchanged** (`\?\C:\…`, `\.\C:`,
+   `\host\C$\…`), so they are rejected outright — and *before* the wildcard check, since `\?\`
+   contains `?` and `C$` contains `$`.
+
+Windows also silently strips trailing dots and spaces, so `.env.` opens `.env`. Deny rules are
+therefore matched **after** resolution, never against the raw string.
 
 ---
 

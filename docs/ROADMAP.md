@@ -156,6 +156,9 @@ budget allocation. A recorded fixture suite for intent accuracy that reruns on a
 
 ## Phase 2 — Tool system + policy gate  **[MVP]**
 
+> **P2-T1 mostly DONE 2026-08-21** — gate built and proven with 103 security tests;
+> process isolation deliberately deferred to Phase 3 (see the note at the end of this phase).
+
 **Objective.** The full capability/policy/execution machinery, proven with **read-only tools only**.
 
 **Why it exists.** This is the phase that makes ORACLE safe to keep building. Every security control
@@ -173,6 +176,7 @@ these projects end up as unrestricted shell wrappers.
    plus the `realpath`-vs-junction experiment ([OQ-04](OPEN_QUESTIONS.md)).
 4. Policy engine: `config/policy.yaml`, scopes, capabilities, tiers, deny-always, fail-closed loading.
 5. `oracle-toolhost` as a **separate process**: JSON-RPC over pipe, Job Object, timeouts, argv-only.
+   **DEFERRED to Phase 3 — see the note below.**
 6. Approvals: bound `arg_hash`, expiry, single-use, re-check before execution.
 7. Taint tracking: provenance on context items; escalation rules.
 8. Hash-chained audit log + `oracle audit verify`.
@@ -198,8 +202,17 @@ security suite is a **merge gate** from here on.
 **Risks.** Windows path edge cases are genuinely hard → property testing plus a real fixture tree with
 actual symlinks and junctions, not mocks. IPC overhead → measure; budget < 50 ms per call.
 
-**Definition of done.** Security suite green and wired into `make check`; audit verification working;
-ADR-0003 and ADR-0005 confirmed against the implementation.
+**Note on process isolation (ADR-0003).** The toolhost is specified but not yet a separate process;
+the executor runs in-process. ADR-0003's three justifications are (a) a crashing tool must not take
+down the agent, (b) a tool must not be able to read `ANTHROPIC_API_KEY`, (c) killing a thread does not
+kill `npm install`'s grandchildren. **None of them bite for Phase 2's read-only file tools, and all
+three bite hard in Phase 3** when `dev.execute`, `git` and `npm` start spawning real process trees.
+Building it at the point where it is load-bearing is deliberate sequencing, not an omission — but it
+is a **hard prerequisite for the first Phase 3 tool that spawns a process**, and the acceptance
+criterion "killing the toolhost mid-call leaves the runtime healthy" moves with it.
+
+**Definition of done.** Security suite green and wired into `scripts/check.py`; audit verification
+working; ADR-0005 confirmed against the implementation; ADR-0003 confirmed at the start of Phase 3.
 
 ---
 

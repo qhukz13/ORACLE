@@ -1,0 +1,120 @@
+# ORACLE policy — data, not code.
+#
+# Nothing the model emits and nothing retrieved from a document can modify this file.
+# It is loaded at startup and on explicit reload only, never from a tool
+# (docs/SECURITY.md#2-design-principles).
+#
+# If this file is missing or unparseable, ORACLE starts in READ-ONLY LOCKDOWN.
+# That is deliberate: a security control that fails open is not a security control.
+
+version: 1
+
+scopes:
+  projects:
+    roots:
+      - { path: "C:/Projects", mode: rw }
+
+  notes:
+    roots:
+      - { path: "C:/Users/qhukz/Documents/ObsidianNotes", mode: rw }
+      - { path: "C:/Users/qhukz/Documents/AI/ML Learning", mode: rw }
+      - { path: "C:/Users/qhukz/Documents/MLAI NOTES/ML/AI", mode: ro }
+
+  scratch:
+    roots:
+      - { path: "D:/ORACLE/scratch", mode: rw }
+
+  # Everything not listed above is invisible. There is no implicit read of
+  # C:/Users/** — Documents alone contains game saves and Paradox data.
+  #
+  # deny_always wins over every allow and is NOT overridable from the UI. Changing it
+  # means editing this file by hand, which is the intended speed bump.
+  #
+  # Matched against the RESOLVED path, never the raw one: Windows strips trailing dots
+  # (`.env.` opens `.env`) and 8.3 aliases (`PROGRA~1`) would otherwise dodge a rule
+  # written against the long name. See logs/development/2026-08-21-oq04-windows-paths.md
+  deny_always:
+    - "**/.ssh/**"
+    - "**/*.env"
+    - "**/.git/hooks/**"      # writing a hook is code execution on the next commit
+    - "**/.git/config"        # core.fsmonitor / core.pager are execution vectors
+    - "**/node_modules/.bin/**"
+    - "**/id_rsa*"
+    - "**/*.pem"
+    - "**/*.pfx"
+
+tools:
+  # ---------------------------------------------------------------- Phase 2: read-only
+  oracle.status:      { tier: T0 }
+  oracle.task_list:   { tier: T0 }
+  oracle.halt:        { tier: T0 }   # stopping must never require permission
+
+  sys.info:           { tier: T0 }
+  sys.processes:      { tier: T0 }
+
+  fs.read:
+    tier: T0
+    scopes: [projects, notes, scratch]
+
+  fs.list:
+    tier: T0
+    scopes: [projects, notes, scratch]
+
+  fs.stat:
+    tier: T0
+    scopes: [projects, notes, scratch]
+
+  # ------------------------------------------------ Phase 3+ (declared, not yet built)
+  # Listed so the tiering is reviewable now rather than invented under deadline later.
+  # A tool with no rule here is denied by default, so declaring them early costs
+  # nothing and documents intent.
+  fs.write:
+    tier: T1
+    scopes: [projects, notes, scratch]
+    scope_tiers:
+      scratch: T1
+      projects: T1
+      notes: T1
+
+  fs.patch:
+    tier: T1
+    scopes: [projects, notes, scratch]
+
+  fs.delete:
+    tier: T3                # goes to the trash journal; never an unrecoverable delete
+    scopes: [projects, notes, scratch]
+
+  git.status:  { tier: T0, scopes: [projects] }
+  git.diff:    { tier: T0, scopes: [projects] }
+  git.log:     { tier: T0, scopes: [projects] }
+  git.add:     { tier: T1, scopes: [projects] }
+  git.commit:  { tier: T1, scopes: [projects] }
+  git.branch:  { tier: T1, scopes: [projects] }
+  git.stash:   { tier: T1, scopes: [projects] }
+  git.push:    { tier: T2, scopes: [projects] }   # visible to others, cannot be unpublished
+  git.reset_hard: { tier: T3, scopes: [projects] }
+  git.clean:      { tier: T3, scopes: [projects] }
+
+  dev.run_tests:    { tier: T1, scopes: [projects] }
+  dev.build:        { tier: T1, scopes: [projects] }
+  dev.lint:         { tier: T1, scopes: [projects] }
+  dev.install_deps: { tier: T2, scopes: [projects] }   # network + arbitrary postinstall
+  dev.execute:      { tier: T2, scopes: [projects] }
+
+  term.open:  { tier: T1, scopes: [projects] }
+  term.read:  { tier: T0, scopes: [projects] }
+  term.write: { tier: T2, scopes: [projects] }   # typing into a live shell = full user rights
+
+  app.launch: { tier: T1 }
+  app.close:  { tier: T2 }
+
+  ai.build_packet: { tier: T0 }                  # local only, no egress
+  ai.delegate:     { tier: T2 }                  # egress; preview is mandatory
+  ai.collect:      { tier: T1 }
+
+# Tools deliberately absent, and therefore denied by default:
+#   oracle.set_policy   - policy changes are a human editing this file
+#   git.push --force    - not exposed at all
+#   registry.*, sys.settings write - the blast radius is the OS
+#   keyboard/mouse synthesis - unscopeable by nature
+# See docs/TOOLS.md#deliberately-absent

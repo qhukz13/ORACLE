@@ -21,6 +21,7 @@ dev = [
     "types-pyyaml>=6.0",
     "ruff>=0.7",
     "mypy>=1.13",
+    "hypothesis>=6.100",
 ]
 
 [project.scripts]
@@ -45,6 +46,9 @@ ignore = ["S101"]
 [tool.ruff.lint.per-file-ignores]
 # Russian test fixtures are the point, not an ambiguity (RUF001).
 "tests/*" = ["S105", "S106", "RUF001"]
+# The security suite must build REAL junctions with mklink; a mocked reparse point
+# would encode the very assumption the suite exists to disprove.
+"tests/security/*" = ["S105", "S106", "RUF001", "S603", "S607", "ASYNC221"]
 # Few-shot examples are literal prompt content, not code. Wrapping them would change
 # what the model sees, and RUF001 flags Cyrillic as "ambiguous" in what is deliberately
 # a bilingual prompt.

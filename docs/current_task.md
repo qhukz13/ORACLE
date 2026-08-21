@@ -7,108 +7,117 @@
 
 ## Task
 
-**P2-T1 — Tool system and the policy gate**
+**P3-T1 — Process isolation, then PC & dev control tools**
 
-**Phase:** [2 — Tool system + policy gate](ROADMAP.md#phase-2--tool-system--policy-gate--mvp) · **Scope:** MVP
+**Phase:** [3 — PC & dev control tools](ROADMAP.md#phase-3--pc--dev-control-tools--mvp) · **Scope:** MVP
 **Status:** `NOT STARTED` · **Set:** 2026-08-21
-**Previous task:** P1-T1 router — `DONE` (93.3% intent accuracy), see [current_report.md](current_report.md)
+**Previous task:** P2-T1 policy gate — `MOSTLY DONE`, see [current_report.md](current_report.md)
 
 ---
 
 ## Objective
 
-Build the full capability / policy / isolated-execution machinery, and prove it with **read-only
-tools only**.
+Build `oracle-toolhost` as a real separate process, **then** the tools that make ORACLE useful: git,
+tests, files, apps, terminal.
 
-## Why this task exists
+## Why the ordering is not negotiable
 
-This is the phase that makes ORACLE safe to keep building. Every security control lands here, before
-a single write tool exists. Retrofitting a policy engine after tools exist is exactly how this class
-of project ends up as an unrestricted shell wrapper — and the roadmap's second sequencing rule
-forbids any write tool before this is done.
+P2 deferred process isolation on the argument that ADR-0003's justifications don't bite for read-only
+file tools. **They all bite the moment a tool spawns a process**, which is the first thing this task
+does:
+
+- a hung `npm install` must not take down the agent, the UI and the event stream;
+- `git` and `npm` must not run in an address space holding `ANTHROPIC_API_KEY`;
+- killing a thread does not kill `npm install`'s grandchildren — only a Job Object does, and HALT's
+  credibility depends on it.
+
+**Do not add a single process-spawning tool before the toolhost exists.** That is the same rule that
+put the policy gate before write tools, applied one level down.
 
 ## Context
 
-P0 gave the transport, event log and shell. P1 gave a router that classifies intent at 93.3% and a
-pipeline that *says* what the user wants but cannot act. The `_PENDING` branch in
-[`src/oracle/router/pipeline.py`](../src/oracle/router/pipeline.py) is the seam where tools plug in.
+P2 delivered: the path canonicaliser (12 steps, TOCTOU recheck, junction-aware), the policy gate
+(fail-closed, deny-by-default, taint escalation, HALT), the hash-chained audit log, tool
+contracts/registry, and five read-only tools — 103 security tests.
 
 Established and not to be re-derived:
-- Router: `qwen3.5:0.8b`, num_ctx 16384, **`think: false`**.
-- **Constrain only what the decoder enforces** ([ADR-0017](DECISIONS.md#adr-0017--constrain-what-the-decoder-can-enforce)) —
-  enums and required fields, never `minimum`/`pattern`. This applies directly to tool-argument schemas.
-- Context budget is per call type; `ContextAssembler` already carries `provenance` for taint.
-- Tests must stay hermetic (`Settings.llm_enabled=False`); no test may require Ollama.
+- **`Path.is_symlink()` is False for junctions.** Use the reparse-point attribute
+  ([OQ-04](OPEN_QUESTIONS.md#oq-04)).
+- **Pin every program to an absolute path at startup**, never resolve via `PATH` at call time.
+- **Never call blocking `subprocess` from an async handler** — use `asyncio.create_subprocess_exec`.
+  ruff `ASYNC221` enforces it.
+- Constraints in tool-argument schemas must be **decoder-enforceable**
+  ([ADR-0017](DECISIONS.md#adr-0017--constrain-what-the-decoder-can-enforce)).
+- Tests stay hermetic (`Settings.llm_enabled=False`); the security suite is a merge gate.
 
 ## Requirements
 
-1. **Resolve [OQ-04](OPEN_QUESTIONS.md#oq-04) first.** Does `os.path.realpath` fully resolve Windows
-   junctions and mount points? Build the fixture tree (symlink + junction + mount point) — it is
-   needed for the security suite regardless of the answer. If `realpath` falls short, use
-   `GetFinalPathNameByHandleW` via `ctypes`.
-2. **Path canonicaliser** implementing all 12 steps of
-   [SECURITY.md §4](SECURITY.md#4-path-safety-windows-specific), including the TOCTOU re-check.
-3. **Tool registry + contract decorator** ([TOOLS.md §2](TOOLS.md#2-tool-contract)); startup
-   validation; JSON Schema generation. Resolved types `ScopedPath`, `ProjectRef`, `ProgramRef` — a
-   bare `str` path in a tool signature is a review rejection.
-4. **Policy engine**: `config/policy.yaml`, scopes, capabilities, risk tiers, `deny_always`, and
-   **fail-closed loading** (unparseable policy → read-only, loudly).
-5. **`oracle-toolhost` as a separate process**: JSON-RPC over pipe, Windows Job Object, timeouts,
-   argv-only. It receives a pre-authorised `ToolInvocation` and nothing else.
-6. **Approvals**: `arg_hash` binding, expiry, single-use, re-check immediately before execution.
-7. **Taint tracking**: provenance → tier escalation; `Assembled.tainted` already exists.
-8. **Hash-chained audit log** + `oracle audit verify`.
-9. **HALT**: API → runtime → job-object termination → deny-all → manual resume. The P0 stub in
-   `app.py` becomes real.
-10. **Read-only tools only**: `fs.read`, `fs.list`, `sys.info`, `sys.processes`, `oracle.*`.
-11. **`tests/security/`** — the red-team suite listed in [TESTING.md §3](TESTING.md#3-security-tests-are-a-merge-gate),
-    wired into `scripts/check.py` as a **merge gate**.
+1. **`oracle-toolhost` as a separate process.** JSON-RPC over a pipe; a Windows **Job Object** with
+   `KILL_ON_JOB_CLOSE` around the whole tree (the pattern already proven in
+   `apps/desktop/src-tauri/src/backend.rs` for the sidecar); per-call timeouts; argv lists only,
+   never `shell=True`; a constructed environment, never inherited `os.environ`.
+2. **Supervision**: the runtime restarts a crashed toolhost; the in-flight step is marked `failed`
+   and is **never silently retried if it had side effects**.
+3. **Undo journal + trash.** `fs.write` backs up first; `fs.delete` moves to trash, never unlinks.
+4. `fs.write`, `fs.patch`, `fs.move`.
+5. `git.*`: status, diff, log, add, commit (undo `reset --soft HEAD~1`), branch, stash, push (T2).
+6. `dev.run_tests` with **structured** results (pytest/vitest/jest/cargo autodetect), `dev.build`,
+   `dev.lint`, `dev.execute` (allowlisted program + argv).
+7. `app.launch` via `config/apps.yaml` aliases; `sys.processes` already exists.
+8. `term.*` via `pywinpty` ([OQ-09](OPEN_QUESTIONS.md#oq-09)); `term.write` confirmed every time.
+9. Project registry upgrade: detect type, test/build commands, read `AGENTS.md`/`CLAUDE.md`.
+10. **Tool selection in the router** — the agent can finally act. Feed only intent-filtered tool
+    schemas into the context budget (`registry.for_intent`), which is already load-bearing for latency.
+11. Approval issuance + the `approval.requested` / `approval.resolved` event round trip.
 
 ## Constraints
 
-- **No write tools, no `fs.write`, no `git.commit`.** Those are P3, after the gate is proven.
-- **No `shell=True`, no `os.system`, no string-built commands.** Enforced by lint and a security test.
-- The toolhost must not be able to read policy, secrets, or re-enter the runtime.
-- The gate stays green; `mypy --strict` covers `src/oracle`.
+- **No tool that spawns a process before the toolhost exists.**
+- No `shell=True`, no `os.system`, no string-built commands.
+- Every new tool: contract, policy rule in `config/policy.yaml`, and a `tests/security/` case.
+- The 40-tool cap is real; `MAX_TOOLS` will start refusing registrations.
+- The gate stays green, security suite included.
 
 ## Acceptance criteria
 
-- [ ] Every red-team case is **denied**, and each denial names the rule that fired.
-- [ ] A corrupt or missing `policy.yaml` yields read-only mode, loudly — never open access.
 - [ ] Killing the toolhost mid-call leaves the runtime healthy; the step is marked `failed`.
 - [ ] HALT terminates a `ping -t` process tree within 2 s from a cold hotkey press.
-- [ ] Tampering with one audit line makes `oracle audit verify` fail.
-- [ ] An approval issued for args A cannot execute args B.
-- [ ] `grep -r "shell=True"` returns nothing; a lint rule enforces it.
-- [ ] Tool-argument schemas use only decoder-enforceable constraints (ADR-0017).
-- [ ] Security suite is part of `scripts/check.py` and green.
+- [ ] "commit my changes in Asterim with message X" works end to end and is undoable.
+- [ ] "run the Asterim tests" returns structured pass/fail counts, not scraped text.
+- [ ] `git.push` prompts, and approving executes **exactly** the previewed argv.
+- [ ] A soak test of 100 tool calls leaves **zero** orphaned processes (verified by enumeration).
+- [ ] A tool whose program is not on the allowlist is refused, naming the rule.
+- [ ] `grep -r "shell=True"` returns nothing; lint enforces it.
+- [ ] Project detection correctly classifies all seven projects in `C:\Projects`.
 
 ## Relevant files
 
-Create: `src/oracle/tools/` (registry, contracts, types) · `src/oracle/policy/` (engine, scopes,
-tiers, taint) · `src/oracle/toolhost/` (separate process, job objects) · `config/policy.yaml` ·
-`tests/security/`
-Modify: `src/oracle/router/pipeline.py` (the `_PENDING` branch) · `src/oracle/api/app.py` (real HALT)
-Read first: [SECURITY.md](SECURITY.md) · [TOOLS.md](TOOLS.md) ·
-[ARCHITECTURE.md §3](ARCHITECTURE.md#3-process-model) · [TESTING.md §3](TESTING.md#3-security-tests-are-a-merge-gate)
+Create: `src/oracle/toolhost/` (process, job objects, RPC) · `src/oracle/tools/{fs,git,dev,term,app}.py`
+· `src/oracle/tools/undo.py` · `config/apps.yaml`
+Modify: `src/oracle/tools/executor.py` (dispatch via toolhost) · `src/oracle/router/pipeline.py`
+(tool selection) · `config/policy.yaml`
+Read first: [ARCHITECTURE.md §3](ARCHITECTURE.md#3-process-model) · [TOOLS.md](TOOLS.md) ·
+[SECURITY.md §4b](SECURITY.md#4b-command-safety) ·
+[`backend.rs`](../apps/desktop/src-tauri/src/backend.rs) for the working Job Object pattern
 
 ## Dependencies
 
-P1-T1 (done). [OQ-04](OPEN_QUESTIONS.md#oq-04) must be answered inside this task, before the
-canonicaliser is built on top of an assumption.
+P2-T1 (done). [OQ-09](OPEN_QUESTIONS.md#oq-09) (`pywinpty` on 3.12, ConPTY resize/encoding) must be
+answered before `term.*`.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| **Windows path edge cases are genuinely hard** — junctions, ADS, 8.3 names, UNC | Property tests (`hypothesis`) over generated adversarial paths, plus a **real** fixture tree with actual symlinks and junctions. A mock encodes the bug you are hunting. |
-| IPC overhead makes tools feel slow | Measure; budget < 50 ms per call. Note the router already costs ~1.5 s, so 50 ms is not the bottleneck. |
-| Policy engine becomes a mini programming language | Policy is **data**, evaluated by a small deterministic engine. If it needs branching, the design is wrong. |
-| Security suite lags the tools | Suite is a merge gate **from this phase on** — a tool without a security test does not merge. |
+| **Orphaned process trees** — the failure HALT exists to prevent | Job Object with `KILL_ON_JOB_CLOSE`; the soak test asserting zero orphans is the real check, not the happy path |
+| Test-runner output parsing is fragile | Prefer machine-readable output (`--json`, `--junit-xml`); treat scraping as a fallback and say so in the result |
+| IPC overhead makes tools feel slow | Budget < 50 ms. For scale: the router already costs ~1.5 s, so 50 ms is not the bottleneck |
+| Tool count blows past the cap and degrades routing | `MAX_TOOLS` refuses at 40; merge before adding |
+| ConPTY encoding mojibake on a Russian-locale Windows | Spike it early ([OQ-09](OPEN_QUESTIONS.md#oq-09)) with Cyrillic output and a mid-stream resize |
 
 ## Definition of done
 
-All acceptance criteria pass · security suite wired into `scripts/check.py` and green ·
-[OQ-04](OPEN_QUESTIONS.md#oq-04) resolved and recorded in `logs/development/` ·
-ADR-0003 and ADR-0005 confirmed against the implementation ·
-`current_report.md` overwritten · this file updated to **P3-T1**.
+All acceptance criteria pass · security suite green and extended for every new tool ·
+ADR-0003 confirmed against the real implementation ·
+[OQ-09](OPEN_QUESTIONS.md#oq-09) resolved and recorded ·
+`current_report.md` overwritten · this file updated to **P4-T1**.

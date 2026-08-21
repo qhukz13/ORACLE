@@ -67,6 +67,8 @@ class TurnPipeline:
         #: Set when the provider is unreachable. Deterministic paths keep working
         #: (ADR-0011); the UI shows a degraded banner rather than looking broken.
         self.degraded: str | None = None
+        #: Set by HALT. The pipeline refuses to start a turn while true.
+        self.halted = False
 
     # ------------------------------------------------------------------ helpers
 
@@ -103,6 +105,16 @@ class TurnPipeline:
 
         await emit("turn.started", session_id, turn_id, trace, {"text": text}, actor="user")
         try:
+            if self.halted and not text.strip().lower().lstrip("/").startswith(("resume", "help")):
+                await self._say(
+                    "ORACLE is halted. Nothing will run until you resume it.",
+                    session_id,
+                    turn_id,
+                    trace,
+                )
+                await emit("turn.finished", session_id, turn_id, trace, {"outcome": "halted"})
+                return
+
             # 1. deterministic pre-router: no model, no latency, no hallucination
             pre = pre_route(text, pipelines=self._pipelines)
             if pre.matched:

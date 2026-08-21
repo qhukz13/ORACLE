@@ -38,9 +38,18 @@ class Settings(BaseSettings):
 
     projects_root: Path = Path("C:/Projects")
 
+    #: Policy lives in the repo, not in the data dir: it is reviewed and versioned like
+    #: code, and must be edited by a human (docs/SECURITY.md#2).
+    policy_path: Path = Path("config/policy.yaml")
+
     @property
     def db_path(self) -> Path:
         return self.data_dir / "oracle.db"
+
+    @property
+    def audit_path(self) -> Path:
+        # Append-only, hash-chained, never rotated away (docs/LOGGING.md).
+        return self.log_dir / "audit" / "audit.jsonl"
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

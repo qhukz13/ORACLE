@@ -30,7 +30,10 @@ STEPS: list[Step] = [
     ("ruff lint", [UV, "run", "ruff", "check", "src", "tests"], ROOT),
     ("mypy", [UV, "run", "mypy"], ROOT),
     ("tsc", [NPM, "run", "--silent", "typecheck"], UI),
-    ("pytest", [UV, "run", "pytest", "-q"], ROOT),
+    ("pytest", [UV, "run", "pytest", "-q", "--ignore=tests/security"], ROOT),
+    # Merge gate from Phase 2 on (docs/TESTING.md#3). Run as its own step so a
+    # security regression is never buried in a wall of ordinary test output.
+    ("security", [UV, "run", "pytest", "-q", "tests/security"], ROOT),
     ("vitest", [NPM, "run", "--silent", "test"], UI),
 ]
 

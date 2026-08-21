@@ -25,9 +25,12 @@ from oracle.llm.ollama import OllamaProvider
 from oracle.llm.structured import StructuredStats
 from oracle.llm.types import ProviderUnavailable
 from oracle.logsink import bind_trace, configure, get_logger
+from oracle.policy.audit import AuditLog
+from oracle.policy.engine import PolicyEngine, load_policy
 from oracle.router.intent import IntentClassifier
 from oracle.router.pipeline import TurnPipeline
 from oracle.storage.db import connect, migrate
+from oracle.tools import ToolExecutor, ToolRegistry, build_registry
 
 log = get_logger(__name__)
 
@@ -40,6 +43,10 @@ class AppState:
     sessions: SessionStore
     agent: TurnPipeline
     provider: OllamaProvider | None
+    policy: PolicyEngine
+    audit: AuditLog
+    registry: ToolRegistry
+    executor: ToolExecutor
     schema_version: int = 0
     projects: list[str] = field(default_factory=list)
     tasks: set[asyncio.Task[None]] = field(default_factory=set)
@@ -65,6 +72,21 @@ async def _build_state(settings: Settings) -> AppState:
     projects = discover_projects(settings.projects_root)
     stats = StructuredStats()
 
+    # The policy gate. load_policy NEVER raises: bad or missing policy yields
+    # read-only lockdown, loudly (docs/SECURITY.md#2).
+    policy = load_policy(settings.policy_path)
+    if policy.read_only:
+        log.error(
+            "policy.lockdown",
+            source=policy.source,
+            effect="read-only; no tool that changes anything will run",
+        )
+    engine = PolicyEngine(policy)
+    audit = AuditLog(settings.audit_path)
+    registry = build_registry()
+    executor = ToolExecutor(registry, engine, audit)
+    log.info("tools.registered", count=len(registry), tools=[c.id for c in registry.all()])
+
     provider: OllamaProvider | None = None
     classifier: IntentClassifier | None = None
     degraded: str | None = None
@@ -89,6 +111,10 @@ async def _build_state(settings: Settings) -> AppState:
         sessions=SessionStore(conn),
         agent=TurnPipeline(eventlog, provider, classifier, projects=projects, stats=stats),
         provider=provider,
+        policy=engine,
+        audit=audit,
+        registry=registry,
+        executor=executor,
         schema_version=version,
         projects=projects,
     )
@@ -162,6 +188,17 @@ def _register_routes(app: FastAPI) -> None:
                 "structured_output": st.agent.stats.snapshot(),
             },
             "projects": st.projects,
+            "policy": {
+                "source": st.policy.policy.source,
+                "read_only": st.policy.policy.read_only,
+                "halted": st.policy.halted,
+                "halt_reason": st.policy.halt_reason,
+                "scopes": sorted({s.name for s in st.policy.policy.scopes}),
+            },
+            "tools": [
+                {"id": c.id, "risk": c.risk.label, "summary": c.summary} for c in st.registry.all()
+            ],
+            "audit": {"seq": st.audit.seq, "path": str(st.audit.path)},
         }
 
     @app.get("/api/v1/sessions")
@@ -270,16 +307,30 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
         st.spawn(st.agent.run(session_id, text))
 
     elif cmd.type == "halt":
-        # P0 stub: HALT has no tools to stop yet, but the path exists from day one so
-        # it is never bolted on later (docs/SECURITY.md#emergency-stop-halt).
+        # Real now, not a stub. Order matters: flip policy to deny-all FIRST, so a
+        # task that is mid-flight cannot slip one more tool call through while we are
+        # still cancelling (docs/SECURITY.md#emergency-stop-halt).
+        reason = str(cmd.payload.get("reason", "user requested halt"))
+        st.policy.halt(reason)
+        st.audit.append(actor="user", tool="oracle.halt", decision="halt", reason=reason)
         for task in list(st.tasks):
             task.cancel()
+        st.agent.halted = True
         await st.eventlog.append(
             Event(
                 type="agent.state",
                 trace_id=bind_trace(),
-                payload={"state": "halted", "reason": cmd.payload.get("reason", "user")},
+                payload={"state": "halted", "reason": reason},
             )
+        )
+
+    elif cmd.type == "resume":
+        # Never automatic. A human decides when a halt is over.
+        st.policy.resume()
+        st.agent.halted = False
+        st.audit.append(actor="user", tool="oracle.resume", decision="resume")
+        await st.eventlog.append(
+            Event(type="agent.state", trace_id=bind_trace(), payload={"state": "idle"})
         )
 
     else:
