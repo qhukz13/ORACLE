@@ -95,9 +95,7 @@ async def ex(tmp_path: Path, workspace: Path) -> AsyncIterator[ToolExecutor]:
 
 
 def _alive(pid: int) -> bool:
-    r = subprocess.run(
-        ["tasklist", "/fi", f"PID eq {pid}", "/nh"], capture_output=True, text=True
-    )
+    r = subprocess.run(["tasklist", "/fi", f"PID eq {pid}", "/nh"], capture_output=True, text=True)
     return str(pid) in r.stdout
 
 
@@ -115,9 +113,7 @@ class TestOnlyAliases:
         assert not out.ok
         assert out.error is not None and out.error.kind == ToolErrorKind.DENIED
 
-    async def test_a_catalogued_app_that_is_not_installed_refuses(
-        self, ex: ToolExecutor
-    ) -> None:
+    async def test_a_catalogued_app_that_is_not_installed_refuses(self, ex: ToolExecutor) -> None:
         out = await ex.execute("app.launch", {"app": "missing"})
         assert not out.ok
         assert out.error is not None and out.error.detail == "apps.missing.path"
@@ -135,9 +131,7 @@ class TestOnlyAliases:
 
 
 class TestPathsAreStillScoped:
-    async def test_a_path_outside_the_scope_is_refused(
-        self, ex: ToolExecutor
-    ) -> None:
+    async def test_a_path_outside_the_scope_is_refused(self, ex: ToolExecutor) -> None:
         out = await ex.execute("app.launch", {"app": "fake", "path": r"C:\Windows\win.ini"})
         assert not out.ok
         assert out.error is not None and out.error.kind == ToolErrorKind.DENIED
@@ -145,16 +139,12 @@ class TestPathsAreStillScoped:
     async def test_an_alias_that_takes_no_path_refuses_one(
         self, ex: ToolExecutor, workspace: Path
     ) -> None:
-        out = await ex.execute(
-            "app.launch", {"app": "noargs", "path": str(workspace / "note.txt")}
-        )
+        out = await ex.execute("app.launch", {"app": "noargs", "path": str(workspace / "note.txt")})
         assert not out.ok
         assert out.error is not None
         assert "does not take a path argument" in out.error.message
 
-    async def test_omitting_the_optional_path_is_not_a_path_check(
-        self, ex: ToolExecutor
-    ) -> None:
+    async def test_omitting_the_optional_path_is_not_a_path_check(self, ex: ToolExecutor) -> None:
         """An unset optional path must not be canonicalised as the string "None"."""
         out = await ex.execute("app.launch", {"app": "noargs"})
         assert out.ok, out.error and out.error.message
@@ -196,9 +186,7 @@ class TestTierComesFromTheCatalogue:
 
 
 class TestDetachment:
-    async def test_the_launched_app_survives_the_toolhost_dying(
-        self, ex: ToolExecutor
-    ) -> None:
+    async def test_the_launched_app_survives_the_toolhost_dying(self, ex: ToolExecutor) -> None:
         """The claim, tested rather than asserted in a comment.
 
         If `app.launch` ran inside the toolhost, killing the job would take the app with

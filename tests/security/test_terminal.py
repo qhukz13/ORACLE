@@ -86,7 +86,9 @@ async def _approved_write(ex: ToolExecutor, session_id: str, text: str, tag: str
     return await ex.execute("term.write", args, approval_id=tag)
 
 
-async def _read_until(ex: ToolExecutor, session_id: str, needle: str, timeout: float = 8.0) -> str:
+async def _read_until(
+    ex: ToolExecutor, session_id: str, needle: str, give_up_after: float = 8.0
+) -> str:
     """Poll the session until the marker appears, or give up.
 
     A fixed sleep would make this test flaky in exactly the way the spike showed the
@@ -96,7 +98,7 @@ async def _read_until(ex: ToolExecutor, session_id: str, needle: str, timeout: f
     import asyncio
 
     seen: list[str] = []
-    deadline = time.time() + timeout
+    deadline = time.time() + give_up_after
     while time.time() < deadline:
         out = await ex.execute("term.read", {"session_id": session_id})
         if out.ok and out.result is not None:
@@ -266,7 +268,7 @@ class TestRefusals:
         assert out.ok
         assert out.result.submitted is False  # type: ignore[union-attr]
 
-        text = await _read_until(ex, session_id, "never-typed-marker", timeout=2.0)
+        text = await _read_until(ex, session_id, "never-typed-marker", give_up_after=2.0)
         assert "never-typed-marker" not in text
 
         await ex.execute("term.close", {"session_id": session_id})

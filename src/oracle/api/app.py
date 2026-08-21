@@ -17,6 +17,7 @@ from fastapi import APIRouter, FastAPI, Query, WebSocket, WebSocketDisconnect
 
 from oracle import __version__
 from oracle.config import Settings, get_settings
+from oracle.core.approvals import ApprovalStore
 from oracle.core.eventlog import EventLog
 from oracle.core.events import PROTOCOL_VERSION, ClientCommand, Event
 from oracle.core.projects import discover_projects
@@ -29,9 +30,10 @@ from oracle.policy.audit import AuditLog
 from oracle.policy.engine import PolicyEngine, load_policy
 from oracle.router.intent import IntentClassifier
 from oracle.router.pipeline import TurnPipeline
+from oracle.router.selection import ToolSelector
 from oracle.storage.db import connect, migrate
 from oracle.toolhost import ToolHost
-from oracle.tools import ToolExecutor, ToolRegistry, build_registry
+from oracle.tools import ToolExecutor, ToolRegistry, build_registry, git_undo_runner
 from oracle.tools.undo import UndoJournal
 
 log = get_logger(__name__)
@@ -51,6 +53,7 @@ class AppState:
     executor: ToolExecutor
     host: ToolHost
     undo: UndoJournal
+    approvals: ApprovalStore
     schema_version: int = 0
     projects: list[str] = field(default_factory=list)
     tasks: set[asyncio.Task[None]] = field(default_factory=set)
@@ -95,6 +98,10 @@ async def _build_state(settings: Settings) -> AppState:
     host = ToolHost(cwd=settings.projects_root)
     undo = UndoJournal(settings.undo_journal)
     executor = ToolExecutor(registry, engine, audit, host=host, undo=undo)
+    # Reversing a git mutation means spawning git, which this process must not do — so
+    # the journal dispatches those back through the gate as `git.undo` (ADR-0003).
+    undo.set_git_runner(git_undo_runner(executor))
+    approvals = ApprovalStore(eventlog, executor)
     log.info("tools.registered", count=len(registry), tools=[c.id for c in registry.all()])
 
     provider: OllamaProvider | None = None
@@ -119,7 +126,19 @@ async def _build_state(settings: Settings) -> AppState:
         conn=conn,
         eventlog=eventlog,
         sessions=SessionStore(conn),
-        agent=TurnPipeline(eventlog, provider, classifier, projects=projects, stats=stats),
+        agent=TurnPipeline(
+            eventlog,
+            provider,
+            classifier,
+            projects=projects,
+            stats=stats,
+            executor=executor,
+            # Selection needs the model. Without one the pipeline still routes and
+            # still refuses clearly — it just cannot choose a tool.
+            selector=ToolSelector(registry, provider, stats=stats) if provider else None,
+            approvals=approvals,
+            projects_root=settings.projects_root,
+        ),
         provider=provider,
         policy=engine,
         audit=audit,
@@ -127,6 +146,7 @@ async def _build_state(settings: Settings) -> AppState:
         executor=executor,
         host=host,
         undo=undo,
+        approvals=approvals,
         schema_version=version,
         projects=projects,
     )
@@ -224,6 +244,7 @@ def _register_routes(app: FastAPI) -> None:
             "audit": {"seq": st.audit.seq, "path": str(st.audit.path)},
             "toolhost": {"running": st.host.running, **st.host.stats.snapshot()},
             "undo": {"available": len(st.undo.latest(50))},
+            "approvals": {"open": st.approvals.open_requests()},
         }
 
     @app.get("/api/v1/sessions")
@@ -331,6 +352,34 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
         await st.sessions.touch(session_id)
         st.spawn(st.agent.run(session_id, text))
 
+    elif cmd.type == "approval.resolve":
+        # The ONLY way an approval is granted. Note what is not here: the client sends
+        # an id and a yes/no, never a digest or a tier — those come from what the user
+        # was actually shown (docs/SECURITY.md#5).
+        approval_id = str(cmd.payload.get("approval_id") or "")
+        approved = bool(cmd.payload.get("approved"))
+        if approval_id:
+            resolution = await st.approvals.resolve(approval_id, approved, by="user")
+            st.audit.append(
+                actor="user",
+                tool="oracle.approval",
+                decision=resolution,
+                approval_id=approval_id,
+            )
+
+    elif cmd.type == "undo":
+        undo_id = str(cmd.payload.get("undo_id") or "")
+        record = undo_id or next((r.id for r in reversed(st.undo.latest(1))), "")
+        if not record:
+            return
+        try:
+            result = await st.undo.undo(record)
+            payload: dict[str, Any] = {"state": "idle", "undone": result}
+        except Exception as exc:
+            payload = {"state": "idle", "undo_failed": str(exc)}
+        st.audit.append(actor="user", tool="oracle.undo", decision="undo", undo_id=record)
+        await st.eventlog.append(Event(type="agent.state", trace_id=bind_trace(), payload=payload))
+
     elif cmd.type == "halt":
         # Real now, not a stub. Order matters: flip policy to deny-all FIRST, so a
         # task that is mid-flight cannot slip one more tool call through while we are
@@ -341,6 +390,9 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
         # Kill the whole tool process tree. This is the part that makes HALT real:
         # cancelling tasks does not kill `npm install`'s grandchildren, the job does.
         await st.host.kill_tree()
+        # An approval left live after a stop is a click that executes something nobody
+        # is watching for any more.
+        refused = await st.approvals.refuse_all(reason)
         for task in list(st.tasks):
             task.cancel()
         st.agent.halted = True
@@ -348,7 +400,7 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
             Event(
                 type="agent.state",
                 trace_id=bind_trace(),
-                payload={"state": "halted", "reason": reason},
+                payload={"state": "halted", "reason": reason, "approvals_refused": refused},
             )
         )
 
