@@ -23,8 +23,22 @@ your code. Heavy reasoning is delegated to agents that are good at it; ORACLE's 
 
 ## Status
 
-**Phase: design complete, implementation not started.**
-There is no code in this repository yet — by design. Read `docs/` first.
+**Phases 0–3 done. Next: [Phase 4 — Desktop UI v1](docs/ROADMAP.md#phase-4--desktop-ui-v1---mvp-milestone), which is the MVP milestone.**
+
+ORACLE runs, routes, and acts. Ask it to commit your changes and it commits them — through a 0.8B
+local router, across a process boundary, with an undo you can use afterwards.
+
+| | |
+|---|---|
+| Tools | **27** behind the policy gate (26 offerable; one is a hidden undo recipe) |
+| Tests | **360**, of which the security suite is a merge gate |
+| Router | `qwen3.5:0.8b`, 93.3% intent accuracy, 100% tool-selection accuracy on the eval set |
+| Isolation | every tool runs in a separate low-privilege process inside a Job Object |
+
+What is not there yet: the desktop UI (approvals are emitted but nothing renders them), knowledge
+retrieval, delegation to Claude/Antigravity, pipelines, and mobile.
+
+Read `docs/` first — this repository is design-first and the documents lead the code.
 
 | Question | File |
 |---|---|

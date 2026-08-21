@@ -7,120 +7,108 @@
 
 ## Task
 
-**P3-T1 — Process isolation, then PC & dev control tools**
+**P4-T1 — Desktop UI v1: the Confirmation Center first**
 
-**Phase:** [3 — PC & dev control tools](ROADMAP.md#phase-3--pc--dev-control-tools--mvp) · **Scope:** MVP
-**Status:** `IN PROGRESS` — requirements 1–4 done · **Set:** 2026-08-21
-**Previous task:** P2-T1 policy gate — `MOSTLY DONE`, see [current_report.md](current_report.md)
+**Phase:** [4 — Desktop UI v1](ROADMAP.md#phase-4--desktop-ui-v1---mvp-milestone) · **Scope:** MVP — ★ **the milestone**
+**Status:** `NOT STARTED` · **Set:** 2026-08-21
+**Previous task:** P3-T1 — `DONE`, all criteria verified live, see [current_report.md](current_report.md)
 
 ---
 
 ## Objective
 
-Build `oracle-toolhost` as a real separate process, **then** the tools that make ORACLE useful: git,
-tests, files, apps, terminal.
+Build the interface that makes the tools usable: chat with tool-call cards, the Confirmation Center,
+the terminal dock, the command palette. Everything before this was infrastructure. **This is the
+product**, and its definition of done is a working day without opening a terminal by hand.
 
-## Why the ordering is not negotiable
+## Why the Confirmation Center comes first
 
-P2 deferred process isolation on the argument that ADR-0003's justifications don't bite for read-only
-file tools. **They all bite the moment a tool spawns a process**, which is the first thing this task
-does:
+Everything else in this phase is an interface to something that already works. The approval card is
+the one piece where the UI is **part of the security model**, not a view onto it:
 
-- a hung `npm install` must not take down the agent, the UI and the event stream;
-- `git` and `npm` must not run in an address space holding `ANTHROPIC_API_KEY`;
-- killing a thread does not kill `npm install`'s grandchildren — only a Job Object does, and HALT's
-  credibility depends on it.
+- the runtime already emits `approval.requested` with the tier, the rule that fired, the arguments
+  and a preview, and already refuses to execute without a matching answer;
+- **nothing renders it.** A confirmation the user cannot read is a rubber stamp, and a rubber stamp
+  is worse than no prompt at all — it trains the habit of clicking Approve.
 
-**Do not add a single process-spawning tool before the toolhost exists.** That is the same rule that
-put the policy gate before write tools, applied one level down.
+So the card is task 1, not task 4. It also forces the tool-call card format that chat needs anyway.
 
 ## Context
 
-P2 delivered: the path canonicaliser (12 steps, TOCTOU recheck, junction-aware), the policy gate
-(fail-closed, deny-by-default, taint escalation, HALT), the hash-chained audit log, tool
-contracts/registry, and five read-only tools — 103 security tests.
+P3 delivered 27 tools behind the gate, tool selection in the router (100% on the eval set), the
+program allowlist, the app catalogue, and the approval round trip. 360 tests.
 
-Established and not to be re-derived:
-- **`Path.is_symlink()` is False for junctions.** Use the reparse-point attribute
-  ([OQ-04](OPEN_QUESTIONS.md#oq-04)).
-- **Pin every program to an absolute path at startup**, never resolve via `PATH` at call time.
-- **Never call blocking `subprocess` from an async handler** — use `asyncio.create_subprocess_exec`.
-  ruff `ASYNC221` enforces it.
-- Constraints in tool-argument schemas must be **decoder-enforceable**
-  ([ADR-0017](DECISIONS.md#adr-0017--constrain-what-the-decoder-can-enforce)).
-- Tests stay hermetic (`Settings.llm_enabled=False`); the security suite is a merge gate.
+Established, and not to be re-derived:
+
+- **The event contract already carries everything the UI needs.** `approval.requested` payload is the
+  card: tool, tier, decision, rule, args, preview, `expires_in_s`. If a field is missing from the
+  event, it must not influence the decision — add it to the event, never fetch it separately.
+- **`approval.respond`** is `{approval_id, decision: "approve"|"reject"}`. `nonce` and `scope` were
+  designed and deliberately dropped ([API.md](API.md#2-websocket-protocol) explains why).
+- **A dry run performs nothing** and needs no approval — that is what lets the card show a real file
+  list before asking. `fs.delete` and `dev.execute` support it.
+- **Agent states are one vocabulary** shared by runtime and UI (`awaiting_approval`, not a
+  translation of it). `apps/desktop/src/protocol.ts` already has the enum.
+- The WS client, resume-on-`since_seq` and the degraded banner all work and are tested (14 TS tests).
 
 ## Requirements
 
-1. ~~**`oracle-toolhost` as a separate process.**~~ **DONE 2026-08-21** —
-   ([write-up](../logs/development/2026-08-21-toolhost-isolation.md)). Verified live: HALT kills the
-   child, its child and its **grandchild**. Boundary cost p50 27.9 ms. Pre-warmed at boot.
-2. ~~**Supervision**~~ **DONE** — restart on crash, full reaping, and **no retry after a timeout**
-   (the side effect may already have happened).
-3. ~~**Undo journal + trash.**~~ **DONE 2026-08-21** — child backs up and reports an `UndoPlan`,
-   parent journals it ([write-up](../logs/development/2026-08-21-write-tools-and-undo.md)).
-4. ~~`fs.write`, `fs.patch`, `fs.move`~~ **DONE**, plus `fs.delete` (T3, moves to trash).
-   Also added `ToolExecutor.preview()` → `(verdict, digest)`, which the Confirmation Center needs.
-5. `git.*`: status, diff, log, add, commit (undo `reset --soft HEAD~1`), branch, stash, push (T2).
-6. `dev.run_tests` with **structured** results (pytest/vitest/jest/cargo autodetect), `dev.build`,
-   `dev.lint`, `dev.execute` (allowlisted program + argv).
-7. `app.launch` via `config/apps.yaml` aliases; `sys.processes` already exists.
-8. `term.*` via `pywinpty` ([OQ-09](OPEN_QUESTIONS.md#oq-09)); `term.write` confirmed every time.
-9. Project registry upgrade: detect type, test/build commands, read `AGENTS.md`/`CLAUDE.md`.
-10. **Tool selection in the router** — the agent can finally act. Feed only intent-filtered tool
-    schemas into the context budget (`registry.for_intent`), which is already load-bearing for latency.
-11. Approval issuance + the `approval.requested` / `approval.resolved` event round trip.
+1. **Confirmation Center.** Renders `approval.requested`; keyboard-driven (`y`/`n`, never a bare
+   Enter on a T3); shows the rule that fired and the *real* preview; a visible countdown, because
+   the request expires; a mis-click guard on T3 that is not a second modal.
+2. **Tool-call cards in chat.** One card per call: tool, arguments, outcome, duration, and an
+   **Undo** control when the outcome carries an `undo_id`.
+3. **Command palette** (`Ctrl+K`) feeding the pre-router — the fastest path to any action, and the
+   thing that makes the pre-router's zero-latency path visible.
+4. **Terminal dock** on xterm.js. `term.read` returns `truncated` when more is waiting and `dropped`
+   when scrollback was trimmed; **both must be visible**, or the UI repeats the bug the backend just
+   had.
+5. **Task list + inspector**: status, duration, tools used, files changed, result.
+6. States: loading skeletons, empty states, offline banner, degraded banner.
+7. Design tokens, full keyboard navigation, `prefers-reduced-motion`, focus rings.
 
 ## Constraints
 
-- **No tool that spawns a process before the toolhost exists.**
-- No `shell=True`, no `os.system`, no string-built commands.
-- Every new tool: contract, policy rule in `config/policy.yaml`, and a `tests/security/` case.
-- The 40-tool cap is real; `MAX_TOOLS` will start refusing registrations.
-- The gate stays green, security suite included.
+- **No orbital visualisation.** It is Phase 9. Building the decorative centrepiece before the
+  functional shell is how this kind of project dies at 80%.
+- Colour is never the only carrier of meaning — icon + label always accompany a status colour.
+- The UI never computes a tier, a rule or a digest. It renders what the event says.
+- TypeScript `strict`, no `any` without a comment explaining why.
 
 ## Acceptance criteria
 
-- [x] Killing the toolhost mid-call leaves the runtime healthy; the step is marked `failed`.
-- [x] HALT terminates a real process tree **including grandchildren** — verified live.
-- [x] A soak of 100 tool calls leaves **zero** orphaned processes.
-- [x] A write runs at T1 without prompting and is undoable — verified live.
-- [x] `fs.delete` refuses without approval, and an approval cannot be reused for another file.
-- [ ] "commit my changes in Asterim with message X" works end to end and is undoable.
-- [ ] "run the Asterim tests" returns structured pass/fail counts, not scraped text.
-- [ ] `git.push` prompts, and approving executes **exactly** the previewed argv.
-- [ ] A tool whose program is not on the allowlist is refused, naming the rule.
-- [ ] `grep -r "shell=True"` returns nothing; lint enforces it.
-- [ ] Project detection correctly classifies all seven projects in `C:\Projects`.
+- [ ] Every MVP action is reachable **without a mouse**.
+- [ ] An approval can be read and decided in **under 5 s** — the preview shows the actual command,
+      not a description of it.
+- [ ] Approving a T3 delete shows the real file list from a `dry_run` first.
+- [ ] The terminal handles 10k lines without frame drops, and *says so* when output was trimmed.
+- [ ] With the backend down, the app opens, explains itself, and reconnects on its own.
+- [ ] An `axe` pass with zero criticals; visible focus throughout.
+- [ ] ★ **A full working day without opening a terminal manually.**
 
 ## Relevant files
 
-Create: `src/oracle/toolhost/` (process, job objects, RPC) · `src/oracle/tools/{fs,git,dev,term,app}.py`
-· `src/oracle/tools/undo.py` · `config/apps.yaml`
-Modify: `src/oracle/tools/executor.py` (dispatch via toolhost) · `src/oracle/router/pipeline.py`
-(tool selection) · `config/policy.yaml`
-Read first: [ARCHITECTURE.md §3](ARCHITECTURE.md#3-process-model) · [TOOLS.md](TOOLS.md) ·
-[SECURITY.md §4b](SECURITY.md#4b-command-safety) ·
-[`backend.rs`](../apps/desktop/src-tauri/src/backend.rs) for the working Job Object pattern
+Create: `apps/desktop/src/components/{ConfirmationCenter,ToolCard,CommandPalette,TerminalDock}.tsx`
+Modify: `apps/desktop/src/App.tsx` · `apps/desktop/src/client.ts` (send `approval.respond`, `undo`)
+Read first: [UI.md](UI.md) · [API.md §2](API.md#2-websocket-protocol) ·
+[SECURITY.md §5](SECURITY.md#5-confirmation-and-approvals) · `src/oracle/core/approvals.py` for the
+exact payload the card is built from
 
 ## Dependencies
 
-P2-T1 (done). [OQ-09](OPEN_QUESTIONS.md#oq-09) (`pywinpty` on 3.12, ConPTY resize/encoding) must be
-answered before `term.*`.
+P3-T1 (done). No open question blocks this. [OQ-14](OPEN_QUESTIONS.md#oq-14) concerns Phase 9 only.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| **Orphaned process trees** — the failure HALT exists to prevent | Job Object with `KILL_ON_JOB_CLOSE`; the soak test asserting zero orphans is the real check, not the happy path |
-| Test-runner output parsing is fragile | Prefer machine-readable output (`--json`, `--junit-xml`); treat scraping as a fallback and say so in the result |
-| IPC overhead makes tools feel slow | Budget < 50 ms. For scale: the router already costs ~1.5 s, so 50 ms is not the bottleneck |
-| Tool count blows past the cap and degrades routing | `MAX_TOOLS` refuses at 40; merge before adding |
-| ConPTY encoding mojibake on a Russian-locale Windows | Spike it early ([OQ-09](OPEN_QUESTIONS.md#oq-09)) with Cyrillic output and a mid-stream resize |
+| UI polish is infinitely expandable | The acceptance list above is the definition, not "it feels good". Timebox and ship. |
+| A confirmation card that is easy to approve without reading | The card is part of the security model. Measure the 5 s target with a real T3 delete, and put the *file list* on it, not a summary. |
+| WebView2 renders differently from Chrome | Test in the Tauri shell, not only in the browser dev server. |
+| Terminal performance with 10k lines | xterm.js with a bounded scrollback; the backend already reports `truncated` and `dropped` — surface both rather than re-inventing a buffer. |
 
 ## Definition of done
 
-All acceptance criteria pass · security suite green and extended for every new tool ·
-ADR-0003 confirmed against the real implementation ·
-[OQ-09](OPEN_QUESTIONS.md#oq-09) resolved and recorded ·
-`current_report.md` overwritten · this file updated to **P4-T1**.
+All acceptance criteria · the gate green including TS typecheck and vitest ·
+Playwright covers the core journeys · `current_report.md` overwritten ·
+this file updated to **P5-T1** · ★ **the MVP milestone is reached**.

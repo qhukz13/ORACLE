@@ -108,7 +108,7 @@ programs:
     path: "C:/Windows/System32/tasklist.exe"
 
 tools:
-  # ---------------------------------------------------------------- Phase 2: read-only
+  # ------------------------------------------------------------------------ read-only
   oracle.status:      { tier: T0 }
   oracle.task_list:   { tier: T0 }
   oracle.halt:        { tier: T0 }   # stopping must never require permission
@@ -128,10 +128,11 @@ tools:
     tier: T0
     scopes: [projects, notes, scratch]
 
-  # ------------------------------------------------ Phase 3+ (declared, not yet built)
-  # Listed so the tiering is reviewable now rather than invented under deadline later.
-  # A tool with no rule here is denied by default, so declaring them early costs
-  # nothing and documents intent.
+  # ---------------------------------------------------------------------- mutating
+  # A tool with no rule here is denied by default, so declaring one early costs nothing
+  # and documents intent. A few below are still declared-but-not-built (git.reset_hard,
+  # git.clean, dev.install_deps, app.close, ai.*) — kept so the tiering is reviewable
+  # now rather than invented under deadline later.
   fs.write:
     tier: T1                # reversible + journalled, so it runs without prompting
     scopes: [projects, notes, scratch]

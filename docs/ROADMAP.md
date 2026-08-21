@@ -216,7 +216,7 @@ working; ADR-0005 confirmed against the implementation; ADR-0003 confirmed at th
 
 ---
 
-## Phase 3 — PC & dev control tools  **[MVP]**
+## Phase 3 — PC & dev control tools  **[MVP]**  ·  **P3-T1 DONE 2026-08-21**
 
 **Objective.** The tools that make ORACLE useful: git, tests, files, apps, terminal.
 
@@ -224,35 +224,62 @@ working; ADR-0005 confirmed against the implementation; ADR-0003 confirmed at th
 
 **Depends on.** P2 (hard: no write tool ships before the gate).
 
-**Tasks.**
-1. Undo journal + trash: `fs.write` backs up; `fs.patch`; `git.commit` undo recipe.
-2. `git.*`: status, diff, log, add, commit, branch, stash, push (T2).
-3. `dev.run_tests` with structured results (pytest/vitest/jest/cargo autodetect), `dev.build`,
-   `dev.lint`, `dev.run_script`, `dev.execute` (allowlisted argv).
-4. `app.launch` via `config/apps.yaml` aliases; `sys.*`.
-5. `term.*`: `pywinpty` PTY in the backend, streamed over WS; `term.write` confirmed every time.
-6. Project registry: discover `C:\Projects\*`, detect type (node/python/rust/roblox), read
-   `AGENTS.md`/`CLAUDE.md`/`README.md` for a project card.
-7. Confirmation flow end to end, including `dry_run` previews for T3.
+**Tasks.** All done — plus process isolation, which P2 deferred here.
+0. ~~`oracle-toolhost` as a real separate process, with supervision and a Job Object.~~ **DONE**
+1. ~~Undo journal + trash; `fs.write`/`fs.patch`/`fs.move`/`fs.delete`.~~ **DONE**
+2. ~~`git.*`: status, diff, log, add, commit, branch, stash, push (T2).~~ **DONE** — plus the
+   hidden `git.undo` the journal dispatches, because reversing a commit needs a process and the
+   parent must not spawn one.
+3. ~~`dev.run_tests` with structured results, `dev.build`, `dev.lint`, `dev.execute`.~~ **DONE**.
+   `dev.run_script` was dropped: detection already runs only what `package.json` declares.
+4. ~~`app.launch` via `config/apps.yaml`; `sys.*`.~~ **DONE** — and it is the one tool that runs
+   in the parent ([ADR-0018](DECISIONS.md#adr-0018--a-launched-application-is-not-a-tool-call)).
+5. ~~`term.*` on ConPTY; `term.write` confirmed every time.~~ **DONE** ([OQ-09](OPEN_QUESTIONS.md#oq-09)).
+6. ~~Project registry: detect type, test/build/lint commands, read `AGENTS.md`/`CLAUDE.md`.~~ **DONE**
+7. ~~Confirmation flow end to end, including `dry_run` previews for T3.~~ **DONE** — the
+   `approval.requested` / `approval.resolved` round trip, and a dry run that performs nothing.
+8. ~~Tool selection in the router.~~ **DONE**, and measured: 100% on 18 cases.
 
 **Deliverables.** A tool set that handles a real morning's work on Asterim.
 
-**Acceptance criteria.**
-- "commit my changes in Asterim with message X" works end to end and is undoable.
-- "run the Asterim tests" returns structured pass/fail counts, not scraped text.
-- `git.push` prompts; approving executes exactly the previewed argv.
-- A recursive delete shows a real file list from `dry_run` before asking.
-- The terminal streams a long `npm install` without dropping bytes or blocking the event loop.
-- Project detection correctly classifies all seven projects in `C:\Projects`.
+**Acceptance criteria.** All verified live, not inferred from unit tests.
+- [x] "commit my changes in Asterim with message X" works end to end and is undoable —
+      routed through the real 0.8B model to `git.commit`; undo returns HEAD and leaves the work staged.
+- [x] "run the Asterim tests" returns structured pass/fail counts — `1 passed, 1 failed`, `junit-xml`.
+- [x] `git.push` prompts; approving executes exactly the previewed argv — and the bare remote received it.
+- [x] A recursive delete shows a real file list from `dry_run` before asking — and a dry run no longer
+      needs the approval it exists to inform, which was circular.
+- [x] The terminal streams a long burst without dropping bytes or blocking the event loop —
+      **2000/2000 lines, 204,090 bytes, loop ticks p50 13.5 ms.** This one failed first and found two
+      real bugs; see `logs/development/2026-08-21-terminal-loses-output.md`.
+- [x] Project detection correctly classifies all seven projects in `C:\Projects` (eight directories,
+      including an empty one that correctly reports `unknown`).
+- [x] A tool whose program is not on the allowlist is refused, naming the rule.
+- [x] `grep -r "shell=True"` returns nothing; lint enforces it, and so does a security test.
 
-**Testing.** Integration tests against a fixture git repo. Undo/redo round trips. A soak test:
-100 tool calls, zero orphaned processes (asserted via process enumeration).
+**Testing.** 360 tests, 1 skipped. Integration tests against a real git repo, a real ConPTY and a
+real toolhost. A soak of 100 tool calls leaving zero orphaned processes. Two measurement scripts that
+need Ollama and are therefore deliberately not tests: `eval_intent.py`, `eval_selection.py`.
 
 **Risks.** Test-runner output parsing is fragile → prefer machine-readable output (`--json`,
 `--junit-xml`) and treat scraping as a fallback. Windows PTY quirks → budget real time for
 `pywinpty`; ConPTY resize and encoding are the usual traps.
 
 **Definition of done.** All acceptance criteria; every new tool has policy rules and a security test.
+
+**What actually got built.** 27 tools (26 offerable), the program allowlist, the app catalogue, the
+approval round trip, and tool selection in the router. Four development logs, three of them about
+things that were nearly ticked off without being measured.
+
+**Deviations from the plan, and why.**
+- **`push` and `delete` shipped in MVP**, having been deferred. The phase that makes a commit
+  meaningful is the same one that makes pushing it meaningful; both arrived with their tiers and
+  their security tests, which was the real requirement.
+- **`dev.run_script` and `fs.open_in_os` were dropped.** The first is subsumed by project detection;
+  the second is `ShellExecute` by another name and cannot be a promise about what happens.
+- **One ADR came out of implementation** ([ADR-0018](DECISIONS.md#adr-0018--a-launched-application-is-not-a-tool-call)):
+  a launched application cannot live inside the Job Object, and that had to be argued rather than
+  assumed.
 
 ---
 

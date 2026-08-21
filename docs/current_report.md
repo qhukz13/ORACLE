@@ -4,149 +4,140 @@
 > picks the project up next.
 
 **Task:** P3-T1 — Process isolation, then PC & dev control tools
-**Status:** `IN PROGRESS` — toolhost + write tools done; git/dev/term next
+**Status:** `DONE` — all 11 requirements, all acceptance criteria verified live
 **Date:** 2026-08-21
 
 ---
 
-## What was done
+## The headline
 
-**`oracle-toolhost` exists and works.** Tools now execute in a separate, low-privilege process inside
-a Windows Job Object. That was requirement #1 of this task and the hard prerequisite for every tool
-that spawns a process — which is all of the remaining ones.
-
-`116 security tests` (was 103) + 89 unit/API + 14 TS. Full gate green.
-
-## The claim, proven live
-
-ADR-0003's load-bearing argument is not "a crash is contained" — it is that **killing a thread does
-not kill `npm install`'s grandchildren**, so HALT would be a lie without process isolation.
-
-With a child that spawns a grandchild sleeping for 600 s:
+**ORACLE can now do things.** Ask it to commit your changes and it commits them, through a 0.8B
+router, across a process boundary, with an undo you can use afterwards:
 
 ```
-before HALT: toolhost=True  spawner=True  grandchild=True
-after  HALT: toolhost=False spawner=False grandchild=False
+"commit my changes in Asterim with message add the feature"
+  -> git.commit  ->  "Committed 59eef851 on main — 3 file(s), +10/-0."
+  -> undo        ->  "commit 59eef851 undone; the changes are staged again"
 ```
 
-Job membership is inherited, so anything the child spawns — and anything *those* spawn — dies with
-the job. This is the same mechanism already proven one level up in the Tauri shell (OQ-11).
+**27 tools** (26 offerable, `git.undo` hidden). **360 tests**, 1 skipped. Gate green: ruff, mypy
+`--strict`, pytest, TS typecheck, vitest.
 
-## Cost of the boundary, measured
+## Acceptance criteria — measured, not inferred
 
-```
-cold (includes process start): 1342 ms
-warm: p50 27.9 ms   p95 29.0 ms      budget <50 ms
-```
+Every one was run against real things: a real git repo with a real bare remote, a real ConPTY, the
+real toolhost, the real model.
 
-~28 ms per call is what ADR-0003 costs. The router already spends ~1.5 s per turn, so the boundary is
-not the bottleneck and never will be. The 1.3 s cold start *was* user-visible on a first tool call,
-so the host is now pre-warmed in the background at boot — fire-and-forget, because a broken toolhost
-must not stop the agent from starting and explaining itself.
+| criterion | result |
+|---|---|
+| commit end to end, undoable | ✅ routed to `git.commit`; undo restores HEAD and leaves the work staged |
+| tests return structured counts | ✅ `1 passed, 1 failed, 0 skipped`, source `junit-xml` |
+| `git.push` prompts; approving runs the previewed argv | ✅ `push origin main`, and the remote received it |
+| recursive delete previews a real file list | ✅ and a dry run performs nothing |
+| terminal streams a long burst losing nothing | ✅ **2000/2000 lines**, loop p50 13.5 ms |
+| unlisted program refused, naming the rule | ✅ `programs.allowlist` |
+| `shell=True` absent, lint enforces it | ✅ plus a security test, because a lint rule is one `# noqa` from advisory |
+| project detection classifies all seven projects | ✅ eight directories, including an empty one that correctly says `unknown` |
 
-## The bug that cost the most time
+## Three things that were nearly ticked off without being measured
 
-**`loop.connect_read_pipe(sys.stdin)` does not work on Windows' Proactor event loop.**
+This is the part worth reading. Each looked done and was not.
 
-The failure mode is the dangerous kind: the child starts, emits `ready`, and then silently never
-reads again. It looks alive. Every call times out at 30 s with nothing to point at. Fixed by reading
-stdin on a worker thread. **Suite runtime went 201 s → 15.8 s** — the 201 s was almost entirely
-timeouts.
+### 1. The terminal silently deleted its own output
 
-Recorded as [OQ-16](OPEN_QUESTIONS.md#oq-16) with a rule for the codebase, because the same trap is
-waiting for the voice daemon, a PTY bridge, and any adapter streaming an external agent's stdout.
+`term.*` had 13 green tests and worked interactively. Measuring the ROADMAP criterion properly — 2000
+numbered lines, so "no bytes dropped" is arithmetic — lost 226 of them.
 
-## Two leaks `filterwarnings = ["error"]` caught
+Two plausible hypotheses were wrong and had to be eliminated by measurement (ConPTY coalescing;
+a slow pump). The real bug: **`term.read` emptied the whole buffer and returned only its last
+16 KB.** The rest was thrown away — which is why the missing lines were always the oldest, and why
+the drop counter honestly reported zero. `truncated` was a field that meant "we deleted some" while
+reading like "there is more".
 
-Both real, neither noise:
+The same run surfaced a second bug: **the child's structlog output was going to stdout, which is the
+toolhost's protocol pipe.** Benign only by luck — a log line that happened to be valid JSON would
+have been parsed as a tool response.
 
-- **`start()`'s failure path leaked a process and a pipe.** When job assignment fails we correctly
-  refuse to continue — but the original code killed the child without reaping it or closing its
-  transport. A slow leak in a process that restarts the toolhost repeatedly.
-- **asyncio subprocess transports are only reclaimed in `__del__`.** No public API to close them, so
-  `_reap()` closes `proc._transport` explicitly.
+Full account: [`2026-08-21-terminal-loses-output.md`](../logs/development/2026-08-21-terminal-loses-output.md).
 
-## Also fixed
+### 2. Tool selection picked the wrong tool, confidently
 
-`sys.info` was returning a hardcoded `cpu_percent: 0.0` — a plausible-looking number that is always
-wrong, which is worse than none. CPU load is a *rate*: now sampled from two `GetSystemTimes` reads
-120 ms apart, reporting real load.
+The first live run of *"commit my changes"* selected `git.add`, staged the files, and **reported
+success**. A plausible adjacent wrong action is a small model's characteristic failure, and it is far
+worse than a crash because it looks like it worked.
 
-## What crosses the boundary
+Fixed by measuring first: `scripts/eval_selection.py`, 18 cases, two of which must select *nothing*.
+Baseline **83.3%** — and two of the three misses were the same thing, the model reaching for the
+nearest tool instead of declining. Few-shot examples (with "none" appearing twice) plus summaries
+rewritten to *distinguish* neighbouring tools took it to **100%**, at no latency cost.
 
-Crosses: a pre-authorised `Invocation` — tool id, validated args, **already-resolved** absolute
-paths, a timeout.
+That change then exposed a silent truncation: selection had been borrowing `ROUTE`'s context budget,
+whose shape is inverted, and **the tool descriptions were being cut off before the model saw them**.
 
-Does not: policy, scopes, tiers, secrets, the audit log, the event log, or any route back into the
-runtime. Two details worth keeping:
+Full account: [`2026-08-21-selection-accuracy.md`](../logs/development/2026-08-21-selection-accuracy.md).
 
-- the child gets a **constructed** environment and **refuses to start** if `ANTHROPIC_API_KEY` and
-  friends are present — absent, not merely unused, enforced from both sides;
-- the child **never resolves a path itself**, so the sandbox decision cannot drift to the wrong side
-  of the pipe. There is a test for exactly that.
+### 3. `fs.delete` declared `dry_run=True` and ignored it
 
-**No retries, deliberately.** A timeout does not mean the side effect did not happen. Both timeout
-paths return *"may or may not have completed — it will not be retried"*, worded identically because
-which side noticed the deadline is an implementation detail and the caller's uncertainty is the same.
+The registry *requires* `dry_run` for T3 so the confirmation card can show a real preview. The
+handler deleted regardless. Fixed — and it exposed a circularity: a dry run required the approval it
+existed to inform. A dry run now skips the approval requirement, which puts an obligation on the
+contract instead: **`dry_run=True` means the call performs nothing**, network egress included. That
+is why `git.push`'s preview is computed from local refs rather than `--dry-run`, which would contact
+the remote.
 
 ## What was built
 
 ```
-src/oracle/toolhost/
-  jobobject.py  Job Object via ctypes: KILL_ON_JOB_CLOSE, process + memory limits
-  protocol.py   Invocation / Response — deliberately small
-  __main__.py   the low-privilege child; holds nothing, refuses secrets in env
-  host.py       supervision: spawn, assign, dispatch, timeouts, restart, reaping
-tests/security/test_toolhost.py   grandchild kill · kill-on-close · no-secrets ·
-                                  child-never-resolves-paths · 100-call soak, zero orphans
+policy/programs.py   the program allowlist: pinned at load, deny-wins, batch-argv rule
+policy/apps.py       the app catalogue: aliases, never paths
+tools/proc.py        the one place a process is spawned; argv lists, caps, blobs
+tools/git.py         9 tools; porcelain v2, never scraped prose
+tools/dev.py         4 tools; junit-xml / json reports, and one honest `scraped`
+tools/terminal.py    4 tools on ConPTY; a reader thread per session
+tools/apps.py        1 tool, in the parent, detached — the only exception to ADR-0003
+core/projects.py     detection by marker file; test/build/lint commands per project
+core/approvals.py    the approval.requested / approval.resolved round trip
+router/selection.py  one tool from an enum, one string, everything else built in code
 ```
 
-## Write tools and undo — done
+## Decisions that came out of building it
 
-`fs.write`, `fs.patch`, `fs.move`, `fs.delete`, the trash, and the undo journal
-([write-up](../logs/development/2026-08-21-write-tools-and-undo.md)). **138 security tests** (was 116).
+- **[ADR-0018](DECISIONS.md#adr-0018--a-launched-application-is-not-a-tool-call)** — a launched
+  application cannot live in the Job Object. HALT must not close your editor. The alternative
+  (`JOB_OBJECT_LIMIT_BREAKAWAY_OK`) would let *anything* the child spawns escape HALT, which is not
+  a trade worth making to open Explorer. **ADR-0003 confirmed** against the implementation in the
+  same pass, with the measurements in its record.
+- **`fs.write` now means "writes a path the contract names".** That is what makes an undo plan
+  possible. A tool whose writes happen inside a spawned program declares `proc.spawn` instead —
+  enforced in the registry, because `dev.build` claiming `fs.write` would have promised a backup
+  nothing could take.
+- **`term.write` is its own capability**, not `proc.spawn`. `docs/SECURITY.md#4b` said so and was
+  right: a spawn is an argv the allowlist can inspect, and a line of shell input is not.
+- **Hidden tools are a category the contract needed.** `git.undo` must exist in the registry and must
+  never be selectable.
 
-The undo machinery is what *buys* the T1 tier: a write runs without prompting because it can be
-reversed. Split across the process boundary — the child backs up and reports an `UndoPlan`, the parent
-journals it, since the child holds nothing durable. Ordering is backup → mutate → journal → report,
-because every other order loses something on a crash.
+## What the model is allowed to decide
 
-Verified live:
+Worth restating, because 100% on 18 cases is not a licence to trust it:
 
-```
-write (T1)                 -> allow, journalled, undoable
-undo                       -> restored from trash
-patch, ambiguous match     -> refused, file unchanged
-delete without approval    -> approval_required (confirm_strong)
-delete with bound approval -> trashed, then undone
-same approval, other file  -> "arguments changed since approval", file survived
-```
+- it picks a **name from an enum** built out of intent-filtered candidates, so an off-menu name is
+  unspellable rather than validated afterwards;
+- it supplies **one string** that is inherently text — a commit message, a test filter;
+- **it never writes a path.** The project path is composed from a root the runtime owns, after the
+  classifier has checked the name against the registry.
 
-Two design points worth keeping: `fs.patch` treats an ambiguous match as an **error**, never picking
-one silently; and `fs.move` resolves **both** paths, since resolving only the source would let a move
-write anywhere on disk.
+There is a test that puts `C:\Windows\System32` in the model's free-text field and shows it goes
+nowhere. That property does not depend on the accuracy number, which is the point of it.
 
-A test failure exposed a real gap rather than just a bad assertion: nothing could compute the argument
-digest an approval binds to. Added `ToolExecutor.preview()` → `(verdict, digest)`, which is exactly
-what the Confirmation Center needs in Phase 4.
+## Known gaps, honestly
 
-## Still to do in this task
-- **`git.*`** — status/diff/log/add/commit/branch/stash, and `git.push` at T2;
-- **`dev.*`** — `run_tests` with structured results, `build`, `lint`, allowlisted `execute`;
-- **`term.*`** — blocked on [OQ-09](OPEN_QUESTIONS.md#oq-09) (`pywinpty`, ConPTY resize/encoding);
-- **tool selection in the router** — the agent still cannot choose a tool; the pipeline says
-  "tools arrive in Phase 2" for actionable intents;
-- **approval issuance** — `Approval` is enforced but nothing creates one yet (Confirmation Center is
-  Phase 4).
-
-## Recommended next action
-
-Continue [P3-T1](current_task.md) with **`git.*`**. It is the first tool family that spawns a real
-process, so it exercises the toolhost properly, and `git.commit` has a genuine undo
-(`reset --soft HEAD~1`) that fits the journal already built.
-
-```
-uv run python scripts/check.py        # gate, incl. 116 security tests
-uv run python scripts/audit.py verify # audit chain
-uv run oracled                        # backend (pre-warms the toolhost)
-```
+- **Only 11 of 26 tools are reachable from a routed turn.** Selection offers a tool only when its
+  arguments can be built from *(project, one string)*. `dev.execute`, `term.write`, `fs.write` and
+  `git.push` need an argv, a command, file content or a remote. They are callable through the API
+  and will be reachable from a plan; half-filling them would mean inventing something.
+- **No UI for approvals yet.** The events are emitted and the WS command works; the card is Phase 4.
+- **Terminal sessions die with the toolhost.** Correct — a shell belongs in the Job Object — but it
+  means a crash loses your session, and that should be visible in the UI rather than silent.
+- **[OQ-13](OPEN_QUESTIONS.md#oq-13) (what approval rate causes prompt fatigue) is still an
+  assumption.** Now measurable: T1 covers writes, commits, tests, builds and branches, so daily use
+  should produce very few prompts. Worth counting once Phase 4 makes daily use real.
