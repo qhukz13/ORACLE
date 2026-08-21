@@ -30,6 +30,7 @@ from oracle.policy.engine import PolicyEngine, load_policy
 from oracle.router.intent import IntentClassifier
 from oracle.router.pipeline import TurnPipeline
 from oracle.storage.db import connect, migrate
+from oracle.toolhost import ToolHost
 from oracle.tools import ToolExecutor, ToolRegistry, build_registry
 
 log = get_logger(__name__)
@@ -47,6 +48,7 @@ class AppState:
     audit: AuditLog
     registry: ToolRegistry
     executor: ToolExecutor
+    host: ToolHost
     schema_version: int = 0
     projects: list[str] = field(default_factory=list)
     tasks: set[asyncio.Task[None]] = field(default_factory=set)
@@ -84,7 +86,12 @@ async def _build_state(settings: Settings) -> AppState:
     engine = PolicyEngine(policy)
     audit = AuditLog(settings.audit_path)
     registry = build_registry()
-    executor = ToolExecutor(registry, engine, audit)
+    # Tools execute across a process boundary (ADR-0003). Pre-warmed in the background
+    # rather than started lazily: a cold start costs ~1.2 s, which the user would
+    # otherwise pay on their first tool call. A failure here must not stop the agent
+    # from starting and explaining itself, so it is fire-and-forget.
+    host = ToolHost(cwd=settings.projects_root)
+    executor = ToolExecutor(registry, engine, audit, host=host)
     log.info("tools.registered", count=len(registry), tools=[c.id for c in registry.all()])
 
     provider: OllamaProvider | None = None
@@ -115,11 +122,20 @@ async def _build_state(settings: Settings) -> AppState:
         audit=audit,
         registry=registry,
         executor=executor,
+        host=host,
         schema_version=version,
         projects=projects,
     )
     state.agent.degraded = degraded
     return state
+
+
+async def _prewarm(st: AppState) -> None:
+    """Start the toolhost ahead of first use. Failure is logged, never fatal."""
+    try:
+        await st.host.start()
+    except Exception as exc:
+        log.warning("toolhost.prewarm_failed", error=str(exc))
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -130,6 +146,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         st = await _build_state(settings)
         app.state.oracle = st
+        if settings.prewarm_toolhost:
+            st.spawn(_prewarm(st))
         log.info(
             "oracled.started",
             port=settings.port,
@@ -145,6 +163,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for task in list(st.tasks):
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await task
+            await st.host.stop()
             if st.provider is not None:
                 await st.provider.aclose()
             await st.conn.close()
@@ -199,6 +218,7 @@ def _register_routes(app: FastAPI) -> None:
                 {"id": c.id, "risk": c.risk.label, "summary": c.summary} for c in st.registry.all()
             ],
             "audit": {"seq": st.audit.seq, "path": str(st.audit.path)},
+            "toolhost": {"running": st.host.running, **st.host.stats.snapshot()},
         }
 
     @app.get("/api/v1/sessions")
@@ -313,6 +333,9 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
         reason = str(cmd.payload.get("reason", "user requested halt"))
         st.policy.halt(reason)
         st.audit.append(actor="user", tool="oracle.halt", decision="halt", reason=reason)
+        # Kill the whole tool process tree. This is the part that makes HALT real:
+        # cancelling tasks does not kill `npm install`'s grandchildren, the job does.
+        await st.host.kill_tree()
         for task in list(st.tasks):
             task.cancel()
         st.agent.halted = True

@@ -25,6 +25,7 @@ from oracle.policy.audit import AuditLog, digest_args
 from oracle.policy.engine import PolicyEngine
 from oracle.policy.model import Capability, Decision, PolicyVerdict, Provenance, Tier
 from oracle.policy.paths import PathRejected, ResolvedPath
+from oracle.toolhost import ToolHost, ToolHostUnavailable
 from oracle.tools.contract import ToolRegistry, ToolResult
 
 log = get_logger(__name__)
@@ -110,11 +111,16 @@ class ToolExecutor:
         audit: AuditLog,
         *,
         approvals: dict[str, Approval] | None = None,
+        host: ToolHost | None = None,
     ) -> None:
         self._registry = registry
         self._engine = engine
         self._audit = audit
         self._approvals = approvals if approvals is not None else {}
+        #: When set, execution crosses a process boundary (ADR-0003). Without it the
+        #: handler runs in-process — acceptable only for read-only tools, and never for
+        #: anything that spawns a process.
+        self._host = host
 
     def grant(self, approval: Approval) -> None:
         self._approvals[approval.approval_id] = approval
@@ -251,20 +257,49 @@ class ToolExecutor:
                 detail=exc.detail,
             )
 
-        # 7. execute, under the contract's own timeout.
+        # 7. execute. Across the process boundary when a host is configured; the
+        #    in-process path exists only for read-only tools and tests.
         try:
-            result = await asyncio.wait_for(
-                contract.handler(resolved={k: v.real for k, v in resolved.items()}, args=args),
-                timeout=contract.timeout_s,
+            if self._host is not None:
+                response = await self._host.call(
+                    tool_id,
+                    raw_args,
+                    resolved={k: str(v.real) for k, v in resolved.items()},
+                    timeout_s=contract.timeout_s,
+                    cwd=cwd,
+                    dry_run=dry_run,
+                )
+                if not response.ok:
+                    # A timeout is NEVER retryable: the side effect may have happened.
+                    return self._fail(
+                        tool_id,
+                        response.error_kind or ToolErrorKind.EXECUTION_FAILED,
+                        response.error_message or "tool failed",
+                        started,
+                        verdict=verdict,
+                    )
+                result = contract.result_model.model_validate(response.result or {})
+            else:
+                result = await asyncio.wait_for(
+                    contract.handler(resolved={k: v.real for k, v in resolved.items()}, args=args),
+                    timeout=contract.timeout_s,
+                )
+        except ToolHostUnavailable as exc:
+            return self._fail(
+                tool_id,
+                ToolErrorKind.EXECUTION_FAILED,
+                f"tool host unavailable: {exc}",
+                started,
+                verdict=verdict,
             )
         except TimeoutError:
             return self._fail(
                 tool_id,
                 ToolErrorKind.TIMEOUT,
-                f"timed out after {contract.timeout_s}s",
+                f"{tool_id} exceeded {contract.timeout_s}s. "
+                "The action may or may not have completed — it will not be retried.",
                 started,
                 verdict=verdict,
-                retryable=True,
             )
         except asyncio.CancelledError:
             self._audit.append(

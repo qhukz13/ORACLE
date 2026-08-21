@@ -237,7 +237,6 @@ class SysInfoResult(ToolResult):
 async def sys_info(*, resolved: dict[str, Any], args: SysInfoArgs) -> SysInfoResult:
     import shutil
 
-    total = getattr(os, "sysconf", None)
     ram_total = ram_used = 0.0
     try:  # pragma: no cover - platform detail
         import ctypes
@@ -270,13 +269,55 @@ async def sys_info(*, resolved: dict[str, Any], args: SysInfoArgs) -> SysInfoRes
         except OSError:
             continue
 
-    _ = total
     return SysInfoResult(
-        cpu_percent=round((os.cpu_count() or 0) and 0.0, 1),
+        cpu_percent=await _cpu_percent(),
         ram_used_gb=round(ram_used, 1),
         ram_total_gb=round(ram_total, 1),
         disks=disks,
     )
+
+
+async def _cpu_percent(sample_ms: int = 120) -> float:
+    """System-wide CPU load, from two `GetSystemTimes` samples.
+
+    CPU utilisation is a rate, so it cannot be read instantaneously — it needs two
+    samples and an interval. An earlier version returned a hardcoded 0.0, which is
+    worse than returning nothing: a plausible-looking number that is always wrong.
+    120 ms is short enough to be unnoticeable in a status call and long enough to be
+    meaningful.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class FILETIME(ctypes.Structure):
+        _fields_ = [("low", wintypes.DWORD), ("high", wintypes.DWORD)]
+
+        @property
+        def value(self) -> int:
+            return int(self.high) << 32 | int(self.low)
+
+    def sample() -> tuple[int, int]:
+        idle, kernel, user = FILETIME(), FILETIME(), FILETIME()
+        if not ctypes.windll.kernel32.GetSystemTimes(
+            ctypes.byref(idle), ctypes.byref(kernel), ctypes.byref(user)
+        ):
+            raise OSError("GetSystemTimes failed")
+        # kernel time includes idle time, so total is kernel + user.
+        return idle.value, kernel.value + user.value
+
+    try:
+        idle0, total0 = sample()
+        await asyncio.sleep(sample_ms / 1000)
+        idle1, total1 = sample()
+    except OSError:
+        log.warning("sys_info.cpu_unavailable")
+        return 0.0
+
+    d_total = total1 - total0
+    if d_total <= 0:
+        return 0.0
+    busy = 1.0 - (idle1 - idle0) / d_total
+    return round(max(0.0, min(1.0, busy)) * 100, 1)
 
 
 # ------------------------------------------------------------------ sys.processes

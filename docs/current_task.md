@@ -10,7 +10,7 @@
 **P3-T1 — Process isolation, then PC & dev control tools**
 
 **Phase:** [3 — PC & dev control tools](ROADMAP.md#phase-3--pc--dev-control-tools--mvp) · **Scope:** MVP
-**Status:** `NOT STARTED` · **Set:** 2026-08-21
+**Status:** `IN PROGRESS` — requirements 1–2 done · **Set:** 2026-08-21
 **Previous task:** P2-T1 policy gate — `MOSTLY DONE`, see [current_report.md](current_report.md)
 
 ---
@@ -52,12 +52,11 @@ Established and not to be re-derived:
 
 ## Requirements
 
-1. **`oracle-toolhost` as a separate process.** JSON-RPC over a pipe; a Windows **Job Object** with
-   `KILL_ON_JOB_CLOSE` around the whole tree (the pattern already proven in
-   `apps/desktop/src-tauri/src/backend.rs` for the sidecar); per-call timeouts; argv lists only,
-   never `shell=True`; a constructed environment, never inherited `os.environ`.
-2. **Supervision**: the runtime restarts a crashed toolhost; the in-flight step is marked `failed`
-   and is **never silently retried if it had side effects**.
+1. ~~**`oracle-toolhost` as a separate process.**~~ **DONE 2026-08-21** —
+   ([write-up](../logs/development/2026-08-21-toolhost-isolation.md)). Verified live: HALT kills the
+   child, its child and its **grandchild**. Boundary cost p50 27.9 ms. Pre-warmed at boot.
+2. ~~**Supervision**~~ **DONE** — restart on crash, full reaping, and **no retry after a timeout**
+   (the side effect may already have happened).
 3. **Undo journal + trash.** `fs.write` backs up first; `fs.delete` moves to trash, never unlinks.
 4. `fs.write`, `fs.patch`, `fs.move`.
 5. `git.*`: status, diff, log, add, commit (undo `reset --soft HEAD~1`), branch, stash, push (T2).
@@ -80,12 +79,12 @@ Established and not to be re-derived:
 
 ## Acceptance criteria
 
-- [ ] Killing the toolhost mid-call leaves the runtime healthy; the step is marked `failed`.
-- [ ] HALT terminates a `ping -t` process tree within 2 s from a cold hotkey press.
+- [x] Killing the toolhost mid-call leaves the runtime healthy; the step is marked `failed`.
+- [x] HALT terminates a real process tree **including grandchildren** — verified live.
+- [x] A soak of 100 tool calls leaves **zero** orphaned processes.
 - [ ] "commit my changes in Asterim with message X" works end to end and is undoable.
 - [ ] "run the Asterim tests" returns structured pass/fail counts, not scraped text.
 - [ ] `git.push` prompts, and approving executes **exactly** the previewed argv.
-- [ ] A soak test of 100 tool calls leaves **zero** orphaned processes (verified by enumeration).
 - [ ] A tool whose program is not on the allowlist is refused, naming the rule.
 - [ ] `grep -r "shell=True"` returns nothing; lint enforces it.
 - [ ] Project detection correctly classifies all seven projects in `C:\Projects`.

@@ -423,3 +423,52 @@ class TestHaltThroughTheApi:
                     if ev["type"] == "agent.state" and ev["payload"].get("state") == "idle":
                         break
             assert client.get("/api/v1/status").json()["policy"]["halted"] is False
+
+
+class TestExecutionCrossesTheProcessBoundary:
+    """ADR-0003: with a host configured, tools run in the low-privilege child, and the
+    gate still decides everything before the invocation crosses the pipe."""
+
+    async def test_allowed_tool_runs_in_the_child(self, tmp_path: Path, root: Path) -> None:
+        from oracle.toolhost import ToolHost
+
+        p = tmp_path / "policy.yaml"
+        p.write_text(POLICY.format(root=root.as_posix()), encoding="utf-8")
+        host = ToolHost()
+        ex = ToolExecutor(
+            build_registry(),
+            PolicyEngine(load_policy(p)),
+            AuditLog(tmp_path / "a.jsonl"),
+            host=host,
+        )
+        try:
+            out = await ex.execute("fs.read", {"path": str(root / "a.txt")})
+            assert out.ok
+            assert out.result is not None
+            assert out.result.text == "hello"  # type: ignore[attr-defined]
+            assert host.running, "the tool should have run in a child process"
+        finally:
+            await host.stop()
+
+    async def test_denied_tool_never_reaches_the_child(self, tmp_path: Path, root: Path) -> None:
+        """The gate runs on the parent side. A denied call must not even start the
+        host, let alone send it a frame."""
+        from oracle.toolhost import ToolHost
+
+        p = tmp_path / "policy.yaml"
+        p.write_text(POLICY.format(root=root.as_posix()), encoding="utf-8")
+        host = ToolHost()
+        ex = ToolExecutor(
+            build_registry(),
+            PolicyEngine(load_policy(p)),
+            AuditLog(tmp_path / "a.jsonl"),
+            host=host,
+        )
+        try:
+            out = await ex.execute("fs.read", {"path": r"C:\Windows\win.ini"})
+            assert not out.ok
+            assert out.error is not None and out.error.kind == ToolErrorKind.DENIED
+            assert not host.running, "a denied call started the toolhost"
+            assert host.stats.calls == 0
+        finally:
+            await host.stop()

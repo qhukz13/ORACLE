@@ -28,6 +28,7 @@ def settings(tmp_path: Path) -> Settings:
         log_dir=tmp_path / "logs",
         port=0,
         llm_enabled=False,
+        prewarm_toolhost=False,
         projects_root=tmp_path / "projects",
     )
 

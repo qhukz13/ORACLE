@@ -27,6 +27,7 @@ doc, delete the marker.
 | [OQ-13](#oq-13) | What approval rate causes prompt fatigue? | `ASSUMPTION` | Phase 3+ tuning | open |
 | [OQ-14](#oq-14) | Does the orbital view earn its place? | `UNKNOWN` | Phase 9 go/no-go | open |
 | [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | `EXPERIMENT NEEDED` | UX quality, not a phase | open |
+| [OQ-16](#oq-16) | Does `connect_read_pipe` work anywhere on Windows? | `UNKNOWN` | none — worked around | monitoring |
 
 ---
 
@@ -320,6 +321,23 @@ modify/delegate boundary moves to a deterministic later step.
 
 **The real mitigation already works:** the pre-router resolves turns in ~5 ms. Every turn it handles
 skips all three costs. That is why ADR-0011 targets >50% of turns.
+
+### OQ-16
+**Is `loop.connect_read_pipe` usable at all on Windows' Proactor loop?** `UNKNOWN` · worked around
+
+`asyncio`'s `connect_read_pipe(sys.stdin)` fails inside
+`_ProactorReadPipeTransport._loop_reading()` on this platform. The failure mode is the dangerous
+kind: the process starts, answers its first write, and then silently never reads again. Every call
+times out with nothing to point at.
+
+**Worked around** by reading stdin on a worker thread
+([write-up](../logs/development/2026-08-21-toolhost-isolation.md)). That is fine here — the toolhost
+handles one invocation at a time — but the same trap is waiting for **any** future component that
+tries to read a pipe asynchronously on Windows: the voice daemon, a PTY bridge, an external-agent
+adapter streaming stdout.
+
+**Rule for this codebase:** on Windows, read pipes on a thread. Do not reach for
+`connect_read_pipe`.
 
 ## Standing assumptions
 

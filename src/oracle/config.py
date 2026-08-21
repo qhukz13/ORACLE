@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     #: code, and must be edited by a human (docs/SECURITY.md#2).
     policy_path: Path = Path("config/policy.yaml")
 
+    #: Start the tool host at boot so the first tool call does not pay ~1.2 s of
+    #: process startup. Tests disable it to stay hermetic and fast.
+    prewarm_toolhost: bool = True
+
     @property
     def db_path(self) -> Path:
         return self.data_dir / "oracle.db"

@@ -3,117 +3,124 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** P2-T1 — Tool system and the policy gate
-**Status:** `MOSTLY DONE` — gate built and proven; process isolation deliberately deferred to Phase 3
+**Task:** P3-T1 — Process isolation, then PC & dev control tools
+**Status:** `IN PROGRESS` — toolhost done and proven; the tools themselves are next
 **Date:** 2026-08-21
 
 ---
 
 ## What was done
 
-The policy gate exists and works. ORACLE can now execute a read-only tool set against real projects,
-and every path, tier, taint flag and denial passes through one chokepoint that is tested against
-adversarial input. **No write tools** — that is Phase 3, and the roadmap forbids them before this.
+**`oracle-toolhost` exists and works.** Tools now execute in a separate, low-privilege process inside
+a Windows Job Object. That was requirement #1 of this task and the hard prerequisite for every tool
+that spawns a process — which is all of the remaining ones.
 
-`103 security tests` + 89 unit/API tests + 14 TS. `uv run python scripts/check.py` green, with the
-security suite as its own gate step.
+`116 security tests` (was 103) + 89 unit/API + 14 TS. Full gate green.
 
-## Verified live, against the real `config/policy.yaml` and real projects
+## The claim, proven live
+
+ADR-0003's load-bearing argument is not "a crash is contained" — it is that **killing a thread does
+not kill `npm install`'s grandchildren**, so HALT would be a lie without process isolation.
+
+With a child that spawns a grandchild sleeping for 600 s:
 
 ```
-ALLOW  fs.read    C:/Projects/ORACLE/README.md            3ms   rule=tools.fs.read.tier
-ALLOW  fs.list    C:/Projects/Asterim                   125ms   rule=tools.fs.list.tier
-DENY   fs.read    C:/Windows/win.ini                    denied  path.outside_scope
-DENY   fs.read    C:/Projects/Asterim/.env              denied  path.denied
-DENY   fs.read    README.md:hidden           (ADS)      denied  path.alternate_data_stream
-DENY   fs.read    //localhost/C$/Windows/... (UNC)      denied  path.device_path
-DENY   fs.read    ../../Windows/win.ini      (traversal)denied  path.outside_scope
-DENY   git.push   (not registered in Phase 2)           not_found
+before HALT: toolhost=True  spawner=True  grandchild=True
+after  HALT: toolhost=False spawner=False grandchild=False
 ```
 
-HALT over the WebSocket: `halted=true` with the reason recorded, a turn attempted while halted
-returns `outcome='halted'`, and only an explicit `resume` clears it. Audit chain: **8 records,
-intact**, every denial carrying the rule that fired.
+Job membership is inherited, so anything the child spawns — and anything *those* spawn — dies with
+the job. This is the same mechanism already proven one level up in the Tauri shell (OQ-11).
 
-## OQ-04 resolved — and it found the bug that would have shipped
+## Cost of the boundary, measured
 
-Tested against a **real** `mklink /J` tree, not mocks
-([write-up](../logs/development/2026-08-21-oq04-windows-paths.md)).
+```
+cold (includes process start): 1342 ms
+warm: p50 27.9 ms   p95 29.0 ms      budget <50 ms
+```
 
-1. **`Path.is_symlink()` returns `False` for a junction.** The natural optimisation — "only resolve
-   if it's a link" — walks straight past every junction. Detection must use the reparse-point
-   attribute. A mocked fixture would have encoded my wrong assumption and passed.
-2. **Junctions need no admin; symlinks do.** Developer Mode is off here, so the *realistic* attacker
-   can make junctions but not symlinks. The suite treats junction tests as required and symlink tests
-   as skippable — the right priority.
-3. **`realpath` does not strip an alternate data stream.** `normal.txt:hidden` hides a payload in a
-   file whose size never changes.
-4. **UNC/device paths pass through `realpath` unchanged**, and must be rejected *before* the wildcard
-   check — `\\?\` contains `?` and `C$` contains `$`.
+~28 ms per call is what ADR-0003 costs. The router already spends ~1.5 s per turn, so the boundary is
+not the bottleneck and never will be. The 1.3 s cold start *was* user-visible on a first tool call,
+so the host is now pre-warmed in the background at boot — fire-and-forget, because a broken toolhost
+must not stop the agent from starting and explaining itself.
 
-Plus: Windows silently strips trailing dots, so `.env.` opens `.env`. Deny rules are matched **after**
-resolution, never against the raw string.
+## The bug that cost the most time
 
-## Bugs my own tooling caught in my own code
+**`loop.connect_read_pipe(sys.stdin)` does not work on Windows' Proactor event loop.**
 
-- **An ADS regex that rejected every absolute path.** `^(?:[A-Za-z]:)?[^:]*:(.*)$` looks correct, but
-  the optional group backtracks and matches the drive-letter colon. 20 tests failed at once. Replaced
-  with an explicit slice. *Regex is a poor default for security predicates.*
-- **`subprocess.run` inside an async tool handler** — blocks the whole event loop, including every
-  other client's event stream. Caught by ruff `ASYNC221`, fixed with `asyncio.create_subprocess_exec`.
-- **`tasklist` resolved via `PATH`** — exactly the current-directory hijack SECURITY.md §4b warns
-  about. Now pinned to an absolute path under `%SystemRoot%` at import, refusing anything else.
-- **A test asserting `....//` is traversal.** It is an ordinary directory name on Win32. Asserting
-  rejection would have baked a false belief into the suite; the correct assertion is *no escape*.
+The failure mode is the dangerous kind: the child starts, emits `ready`, and then silently never
+reads again. It looks alive. Every call times out at 30 s with nothing to point at. Fixed by reading
+stdin on a worker thread. **Suite runtime went 201 s → 15.8 s** — the 201 s was almost entirely
+timeouts.
+
+Recorded as [OQ-16](OPEN_QUESTIONS.md#oq-16) with a rule for the codebase, because the same trap is
+waiting for the voice daemon, a PTY bridge, and any adapter streaming an external agent's stdout.
+
+## Two leaks `filterwarnings = ["error"]` caught
+
+Both real, neither noise:
+
+- **`start()`'s failure path leaked a process and a pipe.** When job assignment fails we correctly
+  refuse to continue — but the original code killed the child without reaping it or closing its
+  transport. A slow leak in a process that restarts the toolhost repeatedly.
+- **asyncio subprocess transports are only reclaimed in `__del__`.** No public API to close them, so
+  `_reap()` closes `proc._transport` explicitly.
+
+## Also fixed
+
+`sys.info` was returning a hardcoded `cpu_percent: 0.0` — a plausible-looking number that is always
+wrong, which is worse than none. CPU load is a *rate*: now sampled from two `GetSystemTimes` reads
+120 ms apart, reporting real load.
+
+## What crosses the boundary
+
+Crosses: a pre-authorised `Invocation` — tool id, validated args, **already-resolved** absolute
+paths, a timeout.
+
+Does not: policy, scopes, tiers, secrets, the audit log, the event log, or any route back into the
+runtime. Two details worth keeping:
+
+- the child gets a **constructed** environment and **refuses to start** if `ANTHROPIC_API_KEY` and
+  friends are present — absent, not merely unused, enforced from both sides;
+- the child **never resolves a path itself**, so the sandbox decision cannot drift to the wrong side
+  of the pipe. There is a test for exactly that.
+
+**No retries, deliberately.** A timeout does not mean the side effect did not happen. Both timeout
+paths return *"may or may not have completed — it will not be retried"*, worded identically because
+which side noticed the deadline is an implementation detail and the caller's uncertainty is the same.
 
 ## What was built
 
 ```
-src/oracle/policy/
-  paths.py     canonicaliser: 12-step algorithm, TOCTOU recheck, component containment
-  model.py     capabilities, tiers T0-T4, decisions, provenance
-  engine.py    THE GATE: fail-closed loading, deny-by-default, taint escalation, HALT
-  audit.py     hash-chained append-only log, fsynced, redacted
-src/oracle/tools/
-  contract.py  contracts + registry, validated at startup (40-tool cap)
-  readonly.py  fs.read · fs.list · fs.stat · sys.info · sys.processes
-  executor.py  validate -> resolve -> GATE -> approval -> recheck -> execute -> audit
-config/policy.yaml           scopes, deny_always, per-tool tiers (Phase 3+ declared early)
-scripts/audit.py             `verify` / `tail`
-tests/security/              103 tests, incl. Hypothesis over 300 adversarial paths
+src/oracle/toolhost/
+  jobobject.py  Job Object via ctypes: KILL_ON_JOB_CLOSE, process + memory limits
+  protocol.py   Invocation / Response — deliberately small
+  __main__.py   the low-privilege child; holds nothing, refuses secrets in env
+  host.py       supervision: spawn, assign, dispatch, timeouts, restart, reaping
+tests/security/test_toolhost.py   grandchild kill · kill-on-close · no-secrets ·
+                                  child-never-resolves-paths · 100-call soak, zero orphans
 ```
 
-## Deliberately NOT done — process isolation
+## Still to do in this task
 
-**`oracle-toolhost` is still in-process.** ADR-0003 wants a separate process; I did not build it.
+The toolhost was the prerequisite; the tools it exists to isolate are not built yet:
 
-The reasoning, so it can be argued with: ADR-0003's three justifications are (a) a crashing tool must
-not take down the agent, (b) a tool must not be able to read `ANTHROPIC_API_KEY`, (c) killing a
-thread does not kill `npm install`'s grandchildren. **None bite for read-only file tools. All three
-bite hard the moment Phase 3 adds `dev.execute`, `git` and `npm`.**
-
-So it is sequencing, not omission — but it is a **hard prerequisite for the first Phase 3 tool that
-spawns a process**, and the acceptance criterion *"killing the toolhost mid-call leaves the runtime
-healthy"* moves with it. Recorded in [ROADMAP Phase 2](ROADMAP.md#phase-2--tool-system--policy-gate--mvp).
-
-## Other gaps
-
-- **The agent cannot yet call tools.** The executor is wired into the app and tested, but the router
-  does not select tools — the pipeline still says "tools arrive in Phase 2" for actionable intents.
-  Tool *selection* is Phase 3 work; the gate had to exist first.
-- **Approvals have no UI.** `Approval` objects are bound, expiring and single-use, and the executor
-  enforces them, but nothing issues one yet — the Confirmation Center is Phase 4.
-- **No undo journal.** Not needed while everything is read-only; required with the first `fs.write`.
-- **`sys.info` reports `cpu_percent` as 0.0** — a placeholder; it needs a sampling interval and
-  should either be implemented properly or dropped from the result.
+- **write tools** — `fs.write`, `fs.patch`, `fs.move`, plus the undo journal and trash;
+- **`git.*`** — status/diff/log/add/commit/branch/stash, and `git.push` at T2;
+- **`dev.*`** — `run_tests` with structured results, `build`, `lint`, allowlisted `execute`;
+- **`term.*`** — blocked on [OQ-09](OPEN_QUESTIONS.md#oq-09) (`pywinpty`, ConPTY resize/encoding);
+- **tool selection in the router** — the agent still cannot choose a tool; the pipeline says
+  "tools arrive in Phase 2" for actionable intents;
+- **approval issuance** — `Approval` is enforced but nothing creates one yet (Confirmation Center is
+  Phase 4).
 
 ## Recommended next action
 
-**[P3-T1](current_task.md) — but build `oracle-toolhost` first.** Do not add a process-spawning tool
-until the Job Object isolation exists; that ordering is the whole reason Phase 2 came before Phase 3.
+Continue [P3-T1](current_task.md) with the **undo journal and `fs.write`** — the smallest write tool,
+which forces the reversibility machinery into existence before anything harder needs it.
 
 ```
-uv run python scripts/check.py        # gate, incl. security suite
+uv run python scripts/check.py        # gate, incl. 116 security tests
 uv run python scripts/audit.py verify # audit chain
-uv run oracled                        # backend
+uv run oracled                        # backend (pre-warms the toolhost)
 ```
