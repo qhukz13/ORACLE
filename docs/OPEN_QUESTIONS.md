@@ -1,0 +1,282 @@
+# ORACLE — Open Questions, Assumptions & Experiments
+
+Everything the design does **not** know. Nothing here is hidden inside another document as a
+confident-sounding sentence.
+
+**Markers:** `UNKNOWN` (nobody has established this) · `ASSUMPTION` (proceeding as if true, unverified)
+· `TO VERIFY` (cheap to check, just check it) · `EXPERIMENT NEEDED` (requires building a spike).
+
+**Rule:** an item blocking a phase is resolved *inside* that phase, before the code that depends on
+it. Resolving an item means: run it, record the result in `logs/development/`, update the affected
+doc, delete the marker.
+
+| # | Question | Marker | Blocks | Status |
+|---|---|---|---|---|
+| [OQ-01](#oq-01) | Which router model actually fits and performs? | `EXPERIMENT NEEDED` | Phase 1 | **placement/latency ANSWERED 2026-08-21; accuracy open** |
+| [OQ-02](#oq-02) | Which embedding model for mixed RU/EN? | `EXPERIMENT NEEDED` | Phase 5 | open |
+| [OQ-03](#oq-03) | How long will Pascal keep GPU acceleration? | `UNKNOWN` | risk, not a phase | monitoring |
+| [OQ-04](#oq-04) | Does `realpath` resolve Windows junctions? | `TO VERIFY` | Phase 2 | open |
+| [OQ-05](#oq-05) | Does `agy -p` emit stdout when piped? | ~~`EXPERIMENT NEEDED`~~ | Phase 6 (Antigravity only) | **RESOLVED 2026-08-21 — yes, with `--output-format`** |
+| [OQ-06](#oq-06) | Can a PWA install over a self-signed cert? | `TO VERIFY` | Phase 8 (push only) | open |
+| [OQ-07](#oq-07) | Is the memory subsystem dual- or quad-channel? | `UNKNOWN` | CPU-fallback planning | open |
+| [OQ-08](#oq-08) | Does FTS5 `unicode61` handle Russian acceptably? | `TO VERIFY` | Phase 5 | open |
+| [OQ-09](#oq-09) | `pywinpty` on Python 3.12 + ConPTY behaviour | `TO VERIFY` | Phase 3 | open |
+| [OQ-10](#oq-10) | Is there a text-only Qwen3.5 quant? | `TO VERIFY` | Phase 1 | open |
+| [OQ-11](#oq-11) | Does the Tauri sidecar die with the shell? | ~~`TO VERIFY`~~ | Phase 0 | **RESOLVED 2026-08-21 — yes, via Job Object** |
+| [OQ-12](#oq-12) | Is taint escalation tolerable in daily use? | `ASSUMPTION` | Phase 5+ tuning | open |
+| [OQ-13](#oq-13) | What approval rate causes prompt fatigue? | `ASSUMPTION` | Phase 3+ tuning | open |
+| [OQ-14](#oq-14) | Does the orbital view earn its place? | `UNKNOWN` | Phase 9 go/no-go | open |
+
+---
+
+### OQ-01
+**Which router model actually fits in ~3.5 GB and performs well enough?**
+**Placement & latency: ANSWERED 2026-08-21. Accuracy: still open, blocks Phase 1.**
+
+Full write-up: [`logs/development/2026-08-21-oq01-router-benchmark.md`](../logs/development/2026-08-21-oq01-router-benchmark.md).
+
+**Measured on this GPU:**
+
+| model | num_ctx | placement | prompt eval (2371 tok) | generation |
+|---|---|---|---|---|
+| **qwen3.5:0.8b** | 8192 & **16384** | **100% GPU** | 1566 ms | **45.4 tok/s** |
+| qwen3.5:2b | 4096 **and** 8192 | 36%/64% CPU/GPU | 3352 ms | 20.4 tok/s |
+
+**→ Router is `qwen3.5:0.8b` at 16k context, `think: false`.**
+
+Three findings that changed the design:
+
+1. **`2b` cannot be rescued by shrinking context** — 4096 and 8192 give an *identical* 36%/64% split,
+   so the weights are what don't fit. The ADR-0004 arithmetic was too optimistic; it ignored Ollama's
+   compute buffers and headroom policy.
+2. **Prompt processing is the TTFT bottleneck**, not generation: 227 tok → 173 ms · 1227 tok → 726 ms ·
+   2427 tok → 1168 ms · 4827 tok → 2216 ms. An 8k prompt would cost ~3.7 s before the first token.
+   → **the context budget had to be split by call type** ([AGENT_RUNTIME.md §5](AGENT_RUNTIME.md#5-context-budget)).
+3. **Qwen3.5 is a thinking model.** Default settings spent 229 tokens reasoning about saying "hello"
+   and returned an *empty* `response` field. `think: false` is mandatory on every router call.
+
+**Still open — the accuracy half.** Intent-classification and tool-selection rates for `0.8b` are
+unmeasured; they need the 30-case fixture set, which is Phase 1 code. **This is now the single largest
+Phase 1 risk: if `0.8b` is too weak, nothing else fits this GPU.** Fallbacks, in order:
+(a) test `OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0` and a text-only build
+([OQ-10](#oq-10)) to try to pull `2b` fully onto the card; (b) accept `2b` at 36% CPU offload
+(~20 tok/s, ~3.4 s TTFT); (c) push more work onto the deterministic pre-router.
+
+---
+
+### OQ-02
+**Which embedding model for a mixed Russian/English corpus of prose and code?** `EXPERIMENT NEEDED` · blocks **Phase 5**
+
+Candidates: `multilingual-e5-base` (768d, needs `query:`/`passage:` prefixes), `bge-m3` (1024d,
+stronger multilingual, heavier), and Matryoshka truncation to 384d.
+
+**Experiment.** Build the 20-question retrieval fixture set from [RAG.md §8](RAG.md#8-quality-measurement)
+— crucially including Russian questions against English code, the case most likely to regress
+silently. Measure recall@5 and CPU throughput (chunks/sec on 24 threads) for each candidate, and for
+768d vs truncated 384d.
+
+**Decides.** Embedding model, vector dimension (fixed at index build), index size.
+
+---
+
+### OQ-03
+**How long will this GPU keep hardware acceleration?** `UNKNOWN` · standing risk
+
+`VERIFIED 2026-08-21`: CUDA 13.0 raised the minimum compute capability to 7.5; CUDA 13.3 removed
+Maxwell/Pascal/Volta. Ollama currently supports compute 5.0–6.2 with driver ≥ 570 (ours is 582.28)
+because it ships an older CUDA runner. **When that runner is dropped, this GTX 1050 Ti loses GPU
+acceleration in an Ollama update.**
+
+**Not resolvable** — it is a vendor decision. Mitigations, all already in the design: the CPU fallback
+path is tested in Phase 1 rather than discovered in production; `LLMProvider` allows switching to a
+`llama.cpp` build compiled for `sm_61`; and the degradation table
+([ARCHITECTURE §8](ARCHITECTURE.md#8-degradation--what-happens-when-a-piece-is-missing)) covers it.
+
+**Watch:** Ollama release notes each quarter. **Do not auto-update Ollama** without checking.
+
+---
+
+### OQ-04
+**Does Python's `os.path.realpath` fully resolve Windows junctions and mount points?** `TO VERIFY` · blocks **Phase 2**
+
+The path canonicaliser depends on step 8 of the algorithm in
+[SECURITY.md §4](SECURITY.md#4-path-safety-windows-specific). Symlinks are handled; **junctions**
+(`mklink /J`) and mount points are the uncertainty, and a junction that resolves incorrectly is a
+sandbox escape.
+
+**Check.** Create a fixture tree with a symlink, a junction and a mount point, each pointing outside an
+allowed root. Assert every one is resolved and denied. If `realpath` falls short, use
+`GetFinalPathNameByHandleW` via `ctypes`.
+
+**Note:** this fixture tree is required for `tests/security/test_symlink_escape.py` regardless of the
+outcome, so the work is not wasted either way.
+
+---
+
+### OQ-05
+**Does `agy -p` emit stdout when run from a subprocess?** **RESOLVED 2026-08-21 — yes.**
+
+Full write-up: [`logs/development/2026-08-21-oq05-antigravity-stdout.md`](../logs/development/2026-08-21-oq05-antigravity-stdout.md).
+
+Tested with `agy` v1.1.14, stdout redirected to a file (not a TTY — the exact condition of
+[issue #76](https://github.com/google-antigravity/antigravity-cli/issues/76)):
+
+| mode | result |
+|---|---|
+| `--output-format json` | exit 0, **257 bytes**, complete valid JSON |
+| `--output-format stream-json` | exit 0, **2278 bytes**, 5 NDJSON lines, `init` → `step_update`×3 → `result` |
+
+Issue #76 affects **default text mode** only. **→ Always pass `--output-format`; never rely on
+default text output from a subprocess.** That one rule is the entire mitigation, and it costs nothing
+because ORACLE wants structured output regardless.
+
+**Envelope gotcha the docs don't state:** the discriminator is an `event` field and the payload sits
+under a key *named after the event* — `{"event":"init","init":{...}}`. Parse `obj[obj["event"]]`.
+
+**→ `AntigravityAdapter` is unblocked for Phase 6.** One caveat found: `agy` used **14,119 input
+tokens** to answer "say hello" (large injected system prompt), so it is a poor choice for small calls
+— route those to Claude or the local model.
+
+---
+
+### OQ-06
+**Can a PWA install and receive push over a self-signed certificate?** `TO VERIFY` · bounds **Phase 8**
+
+Browsers require a secure context for service workers. A self-signed cert is untrusted by default,
+which likely blocks PWA installation and Web Push.
+
+**Check.** Serve the PWA over the self-signed cert; attempt install and service-worker registration on
+the actual phone. Then repeat with a locally-installed CA.
+
+**Does not block Phase 8** — v1 ships in-app WS notifications only, and says so plainly
+([MOBILE.md §5](MOBILE.md#the-open-problem--oq-06)). It only decides whether background push is
+achievable later.
+
+---
+
+### OQ-07
+**Is the memory subsystem dual-channel or quad-channel?** `UNKNOWN` · affects CPU-fallback planning
+
+The Xeon E5-2670 v3 supports quad-channel DDR4, but many X99 boards populate only two channels.
+CPU inference is memory-bandwidth-bound, so this is roughly the difference between ~13 tok/s and
+~6 tok/s for a 3.4 GB model — the difference between a usable and an unusable fallback.
+
+**Check.** Run a memory bandwidth benchmark, or inspect the DIMM population. Record the result; it
+sets realistic expectations for [OQ-03](#oq-03)'s fallback and for the 9B reasoner.
+
+---
+
+### OQ-08
+**Does SQLite FTS5 `unicode61` tokenize Russian acceptably?** `TO VERIFY` · blocks **Phase 5**
+
+Half the hybrid search depends on BM25. If the tokenizer mangles Cyrillic, lexical retrieval silently
+degrades for Russian queries **with no error anywhere** — the worst kind of failure.
+
+**Check.** Index the 157 Obsidian notes; run Russian queries with inflected forms; compare against
+expected hits. If inadequate, evaluate a custom tokenizer or a stemming preprocessor.
+Covered by the retrieval fixture suite, which is why that suite must include Russian cases.
+
+---
+
+### OQ-09
+**`pywinpty` on Python 3.12, and ConPTY resize/encoding behaviour.** `TO VERIFY` · blocks **Phase 3**
+
+Wheel availability is expected to be fine. The real risks are ConPTY resize handling and UTF-8/CP1251
+encoding on a Russian-locale Windows install, which routinely produce mojibake in terminal output.
+
+**Check.** Spike a PTY session streaming a long `npm install`; resize mid-stream; run a command
+producing Cyrillic output.
+
+---
+
+### OQ-10
+**Is there a text-only Qwen3.5 quant?** `TO VERIFY` · affects **Phase 1**
+
+Published Ollama sizes (`2b` = 2.7 GB, `4b` = 3.4 GB) are larger than a text-only model of that
+parameter count implies, because the family is multimodal and the tags include a vision tower. ORACLE
+needs no vision. A text-only build could free several hundred MB of VRAM — which at 3.5 GB usable is
+the difference between 8k and 16k context.
+
+**Check.** Look for text-only tags in the Ollama library; failing that, evaluate a text-only GGUF from
+the community or build one. Fold into [OQ-01](#oq-01).
+
+---
+
+### OQ-11
+**Does the Python sidecar terminate when the Tauri shell is force-quit?** **RESOLVED 2026-08-21 — yes.**
+
+Implemented in [`apps/desktop/src-tauri/src/backend.rs`](../apps/desktop/src-tauri/src/backend.rs):
+the shell creates a Windows **Job Object** with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and assigns
+`oracled` to it. When the last handle to the job closes — which the OS does on process death, however
+violent — every process in the job is terminated.
+
+Measured:
+
+```
+shell pid 7728 started -> backend reachable: True -> oracled pid 26764
+Stop-Process -Id 7728 -Force      (simulates Task Manager "End Task")
+oracled still alive after shell force-kill: False
+port 8787 no longer serving -> clean
+```
+
+Neither `Drop` on `std::process::Child` nor a Tauri `on_window_event` handler survives a hard kill;
+the job object is the only mechanism that does. If assignment to the job fails, `Backend::spawn`
+refuses to continue rather than run a backend it cannot guarantee to clean up.
+
+The reverse case is also verified: killing the backend leaves the UI showing
+`Backend offline — reconnecting in Ns`, and it recovers on its own with no gap
+([P0-T1 report](current_report.md)).
+
+---
+
+### OQ-12
+**Is taint escalation tolerable in daily use?** `ASSUMPTION` · tuning from Phase 5
+
+The design assumes escalating tiers on tainted turns
+([SECURITY.md §6](SECURITY.md#6-prompt-injection-and-taint-tracking)) will fire often enough to
+matter but rarely enough not to be disabled. **That is an assumption, not a finding**, and reading any
+`node_modules` file taints a turn — which may be constant in practice.
+
+**Resolve by measurement.** Track the escalation rate as a metric from Phase 5. If it is high and
+mostly false-positive, refine provenance granularity (e.g. treat a dependency's `package.json` as less
+dangerous than its README) rather than weakening the control.
+
+---
+
+### OQ-13
+**What approval rate actually causes prompt fatigue?** `ASSUMPTION` · tuning from Phase 3
+
+[ADR-0005](DECISIONS.md#adr-0005--one-policy-gate-risk-tiers-taint-tracking) treats prompt fatigue
+as a security failure and sets an alarm at ~5–6 prompts per active hour. **That number is a guess.**
+
+**Resolve by measurement.** Track prompts/hour and the approve-without-reading proxy (decision latency
+< 2 s). If people approve in under two seconds, the prompt has stopped being a control and the tier
+should move to "auto + undo" instead.
+
+---
+
+### OQ-14
+**Does the orbital view earn its place?** `UNKNOWN` · Phase 9 go/no-go
+
+The design commits to a test rather than to the feature: cover every label and it must still be
+possible to say what ORACLE is doing
+([UI.md §3](UI.md#3-the-core-orbital-view--phase-9), [ROADMAP P9](ROADMAP.md#phase-9--advanced-ui--post-mvp)).
+
+**Resolve at Phase 9.** If it fails, delete it and record an ADR saying so. Deleting a centrepiece
+that does not work is a success, not a failure — and deciding this *after* months of real event data
+is exactly why it is scheduled late.
+
+---
+
+## Standing assumptions
+
+Not questions, but things the design takes as true and would need revisiting if they change:
+
+| Assumption | If false |
+|---|---|
+| Single user, single machine | Most of the security model simplifies incorrectly; multi-user would need a redesign |
+| Windows 10 only | Path handling, ConPTY, Job Objects and DPAPI are all Windows-specific |
+| The corpus stays in the tens of thousands of chunks | sqlite-vec brute force stops being adequate; switch to LanceDB |
+| Claude Code stays available and affordable | Delegation degrades to the Handoff Packet fallback (already built) |
+| Projects mostly live under `C:\Projects` | Scope configuration grows, but nothing structural changes |
+| D:/E: keep ~190 GB free | Models and index need a new home; C: cannot host them |

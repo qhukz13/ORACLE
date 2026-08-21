@@ -1,0 +1,57 @@
+# --- ORACLE ---
+# Runtime data lives OUTSIDE the repo (see docs/TECH_STACK.md "Data locations").
+# Anything that lands here anyway must not be committed.
+
+# Logs: directory structure is tracked, contents are not.
+logs/**
+!logs/**/
+!logs/**/.gitkeep
+!logs/README.md
+!logs/development/*.md
+
+# Local state / secrets
+.env
+.env.*
+!.env.example
+config/local.*
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+secrets/
+.oracle/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+
+# Node / frontend
+node_modules/
+.vite/
+apps/*/dist/
+*.tsbuildinfo
+
+# Tauri / Rust
+target/
+apps/desktop/src-tauri/gen/
+
+# Models & indexes (multi-GB, never committed)
+models/
+*.gguf
+*.onnx
+
+# OS / editor
+Thumbs.db
+desktop.ini
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
