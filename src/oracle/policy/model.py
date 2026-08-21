@@ -17,6 +17,11 @@ class Capability(StrEnum):
     contract; it cannot request one at runtime."""
 
     FS_READ = "fs.read"
+    #: Writes a path the CONTRACT names. That is what makes an undo plan possible: we
+    #: know in advance which file to back up. A tool whose writes happen inside a
+    #: spawned program (a build writing `dist/`, a test suite writing a fixture) does
+    #: NOT declare this — `proc.spawn` already means "may write inside its scope", and
+    #: claiming fs.write without a named path would promise a backup nobody can take.
     FS_WRITE = "fs.write"
     FS_DELETE = "fs.delete"
     PROC_SPAWN = "proc.spawn"

@@ -180,7 +180,19 @@ class ToolExecutor:
         floor: tuple[str, Tier] | None = None
 
         for name in sorted(contract.programs):
-            pinned[name] = self._engine.resolve_program(name)
+            # A tool may declare every program it MIGHT need — `dev.run_tests` names
+            # four runners and uses one. So an unavailable program is omitted from the
+            # map rather than failing the call: refusing `dev.run_tests` on a Python
+            # project because `cargo` is missing would be absurd. The handler asks for
+            # the one it actually needs and gets a clear refusal if it is not there.
+            #
+            # Nothing is loosened by this. What can be spawned is still exactly what
+            # policy pinned, and the model-chosen case below still refuses outright.
+            try:
+                pinned[name] = self._engine.resolve_program(name)
+            except ProgramRejected as exc:
+                log.info("tool.program_absent", tool=contract.id, program=name, rule=exc.rule)
+                continue
             # The argv is built inside the child, but the VALUES in it came from the
             # model, so the shape rules still apply to them.
             self._engine.check_fixed_program(name, _string_values(args))

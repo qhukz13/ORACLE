@@ -174,6 +174,16 @@ class ToolRegistry:
         if unknown:
             raise ToolRegistryError(f"{c.id}: path_fields not in args model: {sorted(unknown)}")
 
+        # `fs.write` means "writes a path this contract names" (see Capability.FS_WRITE).
+        # Without a path field there is nothing to back up, so the undo plan a T1 write
+        # promises could not exist — which is exactly how a tool ends up running
+        # unprompted with no way back.
+        if (c.capabilities & {Capability.FS_WRITE, Capability.FS_DELETE}) and not c.path_fields:
+            raise ToolRegistryError(
+                f"{c.id}: declares fs.write/fs.delete but names no path field. If the "
+                f"writes happen inside a spawned program, declare proc.spawn instead."
+            )
+
         spawns = bool(c.programs or c.program_field)
         if spawns and Capability.PROC_SPAWN not in c.capabilities:
             raise ToolRegistryError(
