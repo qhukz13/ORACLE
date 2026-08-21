@@ -11,35 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from pydantic import Field
 
 from oracle.logsink import get_logger
 from oracle.policy.model import Capability, Tier
-from oracle.tools.contract import ToolArgs, ToolResult, tool
-
-
-def _pin(program: str) -> str | None:
-    """Resolve a program to an absolute path ONCE, at import.
-
-    docs/SECURITY.md#4b: never rely on PATH at call time. PATH is
-    attacker-influenceable, and on Windows the current directory participates in the
-    search order — a `tasklist.exe` dropped in a project folder would otherwise win.
-    """
-    import shutil
-
-    found = shutil.which(program)
-    if found is None:
-        return None
-    resolved = os.path.realpath(found)
-    system_root = os.environ.get("SystemRoot", r"C:\Windows").lower()
-    # Only trust a system utility that actually lives under the system root.
-    return resolved if resolved.lower().startswith(system_root) else None
-
-
-_TASKLIST = _pin("tasklist")
-
+from oracle.tools.contract import ToolArgs, ToolContext, ToolResult, tool
 
 #: Refuse to slurp something enormous into a small model's context.
 MAX_READ_BYTES = 256 * 1024
@@ -79,8 +57,8 @@ class FsReadResult(ToolResult):
     side_effects="None.",
     path_fields={"path"},
 )
-async def fs_read(*, resolved: dict[str, Any], args: FsReadArgs) -> FsReadResult:
-    real = resolved["path"]
+async def fs_read(*, ctx: ToolContext, args: FsReadArgs) -> FsReadResult:
+    real = ctx.resolved["path"]
     raw = real.read_bytes()[: args.max_bytes]
     # Binary detection before decode: a NUL byte in the first block is the cheap,
     # reliable signal, and decoding garbage into a prompt is worse than refusing.
@@ -139,8 +117,8 @@ _SKIP = frozenset({"node_modules", "target", ".git", "dist", "build", "__pycache
     side_effects="None.",
     path_fields={"path"},
 )
-async def fs_list(*, resolved: dict[str, Any], args: FsListArgs) -> FsListResult:
-    real = resolved["path"]
+async def fs_list(*, ctx: ToolContext, args: FsListArgs) -> FsListResult:
+    real = ctx.resolved["path"]
     entries: list[Entry] = []
     truncated = False
 
@@ -194,8 +172,8 @@ class FsStatResult(ToolResult):
     side_effects="None.",
     path_fields={"path"},
 )
-async def fs_stat(*, resolved: dict[str, Any], args: FsStatArgs) -> FsStatResult:
-    real = resolved["path"]
+async def fs_stat(*, ctx: ToolContext, args: FsStatArgs) -> FsStatResult:
+    real = ctx.resolved["path"]
     if not real.exists():
         return FsStatResult(path=str(real), exists=False, kind="missing", size=0, modified=0.0)
     st = os.lstat(real)
@@ -234,7 +212,7 @@ class SysInfoResult(ToolResult):
     intents={"status", "question"},
     side_effects="None.",
 )
-async def sys_info(*, resolved: dict[str, Any], args: SysInfoArgs) -> SysInfoResult:
+async def sys_info(*, ctx: ToolContext, args: SysInfoArgs) -> SysInfoResult:
     import shutil
 
     ram_total = ram_used = 0.0
@@ -342,22 +320,24 @@ class SysProcessesResult(ToolResult):
     summary="List running processes by name. Command lines are NOT returned.",
     args=SysProcessesArgs,
     result=SysProcessesResult,
-    capabilities={Capability.SYS_INFO},
+    capabilities={Capability.SYS_INFO, Capability.PROC_SPAWN},
     risk=Tier.T0,
     reversible=True,
     intents={"status", "question", "investigate"},
     # Full command lines routinely contain credentials (docs/LOGGING.md#6), so this
     # returns pid and image name only.
     side_effects="None.",
+    programs={"tasklist"},
 )
-async def sys_processes(*, resolved: dict[str, Any], args: SysProcessesArgs) -> SysProcessesResult:
-    if _TASKLIST is None:
-        raise RuntimeError("tasklist.exe was not found at a trusted absolute path")
-
+async def sys_processes(*, ctx: ToolContext, args: SysProcessesArgs) -> SysProcessesResult:
+    # The path was pinned by the PARENT from the program allowlist and handed over. This
+    # process never looks a program up: doing so would put the decision on the wrong
+    # side of the boundary, exactly as resolving a path here would (ADR-0003).
+    #
     # asyncio, not subprocess.run: a blocking call here stalls the whole event loop,
     # including every other client's event stream. Caught by ruff ASYNC221.
     proc = await asyncio.create_subprocess_exec(
-        _TASKLIST,
+        str(ctx.program("tasklist")),
         "/fo",
         "csv",
         "/nh",
@@ -385,4 +365,13 @@ async def sys_processes(*, resolved: dict[str, Any], args: SysProcessesArgs) -> 
     return SysProcessesResult(processes=procs[:MAX_LIST_ENTRIES], total=len(procs))
 
 
-READ_ONLY_TOOLS = [fs_read, fs_list, fs_stat, sys_info, sys_processes]
+#: Tools that touch nothing and spawn nothing. This is what a read-only deployment
+#: gets, and the security suite asserts that none of them holds a writing capability.
+READ_ONLY_TOOLS = [fs_read, fs_list, fs_stat, sys_info]
+
+#: Reads state, but does it by spawning a process. `proc.spawn` is a writing capability
+#: even though `tasklist` changes nothing — under-declaring it to keep the tool in the
+#: read-only bucket would be exactly the silent privilege gap the registry checks for.
+#: The gate refuses `proc.spawn` in lockdown anyway, so offering this in a read-only
+#: build would only advertise something that could never run.
+SPAWNING_READ_TOOLS = [sys_processes]

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict
@@ -37,6 +38,37 @@ class ToolResult(BaseModel):
 
 
 @dataclass(frozen=True)
+class ToolContext:
+    """Everything a handler is allowed to know about its invocation.
+
+    Deliberately a value object rather than four keyword arguments: it is exactly what
+    crosses the process boundary, so the set of things a tool can reach is reviewable in
+    one place. Note what is *not* here — policy, scopes, the audit log, secrets, any
+    route back into the runtime (ADR-0003).
+
+    `resolved` and `programs` are already-canonicalised absolute paths. A handler that
+    joins its own path or looks up its own program has stepped outside the sandbox, and
+    is a review rejection.
+    """
+
+    resolved: dict[str, Path] = field(default_factory=dict)
+    programs: dict[str, Path] = field(default_factory=dict)
+    cwd: Path | None = None
+    dry_run: bool = False
+
+    def path(self, name: str) -> Path:
+        return self.resolved[name]
+
+    def program(self, name: str) -> Path:
+        try:
+            return self.programs[name]
+        except KeyError as exc:  # pragma: no cover - a contract bug, not a runtime one
+            raise RuntimeError(
+                f"{name!r} was not pinned for this invocation; declare it in the contract"
+            ) from exc
+
+
+@dataclass(frozen=True)
 class ToolContract:
     id: str
     summary: str
@@ -58,6 +90,17 @@ class ToolContract:
 
     #: Path-shaped argument names, resolved through the canonicaliser before the gate.
     path_fields: frozenset[str] = field(default_factory=frozenset)
+    #: Allowlisted program names this tool always needs, pinned to absolute paths by
+    #: the parent and handed over in the context. Fixed here, not chosen at call time.
+    programs: frozenset[str] = field(default_factory=frozenset)
+    #: The one argument that names a program, for the gated escape hatch
+    #: (`dev.execute`). Its argv is checked against the subcommand rules; a tool with a
+    #: fixed program is not.
+    program_field: str | None = None
+    #: Never offered to the model. Used for recipes the undo journal executes, which
+    #: must exist in the registry (the child dispatches by id) but must not be
+    #: selectable — a model that could call `git.uncommit` could undo work unasked.
+    hidden: bool = False
 
     def json_schema(self) -> dict[str, Any]:
         return self.args_model.model_json_schema()
@@ -105,12 +148,18 @@ class ToolRegistry:
         if not c.summary:
             raise ToolRegistryError(f"{c.id}: summary is required — the model reads it")
 
-        writes = bool(c.capabilities & _WRITING)
-        if writes and c.risk is Tier.T0:
+        # `proc.spawn` alone does not prove a MUTATION: `git status` spawns and changes
+        # nothing. It is only honest at T0 while the argv is FIXED by the tool — the
+        # moment the model picks the program (`dev.execute`), what the process does
+        # stops being a promise the contract can make.
+        mutates = bool(c.capabilities & _WRITING - {Capability.PROC_SPAWN}) or (
+            c.program_field is not None
+        )
+        if mutates and c.risk is Tier.T0:
             raise ToolRegistryError(
                 f"{c.id}: declares a writing capability but risk T0. T0 means no side effect."
             )
-        if writes and c.reversible and not c.undo:
+        if mutates and c.reversible and not c.undo:
             raise ToolRegistryError(f"{c.id}: reversible=True requires an `undo` recipe")
         if c.risk >= Tier.T3 and not c.dry_run:
             raise ToolRegistryError(
@@ -125,6 +174,20 @@ class ToolRegistry:
         if unknown:
             raise ToolRegistryError(f"{c.id}: path_fields not in args model: {sorted(unknown)}")
 
+        spawns = bool(c.programs or c.program_field)
+        if spawns and Capability.PROC_SPAWN not in c.capabilities:
+            raise ToolRegistryError(
+                f"{c.id}: names a program but does not declare proc.spawn. The capability "
+                f"is what the gate reads; a mismatch here is a silent privilege gap."
+            )
+        if Capability.PROC_SPAWN in c.capabilities and not spawns:
+            raise ToolRegistryError(
+                f"{c.id}: declares proc.spawn but names no program. Every spawned "
+                f"program must come from the allowlist (docs/SECURITY.md#4b)."
+            )
+        if c.program_field is not None and c.program_field not in c.args_model.model_fields:
+            raise ToolRegistryError(f"{c.id}: program_field {c.program_field!r} not in args model")
+
     def get(self, tool_id: str) -> ToolContract:
         try:
             return self._tools[tool_id]
@@ -137,9 +200,13 @@ class ToolRegistry:
     def all(self) -> list[ToolContract]:
         return sorted(self._tools.values(), key=lambda c: c.id)
 
+    def offerable(self) -> list[ToolContract]:
+        """Everything the model may ever see. Hidden tools are not part of it."""
+        return [c for c in self.all() if not c.hidden]
+
     def for_intent(self, intent: str) -> list[ToolContract]:
         """Pre-filter for the context budget. Load-bearing, not hygiene."""
-        return [c for c in self.all() if not c.intents or intent in c.intents]
+        return [c for c in self.offerable() if not c.intents or intent in c.intents]
 
     def __len__(self) -> int:
         return len(self._tools)
@@ -161,6 +228,9 @@ def tool(
     intents: set[str] | frozenset[str] = frozenset(),
     side_effects: str = "",
     path_fields: set[str] | frozenset[str] = frozenset(),
+    programs: set[str] | frozenset[str] = frozenset(),
+    program_field: str | None = None,
+    hidden: bool = False,
 ) -> Callable[[Callable[..., Awaitable[ToolResult]]], ToolContract]:
     """Declare a tool. Returns the contract, so the module-level name *is* the contract."""
 
@@ -181,6 +251,9 @@ def tool(
             side_effects=side_effects,
             handler=fn,
             path_fields=frozenset(path_fields),
+            programs=frozenset(programs),
+            program_field=program_field,
+            hidden=hidden,
         )
 
     return wrap

@@ -15,14 +15,14 @@ import difflib
 import os
 import shutil
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 from pydantic import Field
 
 from oracle.config import get_settings
 from oracle.logsink import get_logger
 from oracle.policy.model import Capability, Tier
-from oracle.tools.contract import ToolArgs, ToolResult, tool
+from oracle.tools.contract import ToolArgs, ToolContext, ToolResult, tool
 from oracle.tools.undo import TrashStore, UndoKind, UndoPlan
 
 log = get_logger(__name__)
@@ -74,8 +74,8 @@ class FsWriteResult(ToolResult):
     side_effects="Replaces the file's contents. The previous version goes to the trash.",
     path_fields={"path"},
 )
-async def fs_write(*, resolved: dict[str, Any], args: FsWriteArgs) -> FsWriteResult:
-    real: Path = resolved["path"]
+async def fs_write(*, ctx: ToolContext, args: FsWriteArgs) -> FsWriteResult:
+    real: Path = ctx.resolved["path"]
     _guard_size(args.content)
 
     existed = real.exists()
@@ -132,8 +132,8 @@ class FsPatchResult(ToolResult):
     side_effects="Edits the file in place. The previous version goes to the trash.",
     path_fields={"path"},
 )
-async def fs_patch(*, resolved: dict[str, Any], args: FsPatchArgs) -> FsPatchResult:
-    real: Path = resolved["path"]
+async def fs_patch(*, ctx: ToolContext, args: FsPatchArgs) -> FsPatchResult:
+    real: Path = ctx.resolved["path"]
     if not real.exists():
         raise ValueError(f"{real} does not exist")
 
@@ -207,9 +207,9 @@ class FsMoveResult(ToolResult):
     # move write anywhere on disk.
     path_fields={"path", "destination"},
 )
-async def fs_move(*, resolved: dict[str, Any], args: FsMoveArgs) -> FsMoveResult:
-    src: Path = resolved["path"]
-    dst: Path = resolved["destination"]
+async def fs_move(*, ctx: ToolContext, args: FsMoveArgs) -> FsMoveResult:
+    src: Path = ctx.resolved["path"]
+    dst: Path = ctx.resolved["destination"]
     if not src.exists():
         raise ValueError(f"{src} does not exist")
     if dst.exists():
@@ -257,8 +257,8 @@ class FsDeleteResult(ToolResult):
     side_effects="Moves the target into ORACLE's trash. Recoverable until the trash is emptied.",
     path_fields={"path"},
 )
-async def fs_delete(*, resolved: dict[str, Any], args: FsDeleteArgs) -> FsDeleteResult:
-    real: Path = resolved["path"]
+async def fs_delete(*, ctx: ToolContext, args: FsDeleteArgs) -> FsDeleteResult:
+    real: Path = ctx.resolved["path"]
     if not real.exists():
         raise ValueError(f"{real} does not exist")
 

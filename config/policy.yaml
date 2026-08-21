@@ -43,6 +43,65 @@ scopes:
     - "**/*.pem"
     - "**/*.pfx"
 
+# Programs ORACLE may spawn at all (docs/SECURITY.md#4b).
+#
+# Each name is pinned to an ABSOLUTE PATH once, when this file is loaded. PATH is never
+# consulted at call time: it is attacker-influenceable, and on Windows the current
+# directory participates in the search order, so a `git.exe` dropped into a project
+# folder would otherwise win.
+#
+# `subcommands` is consulted only for `dev.execute`, where the model chooses the argv.
+# An intent-shaped tool (`git.commit`) builds its own argv and is a promise by
+# construction — that is the entire point of TOOLS.md rule 1. Both paths still get the
+# argument-shape checks (NUL bytes, length, and the batch-file rule below).
+#
+# A subcommand nobody wrote down is DENIED. There is no implicit allow.
+programs:
+  git:
+    subcommands:
+      allow:   [status, diff, log, add, branch, stash, show, rev-parse, worktree]
+      confirm: [commit, checkout, push, pull, fetch, merge, rebase, restore]
+      # Not overridable from the UI. Each of these destroys work that cannot be
+      # recovered from the trash, or rewrites published history.
+      deny:
+        - "push --force"
+        - "push -f"
+        - "push --force-with-lease"
+        - filter-branch
+        - "clean -x"
+        - "reset --hard"
+  # npm and uv are batch/shim targets on Windows; arguments containing characters
+  # cmd.exe would reinterpret are refused outright rather than escaped, because there
+  # is no correct escaping for a batch target (CVE-2024-3566).
+  npm:
+    subcommands:
+      allow:   [test, run, ci, ls, exec]
+      confirm: [install, update, build]
+      deny:    [publish, login, adduser, token]
+  uv:
+    subcommands:
+      allow:   [run, tree, version]
+      confirm: [sync, add, lock]
+      deny:    [publish, build]
+  cargo:
+    subcommands:
+      allow:   [test, build, check, clippy, fmt, tree, metadata]
+      confirm: [run, update]
+      deny:    [publish, login, install]
+  python:
+    # No subcommand grammar; the argv is matched as a whole instead.
+    allow_args_matching:
+      - "-m pytest*"
+      - "-m ruff*"
+      - "-m mypy*"
+      - "-m venv*"
+      - "-V"
+  tasklist:
+    # Declared with an absolute path so a `tasklist.exe` earlier on PATH can never be
+    # the one we run. If this path is wrong on some machine the tool refuses loudly,
+    # which is the correct failure.
+    path: "C:/Windows/System32/tasklist.exe"
+
 tools:
   # ---------------------------------------------------------------- Phase 2: read-only
   oracle.status:      { tier: T0 }

@@ -30,6 +30,10 @@ class Invocation(BaseModel):
     #: Absolute, canonicalised paths. The child never resolves a path itself; doing so
     #: would put the sandbox decision on the wrong side of the boundary.
     resolved: dict[str, str] = Field(default_factory=dict)
+    #: Absolute paths of the allowlisted programs this call may spawn, pinned by the
+    #: parent. The child never consults `PATH` and never looks up a program by name —
+    #: same reason as `resolved` (docs/SECURITY.md#4b).
+    programs: dict[str, str] = Field(default_factory=dict)
     cwd: str | None = None
     timeout_s: int = 30
     dry_run: bool = False

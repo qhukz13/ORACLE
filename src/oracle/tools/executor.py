@@ -25,8 +25,9 @@ from oracle.policy.audit import AuditLog, digest_args
 from oracle.policy.engine import PolicyEngine
 from oracle.policy.model import Capability, Decision, PolicyVerdict, Provenance, Tier
 from oracle.policy.paths import PathRejected, ResolvedPath
+from oracle.policy.programs import ProgramRejected
 from oracle.toolhost import ToolHost, ToolHostUnavailable
-from oracle.tools.contract import ToolRegistry, ToolResult
+from oracle.tools.contract import ToolContext, ToolContract, ToolRegistry, ToolResult
 from oracle.tools.undo import UndoJournal, UndoKind, load_undo_plan
 
 log = get_logger(__name__)
@@ -106,6 +107,24 @@ class ToolOutcome:
     undo_id: str | None = None
 
 
+def _string_values(args: Any) -> list[str]:
+    """Every model-supplied string that could end up inside an argv.
+
+    Used to apply the program allowlist's argument-shape rules to intent-shaped tools,
+    whose final argv is assembled on the far side of the boundary. The parent cannot
+    see `git commit -m <message>`, but it can see `<message>` — which is the part the
+    model chose and therefore the only part worth inspecting.
+    """
+    out: list[str] = []
+    for name in type(args).model_fields:
+        value = getattr(args, name, None)
+        if isinstance(value, str):
+            out.append(value)
+        elif isinstance(value, list):
+            out.extend(v for v in value if isinstance(v, str))
+    return out
+
+
 def _digest(raw_args: dict[str, Any], resolved: dict[str, ResolvedPath]) -> str:
     r"""The value an approval binds to.
 
@@ -146,6 +165,34 @@ class ToolExecutor:
     def grant(self, approval: Approval) -> None:
         self._approvals[approval.approval_id] = approval
 
+    # ------------------------------------------------------------------ programs
+
+    def _pin_programs(
+        self, contract: ToolContract, args: Any
+    ) -> tuple[dict[str, Path], tuple[str, Tier] | None]:
+        """Resolve every program this call may spawn, on the parent side.
+
+        Returns the pinned paths and, for the gated escape hatch, the tier floor its
+        argv earned. Raises `ProgramRejected` — which the caller turns into a denial
+        naming the rule, because "refused" without "by what" is useless.
+        """
+        pinned: dict[str, Path] = {}
+        floor: tuple[str, Tier] | None = None
+
+        for name in sorted(contract.programs):
+            pinned[name] = self._engine.resolve_program(name)
+            # The argv is built inside the child, but the VALUES in it came from the
+            # model, so the shape rules still apply to them.
+            self._engine.check_fixed_program(name, _string_values(args))
+
+        if contract.program_field is not None:
+            chosen = str(getattr(args, contract.program_field))
+            argv = [str(a) for a in (getattr(args, "args", None) or [])]
+            floor = (chosen, self._engine.check_program(chosen, argv))
+            pinned[chosen] = self._engine.resolve_program(chosen)
+
+        return pinned, floor
+
     def preview(
         self, tool_id: str, raw_args: dict[str, Any], *, cwd: Path | None = None
     ) -> tuple[PolicyVerdict, str]:
@@ -161,11 +208,13 @@ class ToolExecutor:
             f: self._engine.resolve_path(str(getattr(args, f)), cwd=cwd)
             for f in contract.path_fields
         }
+        _, floor = self._pin_programs(contract, args)
         verdict = self._engine.evaluate(
             tool_id,
             capabilities=contract.capabilities,
             paths=list(resolved.values()),
             declared_tier=contract.risk,
+            program_floor=floor,
         )
         return verdict, _digest(raw_args, resolved)
 
@@ -219,6 +268,21 @@ class ToolExecutor:
                 detail=exc.detail,
             )
 
+        # 3b. pin every program this call may spawn, on THIS side of the boundary. A
+        #     program the allowlist does not name is refused here, before the gate ever
+        #     sees a tier.
+        try:
+            pinned, program_floor = self._pin_programs(contract, args)
+        except ProgramRejected as exc:
+            self._audit_denial(tool_id, raw_args, rule=exc.rule, reason=exc.detail)
+            return self._fail(
+                tool_id,
+                ToolErrorKind.DENIED,
+                f"{exc.detail} (rule: {exc.rule})",
+                started,
+                detail=exc.rule,
+            )
+
         # 4. THE GATE.
         verdict = self._engine.evaluate(
             tool_id,
@@ -226,6 +290,7 @@ class ToolExecutor:
             paths=list(resolved.values()),
             provenances=provenances,
             declared_tier=contract.risk,
+            program_floor=program_floor,
         )
 
         args_digest = _digest(raw_args, resolved)
@@ -307,6 +372,7 @@ class ToolExecutor:
                     tool_id,
                     raw_args,
                     resolved={k: str(v.real) for k, v in resolved.items()},
+                    programs={k: str(v) for k, v in pinned.items()},
                     timeout_s=contract.timeout_s,
                     cwd=cwd,
                     dry_run=dry_run,
@@ -322,9 +388,14 @@ class ToolExecutor:
                     )
                 result = contract.result_model.model_validate(response.result or {})
             else:
+                ctx = ToolContext(
+                    resolved={k: v.real for k, v in resolved.items()},
+                    programs=pinned,
+                    cwd=cwd,
+                    dry_run=dry_run,
+                )
                 result = await asyncio.wait_for(
-                    contract.handler(resolved={k: v.real for k, v in resolved.items()}, args=args),
-                    timeout=contract.timeout_s,
+                    contract.handler(ctx=ctx, args=args), timeout=contract.timeout_s
                 )
         except ToolHostUnavailable as exc:
             return self._fail(

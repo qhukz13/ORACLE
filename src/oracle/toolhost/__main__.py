@@ -52,12 +52,17 @@ async def _handle(inv: Invocation, registry: Any) -> Response:
 
     from pathlib import Path
 
-    resolved = {k: Path(v) for k, v in inv.resolved.items()}
+    from oracle.tools.contract import ToolContext
+
+    ctx = ToolContext(
+        resolved={k: Path(v) for k, v in inv.resolved.items()},
+        programs={k: Path(v) for k, v in inv.programs.items()},
+        cwd=Path(inv.cwd) if inv.cwd else None,
+        dry_run=inv.dry_run,
+    )
 
     try:
-        result = await asyncio.wait_for(
-            contract.handler(resolved=resolved, args=args), timeout=inv.timeout_s
-        )
+        result = await asyncio.wait_for(contract.handler(ctx=ctx, args=args), timeout=inv.timeout_s)
     except TimeoutError:
         # Same wording as the parent-side timeout on purpose. Which side noticed the
         # deadline is an implementation detail; the uncertainty for the caller is

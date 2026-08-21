@@ -31,6 +31,7 @@ from oracle.policy.model import (
     Tier,
 )
 from oracle.policy.paths import PathRejected, PathResolver, ResolvedPath, Scope
+from oracle.policy.programs import EMPTY_ALLOWLIST, ProgramAllowlist, ProgramRejected
 
 log = get_logger(__name__)
 
@@ -51,6 +52,9 @@ class Policy:
     scopes: list[Scope]
     deny_always: list[str]
     tools: dict[str, ToolRule]
+    #: Which programs may be spawned at all, pinned to absolute paths at load
+    #: (docs/SECURITY.md#4b). Empty means nothing may be spawned.
+    programs: ProgramAllowlist = EMPTY_ALLOWLIST
     #: True when we could not load real policy and are running locked down.
     read_only: bool = False
     source: str = "config/policy.yaml"
@@ -116,7 +120,9 @@ def _parse(raw: dict[str, Any], source: str) -> Policy:
     if not scopes:
         raise PolicyError("policy declares no scopes; refusing to run wide open")
 
-    return Policy(scopes=scopes, deny_always=deny, tools=tools, source=source)
+    programs = ProgramAllowlist.parse(raw.get("programs"))
+
+    return Policy(scopes=scopes, deny_always=deny, tools=tools, programs=programs, source=source)
 
 
 class PolicyEngine:
@@ -145,6 +151,26 @@ class PolicyEngine:
     def resolve_path(self, raw: str, *, cwd: Path | None = None) -> ResolvedPath:
         return self.resolver.resolve(raw, cwd=cwd)
 
+    # --------------------------------------------------------------- programs
+
+    def resolve_program(self, name: str) -> Path:
+        """The pinned absolute path for an allowlisted program.
+
+        Resolution happens on the PARENT side and the absolute path is handed across
+        the boundary, for the same reason paths are: a child that could resolve a
+        program itself would put the decision on the wrong side of the pipe
+        (ADR-0003).
+        """
+        return self.policy.programs.path_of(name)
+
+    def check_program(self, name: str, args: list[str]) -> Tier:
+        """Validate a model-supplied argv; returns the tier floor it earns."""
+        return self.policy.programs.check(name, args)
+
+    def check_fixed_program(self, name: str, args: list[str]) -> None:
+        """Validate an argv ORACLE built itself. Shape only, no subcommand grammar."""
+        self.policy.programs.check_fixed(name, args)
+
     # ------------------------------------------------------------------ evaluate
 
     def evaluate(
@@ -155,6 +181,7 @@ class PolicyEngine:
         paths: list[ResolvedPath] | None = None,
         provenances: frozenset[Provenance] = frozenset(),
         declared_tier: Tier | None = None,
+        program_floor: tuple[str, Tier] | None = None,
     ) -> PolicyVerdict:
         """The gate. Returns a verdict; never performs anything."""
         paths = paths or []
@@ -234,6 +261,14 @@ class PolicyEngine:
                 base = override
                 rule_name = f"tools.{tool_id}.scope_tiers.{p.scope.name}"
 
+        # A program allowlist entry can only RAISE the tier: `dev.execute git push`
+        # must not run at the tier `dev.execute` alone would have earned.
+        if program_floor is not None:
+            prog_name, prog_tier = program_floor
+            if prog_tier > base:
+                base = prog_tier
+                rule_name = f"programs.{prog_name}"
+
         # Taint escalation: a plan built from untrusted content does not get to
         # auto-write. T0 is unaffected — reading more is not the risk.
         tainted = bool(provenances & UNTRUSTED)
@@ -262,6 +297,7 @@ __all__ = [
     "PathRejected",
     "Policy",
     "PolicyEngine",
+    "ProgramRejected",
     "ToolRule",
     "load_policy",
 ]
