@@ -17,16 +17,21 @@ from oracle.tools.executor import (
 )
 
 
-def build_registry() -> ToolRegistry:
-    """The Phase 2 tool set: read-only only.
+def build_registry(*, writes: bool = True) -> ToolRegistry:
+    """Build the tool registry.
 
-    Write tools arrive in Phase 3, once the gate proven here has shipped.
+    `writes=False` yields the Phase 2 read-only set, which the security suite uses to
+    assert that a read-only deployment really cannot mutate anything.
     """
+    from oracle.tools.filesystem import WRITE_TOOLS
     from oracle.tools.readonly import READ_ONLY_TOOLS
 
     registry = ToolRegistry()
     for contract in READ_ONLY_TOOLS:
         registry.register(contract)
+    if writes:
+        for contract in WRITE_TOOLS:
+            registry.register(contract)
     return registry
 
 

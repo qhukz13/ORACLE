@@ -355,8 +355,9 @@ class TestRegistryValidation:
         with pytest.raises(ToolRegistryError, match="path_fields"):
             ToolRegistry().register(bad)
 
-    def test_phase2_registry_is_read_only(self) -> None:
-        """The phase's central claim, asserted rather than trusted."""
+    def test_read_only_build_really_cannot_mutate(self) -> None:
+        """`build_registry(writes=False)` is what a read-only deployment gets. If a
+        write tool ever leaks into it, the claim is silently false."""
         from oracle.policy.model import Capability
 
         writing = {
@@ -368,9 +369,26 @@ class TestRegistryValidation:
             Capability.INPUT_SYNTH,
             Capability.SYS_SETTINGS,
         }
-        for contract in build_registry().all():
-            assert not (contract.capabilities & writing), f"{contract.id} can write in Phase 2"
-            assert contract.risk <= Tier.T1, f"{contract.id} is above T1 in Phase 2"
+        for contract in build_registry(writes=False).all():
+            assert not (contract.capabilities & writing), f"{contract.id} can mutate"
+            assert contract.risk <= Tier.T1, f"{contract.id} is above T1"
+
+    def test_every_write_tool_is_declared_reversible_or_gated(self) -> None:
+        """ADR-0005's bargain: a tool runs without prompting BECAUSE it can be undone.
+        A write tool that is neither reversible nor above T1 would be getting the
+        convenience without paying for it."""
+        from oracle.policy.model import Capability
+
+        mutating = {Capability.FS_WRITE, Capability.FS_DELETE, Capability.GIT_WRITE}
+        for c in build_registry().all():
+            if not (c.capabilities & mutating):
+                continue
+            if c.risk <= Tier.T1:
+                assert c.reversible and c.undo, (
+                    f"{c.id} mutates at {c.risk.label} but declares no undo"
+                )
+            else:
+                assert c.dry_run, f"{c.id} is {c.risk.label} but cannot preview its effect"
 
     def test_every_registered_tool_has_a_policy_rule(self) -> None:
         """A tool with no rule is denied by default — correct, but silent. Catch the

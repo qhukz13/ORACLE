@@ -51,6 +51,16 @@ class Settings(BaseSettings):
         return self.data_dir / "oracle.db"
 
     @property
+    def trash_dir(self) -> Path:
+        # Previous versions live here. `fs.delete` is a move into this directory, never
+        # an unlink (docs/TOOLS.md).
+        return self.data_dir / "trash"
+
+    @property
+    def undo_journal(self) -> Path:
+        return self.data_dir / "undo.jsonl"
+
+    @property
     def audit_path(self) -> Path:
         # Append-only, hash-chained, never rotated away (docs/LOGGING.md).
         return self.log_dir / "audit" / "audit.jsonl"

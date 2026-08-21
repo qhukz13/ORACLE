@@ -69,19 +69,19 @@ tools:
   # A tool with no rule here is denied by default, so declaring them early costs
   # nothing and documents intent.
   fs.write:
-    tier: T1
+    tier: T1                # reversible + journalled, so it runs without prompting
     scopes: [projects, notes, scratch]
-    scope_tiers:
-      scratch: T1
-      projects: T1
-      notes: T1
 
   fs.patch:
     tier: T1
     scopes: [projects, notes, scratch]
 
+  fs.move:
+    tier: T1
+    scopes: [projects, notes, scratch]
+
   fs.delete:
-    tier: T3                # goes to the trash journal; never an unrecoverable delete
+    tier: T3                # moves to the trash; never an unrecoverable delete
     scopes: [projects, notes, scratch]
 
   git.status:  { tier: T0, scopes: [projects] }

@@ -4,7 +4,7 @@
 > picks the project up next.
 
 **Task:** P3-T1 — Process isolation, then PC & dev control tools
-**Status:** `IN PROGRESS` — toolhost done and proven; the tools themselves are next
+**Status:** `IN PROGRESS` — toolhost + write tools done; git/dev/term next
 **Date:** 2026-08-21
 
 ---
@@ -101,11 +101,36 @@ tests/security/test_toolhost.py   grandchild kill · kill-on-close · no-secrets
                                   child-never-resolves-paths · 100-call soak, zero orphans
 ```
 
+## Write tools and undo — done
+
+`fs.write`, `fs.patch`, `fs.move`, `fs.delete`, the trash, and the undo journal
+([write-up](../logs/development/2026-08-21-write-tools-and-undo.md)). **138 security tests** (was 116).
+
+The undo machinery is what *buys* the T1 tier: a write runs without prompting because it can be
+reversed. Split across the process boundary — the child backs up and reports an `UndoPlan`, the parent
+journals it, since the child holds nothing durable. Ordering is backup → mutate → journal → report,
+because every other order loses something on a crash.
+
+Verified live:
+
+```
+write (T1)                 -> allow, journalled, undoable
+undo                       -> restored from trash
+patch, ambiguous match     -> refused, file unchanged
+delete without approval    -> approval_required (confirm_strong)
+delete with bound approval -> trashed, then undone
+same approval, other file  -> "arguments changed since approval", file survived
+```
+
+Two design points worth keeping: `fs.patch` treats an ambiguous match as an **error**, never picking
+one silently; and `fs.move` resolves **both** paths, since resolving only the source would let a move
+write anywhere on disk.
+
+A test failure exposed a real gap rather than just a bad assertion: nothing could compute the argument
+digest an approval binds to. Added `ToolExecutor.preview()` → `(verdict, digest)`, which is exactly
+what the Confirmation Center needs in Phase 4.
+
 ## Still to do in this task
-
-The toolhost was the prerequisite; the tools it exists to isolate are not built yet:
-
-- **write tools** — `fs.write`, `fs.patch`, `fs.move`, plus the undo journal and trash;
 - **`git.*`** — status/diff/log/add/commit/branch/stash, and `git.push` at T2;
 - **`dev.*`** — `run_tests` with structured results, `build`, `lint`, allowlisted `execute`;
 - **`term.*`** — blocked on [OQ-09](OPEN_QUESTIONS.md#oq-09) (`pywinpty`, ConPTY resize/encoding);
@@ -116,8 +141,9 @@ The toolhost was the prerequisite; the tools it exists to isolate are not built 
 
 ## Recommended next action
 
-Continue [P3-T1](current_task.md) with the **undo journal and `fs.write`** — the smallest write tool,
-which forces the reversibility machinery into existence before anything harder needs it.
+Continue [P3-T1](current_task.md) with **`git.*`**. It is the first tool family that spawns a real
+process, so it exercises the toolhost properly, and `git.commit` has a genuine undo
+(`reset --soft HEAD~1`) that fits the journal already built.
 
 ```
 uv run python scripts/check.py        # gate, incl. 116 security tests

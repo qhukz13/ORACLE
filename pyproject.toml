@@ -48,12 +48,22 @@ ignore = ["S101"]
 "tests/*" = ["S105", "S106", "RUF001"]
 # The security suite must build REAL junctions with mklink; a mocked reparse point
 # would encode the very assumption the suite exists to disprove.
-"tests/security/*" = ["S105", "S106", "RUF001", "S603", "S607", "ASYNC221"]
+"tests/security/*" = ["S105", "S106", "RUF001", "S603", "S607", "ASYNC221", "ASYNC240"]
 # Few-shot examples are literal prompt content, not code. Wrapping them would change
 # what the model sees, and RUF001 flags Cyrillic as "ambiguous" in what is deliberately
 # a bilingual prompt.
 "src/oracle/router/intent.py" = ["E501", "RUF001"]
 "scripts/*" = ["E501"]
+# ASYNC240: tool handlers do blocking file I/O on purpose. They execute inside the
+# toolhost child, which handles exactly one invocation at a time and has no event loop
+# to starve (ADR-0003). Making them async-file-aware would add noise to every handler
+# to protect a loop that has nothing else to run.
+#
+# NOTE: this reasoning holds only for the toolhost path. `ToolExecutor(host=None)` runs
+# handlers in-process and IS exposed to this; it exists for tests and as a degraded
+# fallback, and is documented as such in executor.py.
+"src/oracle/tools/readonly.py" = ["ASYNC240"]
+"src/oracle/tools/filesystem.py" = ["ASYNC240"]
 
 [tool.mypy]
 python_version = "3.12"

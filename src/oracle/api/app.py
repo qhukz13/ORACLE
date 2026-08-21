@@ -32,6 +32,7 @@ from oracle.router.pipeline import TurnPipeline
 from oracle.storage.db import connect, migrate
 from oracle.toolhost import ToolHost
 from oracle.tools import ToolExecutor, ToolRegistry, build_registry
+from oracle.tools.undo import UndoJournal
 
 log = get_logger(__name__)
 
@@ -49,6 +50,7 @@ class AppState:
     registry: ToolRegistry
     executor: ToolExecutor
     host: ToolHost
+    undo: UndoJournal
     schema_version: int = 0
     projects: list[str] = field(default_factory=list)
     tasks: set[asyncio.Task[None]] = field(default_factory=set)
@@ -91,7 +93,8 @@ async def _build_state(settings: Settings) -> AppState:
     # otherwise pay on their first tool call. A failure here must not stop the agent
     # from starting and explaining itself, so it is fire-and-forget.
     host = ToolHost(cwd=settings.projects_root)
-    executor = ToolExecutor(registry, engine, audit, host=host)
+    undo = UndoJournal(settings.undo_journal)
+    executor = ToolExecutor(registry, engine, audit, host=host, undo=undo)
     log.info("tools.registered", count=len(registry), tools=[c.id for c in registry.all()])
 
     provider: OllamaProvider | None = None
@@ -123,6 +126,7 @@ async def _build_state(settings: Settings) -> AppState:
         registry=registry,
         executor=executor,
         host=host,
+        undo=undo,
         schema_version=version,
         projects=projects,
     )
@@ -219,6 +223,7 @@ def _register_routes(app: FastAPI) -> None:
             ],
             "audit": {"seq": st.audit.seq, "path": str(st.audit.path)},
             "toolhost": {"running": st.host.running, **st.host.stats.snapshot()},
+            "undo": {"available": len(st.undo.latest(50))},
         }
 
     @app.get("/api/v1/sessions")

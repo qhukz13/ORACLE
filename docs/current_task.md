@@ -10,7 +10,7 @@
 **P3-T1 — Process isolation, then PC & dev control tools**
 
 **Phase:** [3 — PC & dev control tools](ROADMAP.md#phase-3--pc--dev-control-tools--mvp) · **Scope:** MVP
-**Status:** `IN PROGRESS` — requirements 1–2 done · **Set:** 2026-08-21
+**Status:** `IN PROGRESS` — requirements 1–4 done · **Set:** 2026-08-21
 **Previous task:** P2-T1 policy gate — `MOSTLY DONE`, see [current_report.md](current_report.md)
 
 ---
@@ -57,8 +57,10 @@ Established and not to be re-derived:
    child, its child and its **grandchild**. Boundary cost p50 27.9 ms. Pre-warmed at boot.
 2. ~~**Supervision**~~ **DONE** — restart on crash, full reaping, and **no retry after a timeout**
    (the side effect may already have happened).
-3. **Undo journal + trash.** `fs.write` backs up first; `fs.delete` moves to trash, never unlinks.
-4. `fs.write`, `fs.patch`, `fs.move`.
+3. ~~**Undo journal + trash.**~~ **DONE 2026-08-21** — child backs up and reports an `UndoPlan`,
+   parent journals it ([write-up](../logs/development/2026-08-21-write-tools-and-undo.md)).
+4. ~~`fs.write`, `fs.patch`, `fs.move`~~ **DONE**, plus `fs.delete` (T3, moves to trash).
+   Also added `ToolExecutor.preview()` → `(verdict, digest)`, which the Confirmation Center needs.
 5. `git.*`: status, diff, log, add, commit (undo `reset --soft HEAD~1`), branch, stash, push (T2).
 6. `dev.run_tests` with **structured** results (pytest/vitest/jest/cargo autodetect), `dev.build`,
    `dev.lint`, `dev.execute` (allowlisted program + argv).
@@ -82,6 +84,8 @@ Established and not to be re-derived:
 - [x] Killing the toolhost mid-call leaves the runtime healthy; the step is marked `failed`.
 - [x] HALT terminates a real process tree **including grandchildren** — verified live.
 - [x] A soak of 100 tool calls leaves **zero** orphaned processes.
+- [x] A write runs at T1 without prompting and is undoable — verified live.
+- [x] `fs.delete` refuses without approval, and an approval cannot be reused for another file.
 - [ ] "commit my changes in Asterim with message X" works end to end and is undoable.
 - [ ] "run the Asterim tests" returns structured pass/fail counts, not scraped text.
 - [ ] `git.push` prompts, and approving executes **exactly** the previewed argv.

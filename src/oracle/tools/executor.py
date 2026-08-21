@@ -27,6 +27,7 @@ from oracle.policy.model import Capability, Decision, PolicyVerdict, Provenance,
 from oracle.policy.paths import PathRejected, ResolvedPath
 from oracle.toolhost import ToolHost, ToolHostUnavailable
 from oracle.tools.contract import ToolRegistry, ToolResult
+from oracle.tools.undo import UndoJournal, UndoKind, load_undo_plan
 
 log = get_logger(__name__)
 
@@ -101,6 +102,19 @@ class ToolOutcome:
     verdict: PolicyVerdict
     duration_ms: int
     error: ToolError | None = None
+    #: Set when the mutation was journalled, so the caller can offer "undo that".
+    undo_id: str | None = None
+
+
+def _digest(raw_args: dict[str, Any], resolved: dict[str, ResolvedPath]) -> str:
+    r"""The value an approval binds to.
+
+    Computed from the RESOLVED arguments, not the raw ones: approving `..\..\a.txt` and
+    approving the absolute path it resolves to must be the same decision, and two
+    spellings of one path must not produce two different approvals.
+    """
+    merged: dict[str, Any] = {**raw_args, **{k: str(v.real) for k, v in resolved.items()}}
+    return digest_args({k: str(v) for k, v in merged.items()})
 
 
 class ToolExecutor:
@@ -112,18 +126,48 @@ class ToolExecutor:
         *,
         approvals: dict[str, Approval] | None = None,
         host: ToolHost | None = None,
+        undo: UndoJournal | None = None,
     ) -> None:
         self._registry = registry
         self._engine = engine
         self._audit = audit
         self._approvals = approvals if approvals is not None else {}
         #: When set, execution crosses a process boundary (ADR-0003). Without it the
-        #: handler runs in-process — acceptable only for read-only tools, and never for
-        #: anything that spawns a process.
+        #: handler runs IN-PROCESS, which is acceptable only for tests and as a degraded
+        #: fallback: handlers do blocking file I/O (correct inside the single-invocation
+        #: child, a stalled event loop here) and nothing that spawns a process may ever
+        #: take this path.
         self._host = host
+        #: Records how to reverse each T1 mutation. Lives on the PARENT side: the child
+        #: performs the backup and reports it, but must not hold the record of what it
+        #: did (ADR-0003).
+        self._undo = undo
 
     def grant(self, approval: Approval) -> None:
         self._approvals[approval.approval_id] = approval
+
+    def preview(
+        self, tool_id: str, raw_args: dict[str, Any], *, cwd: Path | None = None
+    ) -> tuple[PolicyVerdict, str]:
+        """What WOULD happen, and the digest an approval must bind to.
+
+        This is what the Confirmation Center calls to render a card: it needs the
+        verdict to know whether to ask, and the digest so the approval it issues cannot
+        be reused for different arguments. It performs nothing.
+        """
+        contract = self._registry.get(tool_id)
+        args = contract.args_model.model_validate(raw_args)
+        resolved = {
+            f: self._engine.resolve_path(str(getattr(args, f)), cwd=cwd)
+            for f in contract.path_fields
+        }
+        verdict = self._engine.evaluate(
+            tool_id,
+            capabilities=contract.capabilities,
+            paths=list(resolved.values()),
+            declared_tier=contract.risk,
+        )
+        return verdict, _digest(raw_args, resolved)
 
     # ------------------------------------------------------------------ execute
 
@@ -184,9 +228,7 @@ class ToolExecutor:
             declared_tier=contract.risk,
         )
 
-        args_digest = digest_args(
-            {k: str(v) for k, v in {**raw_args, **{k: str(v) for k, v in resolved.items()}}.items()}
-        )
+        args_digest = _digest(raw_args, resolved)
 
         if verdict.decision is Decision.DENY:
             self._audit_denial(tool_id, raw_args, rule=verdict.rule, reason=verdict.reason)
@@ -316,6 +358,14 @@ class ToolExecutor:
                 detail=repr(exc)[:600],
             )
 
+        # Journal the undo BEFORE reporting success. If we crashed between the mutation
+        # and the record, the user would have a changed file and no way back.
+        undo_id: str | None = None
+        if self._undo is not None:
+            plan = load_undo_plan(result)
+            if plan is not None and plan.kind is not UndoKind.NONE:
+                undo_id = self._undo.record(tool_id, plan, trace_id=trace_id_var.get()).id
+
         duration = int((time.perf_counter() - started) * 1000)
         self._audit.append(
             actor="agent",
@@ -329,9 +379,15 @@ class ToolExecutor:
             duration_ms=duration,
             trace_id=trace_id_var.get(),
             dry_run=dry_run,
+            undo_id=undo_id,
         )
         return ToolOutcome(
-            tool=tool_id, ok=True, result=result, verdict=verdict, duration_ms=duration
+            tool=tool_id,
+            ok=True,
+            result=result,
+            verdict=verdict,
+            duration_ms=duration,
+            undo_id=undo_id,
         )
 
     # ------------------------------------------------------------------ helpers
