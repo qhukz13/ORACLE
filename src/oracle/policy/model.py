@@ -31,8 +31,31 @@ class Capability(StrEnum):
     SYS_INFO = "sys.info"
     SYS_SETTINGS = "sys.settings"
     GIT_WRITE = "git.write"
+    #: Typing into a live shell. Deliberately NOT `proc.spawn`
+    #: (docs/SECURITY.md#4b): the agent may read a PTY's output all day, but writing
+    #: into one is full user privilege with no scope — an allowlist cannot inspect what
+    #: a shell will do with a line of text, and there is no undo for it.
+    TERM_WRITE = "term.write"
     SECRET_READ = "secret.read"  # noqa: S105 - a capability name, not a credential
     AGENT_DELEGATE = "agent.delegate"
+
+
+#: Capabilities that can change the world. Used by the registry to police contracts and
+#: by the gate to decide what read-only lockdown refuses. ONE definition, because two
+#: copies of a security-relevant set is one copy waiting to drift.
+WRITING_CAPABILITIES: frozenset[Capability] = frozenset(
+    {
+        Capability.FS_WRITE,
+        Capability.FS_DELETE,
+        Capability.PROC_SPAWN,
+        Capability.PROC_KILL,
+        Capability.NET_EGRESS,
+        Capability.GIT_WRITE,
+        Capability.TERM_WRITE,
+        Capability.INPUT_SYNTH,
+        Capability.SYS_SETTINGS,
+    }
+)
 
 
 class Tier(IntEnum):

@@ -17,7 +17,7 @@ from typing import Any, ClassVar
 from pydantic import BaseModel, ConfigDict
 
 from oracle.policy.apps import AppEntry
-from oracle.policy.model import Capability, Tier
+from oracle.policy.model import WRITING_CAPABILITIES, Capability, Tier
 
 
 class ToolArgs(BaseModel):
@@ -119,17 +119,7 @@ class ToolRegistryError(Exception):
     """A contract is malformed. Raised at startup so it cannot be a runtime surprise."""
 
 
-_WRITING = frozenset(
-    {
-        Capability.FS_WRITE,
-        Capability.FS_DELETE,
-        Capability.PROC_SPAWN,
-        Capability.NET_EGRESS,
-        Capability.GIT_WRITE,
-        Capability.INPUT_SYNTH,
-        Capability.SYS_SETTINGS,
-    }
-)
+_WRITING = WRITING_CAPABILITIES
 
 
 class ToolRegistry:

@@ -96,6 +96,11 @@ programs:
       - "-m mypy*"
       - "-m venv*"
       - "-V"
+  cmd:
+    # The interactive shell `term.open` starts. It is on the allowlist so the pinning
+    # rule applies to it like anything else — and NOT because a shell can be inspected.
+    # It cannot: that is exactly why `term.write` is T2 and confirmed every time.
+    path: "C:/Windows/System32/cmd.exe"
   tasklist:
     # Declared with an absolute path so a `tasklist.exe` earlier on PATH can never be
     # the one we run. If this path is wrong on some machine the tool refuses loudly,
@@ -163,11 +168,12 @@ tools:
   dev.install_deps: { tier: T2, scopes: [projects] }   # network + arbitrary postinstall
   dev.execute:      { tier: T2, scopes: [projects] }
 
-  term.open:  { tier: T1, scopes: [projects] }
-  term.read:  { tier: T0, scopes: [projects] }
-  term.write: { tier: T2, scopes: [projects] }   # typing into a live shell = full user rights
+  term.open:  { tier: T1, scopes: [projects, notes, scratch] }
+  term.read:  { tier: T0, scopes: [projects, notes, scratch] }
+  term.write: { tier: T2, scopes: [projects, notes, scratch] }   # typing into a live shell = full user rights
+  term.close: { tier: T1, scopes: [projects, notes, scratch] }
 
-  app.launch: { tier: T1 }
+  app.launch: { tier: T1, scopes: [projects, notes, scratch] }
   app.close:  { tier: T2 }
 
   ai.build_packet: { tier: T0 }                  # local only, no egress

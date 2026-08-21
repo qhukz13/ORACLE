@@ -33,6 +33,7 @@ def build_registry(*, writes: bool = True) -> ToolRegistry:
     from oracle.tools.filesystem import WRITE_TOOLS
     from oracle.tools.git import GIT_TOOLS
     from oracle.tools.readonly import READ_ONLY_TOOLS, SPAWNING_READ_TOOLS
+    from oracle.tools.terminal import TERM_TOOLS
 
     registry = ToolRegistry()
     for contract in READ_ONLY_TOOLS:
@@ -41,7 +42,14 @@ def build_registry(*, writes: bool = True) -> ToolRegistry:
         # Spawning tools are excluded from the read-only set even when they only read:
         # the gate denies `proc.spawn` in lockdown, so a read-only build that listed
         # them would be advertising something that can never run.
-        for contract in (*SPAWNING_READ_TOOLS, *WRITE_TOOLS, *GIT_TOOLS, *DEV_TOOLS, *APP_TOOLS):
+        for contract in (
+            *SPAWNING_READ_TOOLS,
+            *WRITE_TOOLS,
+            *GIT_TOOLS,
+            *DEV_TOOLS,
+            *APP_TOOLS,
+            *TERM_TOOLS,
+        ):
             registry.register(contract)
     return registry
 

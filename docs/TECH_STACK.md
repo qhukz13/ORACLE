@@ -319,11 +319,19 @@ count and forfeits DOM accessibility.
 Chosen: deterministic polar layout — ring = category, angle = stable hash of node id, radius =
 recency/attention. `d3-scale` and `d3-shape` as pure math helpers; no `d3-selection` (it fights React).
 
-### Terminal: xterm.js + **pywinpty** (ConPTY)
+### Terminal: xterm.js + **pywinpty** (ConPTY)  `VERIFIED 2026-08-21`
 
 The PTY lives in the **backend**, not the shell — that is what lets the phone attach to the same
 terminal session and what keeps the shell logic-free. `pywinpty` wraps Windows ConPTY.
-`TO VERIFY`: `pywinpty` wheel availability for Python 3.12 (expected fine).
+
+**`pywinpty>=3.0.5`, verified before it was added** ([OQ-09](OPEN_QUESTIONS.md#oq-09)): the 3.12
+wheel installs clean, Cyrillic needs no `chcp` because ConPTY normalises to UTF-8, resize mid-stream
+is safe, and concurrent sessions do not leak into each other. It earns its place because the
+alternative is reimplementing ConPTY's pseudoconsole handshake in `ctypes`, which is a worse
+maintenance commitment than one wheel.
+
+More precisely, the PTY lives in the **toolhost child**, not the API process — a shell must be inside
+the Job Object so HALT can actually stop it.
 
 ---
 

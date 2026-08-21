@@ -20,7 +20,7 @@ doc, delete the marker.
 | [OQ-06](#oq-06) | Can a PWA install over a self-signed cert? | `TO VERIFY` | Phase 8 (push only) | open |
 | [OQ-07](#oq-07) | Is the memory subsystem dual- or quad-channel? | `UNKNOWN` | CPU-fallback planning | open |
 | [OQ-08](#oq-08) | Does FTS5 `unicode61` handle Russian acceptably? | `TO VERIFY` | Phase 5 | open |
-| [OQ-09](#oq-09) | `pywinpty` on Python 3.12 + ConPTY behaviour | `TO VERIFY` | Phase 3 | open |
+| [OQ-09](#oq-09) | `pywinpty` on Python 3.12 + ConPTY behaviour | ~~`TO VERIFY`~~ | Phase 3 | **RESOLVED 2026-08-21 — works; readiness must be measured, not slept** |
 | [OQ-10](#oq-10) | Is there a text-only Qwen3.5 quant? | `TO VERIFY` | Phase 1 | open |
 | [OQ-11](#oq-11) | Does the Tauri sidecar die with the shell? | ~~`TO VERIFY`~~ | Phase 0 | **RESOLVED 2026-08-21 — yes, via Job Object** |
 | [OQ-12](#oq-12) | Is taint escalation tolerable in daily use? | `ASSUMPTION` | Phase 5+ tuning | open |
@@ -208,13 +208,28 @@ Covered by the retrieval fixture suite, which is why that suite must include Rus
 ---
 
 ### OQ-09
-**`pywinpty` on Python 3.12, and ConPTY resize/encoding behaviour.** `TO VERIFY` · blocks **Phase 3**
+**`pywinpty` on Python 3.12, and ConPTY resize/encoding behaviour.**
+**RESOLVED 2026-08-21 — `pywinpty` 3.0.5 works; the real hazard was somewhere else entirely.**
 
-Wheel availability is expected to be fine. The real risks are ConPTY resize handling and UTF-8/CP1251
-encoding on a Russian-locale Windows install, which routinely produce mojibake in terminal output.
+Full write-up: [`logs/development/2026-08-21-oq09-conpty.md`](../logs/development/2026-08-21-oq09-conpty.md).
 
-**Check.** Spike a PTY session streaming a long `npm install`; resize mid-stream; run a command
-producing Cyrillic output.
+Measured on this machine:
+
+| worry | result |
+|---|---|
+| Python 3.12 wheel | present, installs clean |
+| Cyrillic on a Russian-locale install | **works with no `chcp`** — ConPTY normalises to UTF-8 |
+| resize mid-stream | safe; the session survives and keeps streaming (300-line burst intact) |
+| concurrent sessions | isolated; output does not cross between them |
+
+**The finding that mattered was not on the list.** Input written before the shell is
+reading is **swallowed silently** — no error, no exception, nothing in any log. A fixed
+sleep is a coin flip: 1.5 s failed and 2.5 s succeeded, run to run. Waiting for first
+output followed by a 300 ms quiet gap was 8/8 at ~0.33 s.
+
+**Rule for the codebase:** readiness of an external process is a *measured condition*,
+never a sleep. This is the same shape as [OQ-16](#oq-16) — an external process that
+looks alive while quietly ignoring you.
 
 ---
 

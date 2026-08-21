@@ -12,6 +12,9 @@ dependencies = [
     "structlog>=24.4",
     "httpx2>=2.12",
     "pyyaml>=6.0",
+    # Windows ConPTY, for term.*. Justified in docs/TECH_STACK.md#terminal; the 3.12
+    # wheel and the ConPTY behaviour were verified in OQ-09 before this was added.
+    "pywinpty>=3.0.5",
 ]
 
 [dependency-groups]

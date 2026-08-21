@@ -24,6 +24,7 @@ from oracle.policy.apps import EMPTY_CATALOGUE, AppCatalogue, AppEntry, AppRejec
 from oracle.policy.model import (
     TIER_DECISION,
     UNTRUSTED,
+    WRITING_CAPABILITIES,
     Capability,
     Decision,
     PolicyError,
@@ -234,15 +235,7 @@ class PolicyEngine:
             rule_name = f"tools.{tool_id}.contract_tier"
 
         # Read-only lockdown: anything that can change the world is refused.
-        writing = capabilities & {
-            Capability.FS_WRITE,
-            Capability.FS_DELETE,
-            Capability.PROC_SPAWN,
-            Capability.NET_EGRESS,
-            Capability.GIT_WRITE,
-            Capability.INPUT_SYNTH,
-            Capability.SYS_SETTINGS,
-        }
+        writing = capabilities & WRITING_CAPABILITIES
         if self.policy.read_only and writing:
             return PolicyVerdict(
                 decision=Decision.DENY,
