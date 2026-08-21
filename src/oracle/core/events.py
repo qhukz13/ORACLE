@@ -49,6 +49,11 @@ KNOWN_TYPES: Final[frozenset[str]] = CRITICAL_TYPES | frozenset(
     {
         "message.delta",
         "message.completed",
+        # One card per tool call in the UI. Coalescable rather than critical: a lost
+        # card is a cosmetic gap, and `turn.finished` still closes the turn. The
+        # *approval* for a tool call is the critical part, and that is a separate type.
+        "tool.started",
+        "tool.finished",
         "log.entry",
         "system.metrics",
     }

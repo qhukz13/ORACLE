@@ -39,6 +39,8 @@ CASES: list[tuple[str, str, str | None]] = [
     ("закоммить мои изменения с сообщением почини редирект", "modify", "git.commit"),
     ("stage everything in Asterim", "modify", "git.add"),
     ("add my files to the index", "modify", "git.add"),
+    ("push my changes to origin", "modify", "git.push"),
+    ("отправь изменения на сервер", "modify", "git.push"),
     # tests
     ("run the tests for Asterim", "run", "dev.run_tests"),
     ("запусти тесты", "run", "dev.run_tests"),

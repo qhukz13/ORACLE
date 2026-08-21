@@ -60,6 +60,12 @@ ARG_BUILDERS: dict[str, str] = {
     "dev.build": "path",
     "dev.lint": "path",
     "fs.list": "path",
+    # Buildable from the project alone because both of its other arguments have honest
+    # defaults: `origin`, and the branch that is actually checked out. "push my changes"
+    # means exactly that. It is also the only routable tool above T1, which matters —
+    # without it the Confirmation Center could never fire from a routed turn, and the
+    # most safety-critical surface in the product would be unreachable by the user.
+    "git.push": "path",
     # project path plus one string the model supplies
     "git.commit": "path+message",
     "dev.run_tests": "path+filter",
@@ -104,6 +110,7 @@ _EXAMPLES = """Examples:
 "закоммить с сообщением почини редирект"
   -> {"tool":"git.commit","text":"почини редирект"}
 "stage everything" -> {"tool":"git.add","text":""}
+"push my changes" -> {"tool":"git.push","text":""}
 "is the repo clean" -> {"tool":"git.status","text":""}
 "what changed since the last commit" -> {"tool":"git.diff","text":""}
 "run the tests" -> {"tool":"dev.run_tests","text":""}

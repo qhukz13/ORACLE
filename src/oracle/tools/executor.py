@@ -163,6 +163,12 @@ class ToolExecutor:
         #: did (ADR-0003).
         self._undo = undo
 
+    @property
+    def registry(self) -> ToolRegistry:
+        """Read-only access to the catalogue, for callers that need a contract (the
+        confirmation card needs `side_effects` and `dry_run`)."""
+        return self._registry
+
     def grant(self, approval: Approval) -> None:
         self._approvals[approval.approval_id] = approval
 

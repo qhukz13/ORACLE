@@ -394,7 +394,7 @@ class TurnPipeline:
                 trace_id=trace,
                 session_id=session_id,
                 turn_id=turn_id,
-                preview={"summary": f"{tool_id} {selection.args}", "args": selection.args},
+                preview=await self._preview_of(tool_id, selection.args),
             )
             resolution = await self._approvals.wait(pending)
             if resolution != Resolution.APPROVED:
@@ -408,21 +408,70 @@ class TurnPipeline:
             approval_id = pending.id
 
         await self._emit("agent.state", session_id, turn_id, trace, {"state": "executing"})
-        outcome = await self._executor.execute(tool_id, selection.args, approval_id=approval_id)
+        # The card the UI renders. `args` and `tier` are here because the point of a
+        # tool card is that the user can see what was actually run, not a paraphrase.
         await self._emit(
-            "agent.state",
+            "tool.started",
+            session_id,
+            turn_id,
+            trace,
+            {"tool": tool_id, "args": selection.args, "tier": verdict.tier.label},
+        )
+        outcome = await self._executor.execute(tool_id, selection.args, approval_id=approval_id)
+        summary = _render(tool_id, outcome)
+        await self._emit(
+            "tool.finished",
             session_id,
             turn_id,
             trace,
             {
-                "state": "idle",
                 "tool": tool_id,
                 "ok": outcome.ok,
                 "duration_ms": outcome.duration_ms,
                 "undo_id": outcome.undo_id,
+                "summary": summary,
+                "error": outcome.error.message if outcome.error else None,
+                "error_kind": outcome.error.kind if outcome.error else None,
             },
         )
-        await self._say(_render(tool_id, outcome), session_id, turn_id, trace)
+        await self._emit("agent.state", session_id, turn_id, trace, {"state": "idle"})
+        await self._say(summary, session_id, turn_id, trace)
+
+    async def _preview_of(self, tool_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        """What the confirmation card shows under EFFECT.
+
+        docs/UI.md#9 requires a **real preview, never a paraphrase** — an actual file
+        list, an actual set of commits. So where the tool supports a dry run, we run
+        one: `dry_run=True` means the call performs nothing, which is exactly why it
+        needs no approval of its own and cannot become a way to act before asking.
+
+        The contract's `side_effects` sentence goes alongside it rather than instead of
+        it. It says what *kind* of thing is about to happen; the dry run says what
+        *this* one would do.
+        """
+        assert self._executor is not None
+        contract = self._executor.registry.get(tool_id)
+        preview: dict[str, Any] = {"summary": contract.side_effects, "args": args}
+
+        if not contract.dry_run:
+            return preview
+        try:
+            rehearsal = await self._executor.execute(tool_id, args, dry_run=True)
+        except Exception as exc:  # pragma: no cover - a preview must never break the ask
+            log.warning("preview.failed", tool=tool_id, error=str(exc))
+            return preview
+        if rehearsal.ok and rehearsal.result is not None:
+            detail = getattr(rehearsal.result, "output", None) or getattr(
+                rehearsal.result, "would_delete", None
+            )
+            if detail:
+                preview["detail"] = detail
+                preview["summary"] = f"{contract.side_effects}"
+        elif rehearsal.error is not None:
+            # A preview that failed is itself worth showing: "this would not work" is
+            # the most useful thing the card could tell you before you approve it.
+            preview["detail"] = f"a rehearsal of this failed: {rehearsal.error.message}"
+        return preview
 
     # ------------------------------------------------------------------- parts
 

@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from oracle.policy.model import Tier
 from oracle.router.selection import (
     ARG_BUILDERS,
     MAX_CANDIDATES,
@@ -44,12 +45,24 @@ class TestTheMenu:
         for intent in ("run", "modify", "investigate", "status", "search"):
             assert all(not c.hidden for c in candidates_for(registry, intent))
 
-    def test_dangerous_tools_are_not_selectable_from_a_routed_turn(self) -> None:
-        """`dev.execute`, `term.write` and `fs.write` need an argv, a command or file
-        content. None can be built from (project, one string) without inventing
-        something, so the router cannot reach them at all."""
-        for tool_id in ("dev.execute", "term.write", "fs.write", "fs.delete", "git.push"):
+    def test_tools_needing_invented_arguments_are_not_selectable(self) -> None:
+        """`dev.execute` needs an argv, `term.write` a command, `fs.write` file content,
+        `fs.delete` a specific victim. None can be built from (project, one string)
+        without inventing something, so the router cannot reach them at all."""
+        for tool_id in ("dev.execute", "term.write", "fs.write", "fs.delete", "term.open"):
             assert tool_id not in ARG_BUILDERS
+
+    def test_exactly_one_routable_tool_is_above_t1(self) -> None:
+        """`git.push` is routable and T2, deliberately: without a routable tool that
+        asks, the Confirmation Center could never fire from a routed turn and the most
+        safety-critical surface in the product would be unreachable.
+
+        It is buildable honestly — `origin` and the checked-out branch are what "push my
+        changes" means. If a second tool ever joins it here, that is a decision to make
+        on purpose, not to discover."""
+        registry = build_registry()
+        asking = [c.id for c in registry.all() if c.id in ARG_BUILDERS and c.risk > Tier.T1]
+        assert asking == ["git.push"]
 
     def test_the_candidate_list_is_capped(self) -> None:
         registry = build_registry()
