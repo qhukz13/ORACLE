@@ -12,7 +12,7 @@ doc, delete the marker.
 
 | # | Question | Marker | Blocks | Status |
 |---|---|---|---|---|
-| [OQ-01](#oq-01) | Which router model actually fits and performs? | `EXPERIMENT NEEDED` | Phase 1 | **placement/latency ANSWERED 2026-08-21; accuracy open** |
+| [OQ-01](#oq-01) | Which router model actually fits and performs? | ~~`EXPERIMENT NEEDED`~~ | Phase 1 | **RESOLVED 2026-08-21 — 0.8b, 93.3% accuracy** |
 | [OQ-02](#oq-02) | Which embedding model for mixed RU/EN? | `EXPERIMENT NEEDED` | Phase 5 | open |
 | [OQ-03](#oq-03) | How long will Pascal keep GPU acceleration? | `UNKNOWN` | risk, not a phase | monitoring |
 | [OQ-04](#oq-04) | Does `realpath` resolve Windows junctions? | `TO VERIFY` | Phase 2 | open |
@@ -26,12 +26,13 @@ doc, delete the marker.
 | [OQ-12](#oq-12) | Is taint escalation tolerable in daily use? | `ASSUMPTION` | Phase 5+ tuning | open |
 | [OQ-13](#oq-13) | What approval rate causes prompt fatigue? | `ASSUMPTION` | Phase 3+ tuning | open |
 | [OQ-14](#oq-14) | Does the orbital view earn its place? | `UNKNOWN` | Phase 9 go/no-go | open |
+| [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | `EXPERIMENT NEEDED` | UX quality, not a phase | open |
 
 ---
 
 ### OQ-01
 **Which router model actually fits in ~3.5 GB and performs well enough?**
-**Placement & latency: ANSWERED 2026-08-21. Accuracy: still open, blocks Phase 1.**
+**RESOLVED 2026-08-21 — `qwen3.5:0.8b`, 93.3% intent accuracy, 100% GPU-resident at 16k.**
 
 Full write-up: [`logs/development/2026-08-21-oq01-router-benchmark.md`](../logs/development/2026-08-21-oq01-router-benchmark.md).
 
@@ -55,12 +56,27 @@ Three findings that changed the design:
 3. **Qwen3.5 is a thinking model.** Default settings spent 229 tokens reasoning about saying "hello"
    and returned an *empty* `response` field. `think: false` is mandatory on every router call.
 
-**Still open — the accuracy half.** Intent-classification and tool-selection rates for `0.8b` are
-unmeasured; they need the 30-case fixture set, which is Phase 1 code. **This is now the single largest
-Phase 1 risk: if `0.8b` is too weak, nothing else fits this GPU.** Fallbacks, in order:
-(a) test `OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0` and a text-only build
-([OQ-10](#oq-10)) to try to pull `2b` fully onto the card; (b) accept `2b` at 36% CPU offload
-(~20 tok/s, ~3.4 s TTFT); (c) push more work onto the deterministic pre-router.
+**Accuracy: RESOLVED 2026-08-21 — `qwen3.5:0.8b` is good enough.**
+Full write-up: [`logs/development/2026-08-21-p1-router-accuracy.md`](../logs/development/2026-08-21-p1-router-accuracy.md).
+
+```
+intent accuracy    93.3%  (28/30)   gate 85%   PASS
+clarify behaviour 100.0%  (30/30)
+structured output  0.00% failures   gate <2%   PASS
+```
+
+The feared fallback to `2b` was never needed. Three changes got there, none of them model tuning:
+
+1. **`confidence` float → enum.** Ollama's constrained decoding enforces enums but *ignores* numeric
+   `minimum`/`maximum`; a float confidence produced `95` and failed validation on 12 of 30 cases.
+   23.3% → 63.3%, and structured failures 27.9% → 0%.
+2. **Few-shot examples** in the system prompt: 63.3% → 83.3%. The single biggest lever.
+3. **Moving three decisions out of the model entirely** (ADR-0011): naming an agent, naming a
+   registered pipeline, and bare stop words are facts of the sentence, decided in ~5 ms instead of
+   ~1500 ms. 83.3% → 93.3%.
+
+**Latency is the part that missed** — see [OQ-15](#oq-15), split out because it is a property of the
+runtime rather than of the model.
 
 ---
 
@@ -267,6 +283,31 @@ that does not work is a success, not a failure — and deciding this *after* mon
 is exactly why it is scheduled late.
 
 ---
+
+### OQ-15
+**Can a routed turn get meaningfully under ~1.5 s?** `EXPERIMENT NEEDED` · quality, not a blocker
+
+Measured decomposition of a routed turn on this stack:
+
+| component | cost | ours to control? |
+|---|---|---|
+| Ollama fixed per-request overhead | **~600 ms** | no |
+| prompt processing (~900 tok, few-shot) | ~570 ms | yes — but it buys +30 accuracy points |
+| generation (~19 tokens) | ~330 ms | marginally |
+
+The ~600 ms floor is real: a 2-token prompt generating *zero* tokens still costs 638 ms, while raw
+HTTP to the same daemon is 5 ms. It is unaffected by schema/grammar.
+
+**The 900 ms p50 gate in ROADMAP Phase 1 was mis-derived** — it came from OQ-01's prompt-eval
+measurements alone and never budgeted for generation or per-request overhead. It is unreachable here
+at any prompt size.
+
+Things worth trying: `/api/generate` with a pre-rendered prompt instead of `/api/chat`; a llama.cpp
+server directly (ADR-0009's documented escape hatch); trimming the few-shot block once the
+modify/delegate boundary moves to a deterministic later step.
+
+**The real mitigation already works:** the pre-router resolves turns in ~5 ms. Every turn it handles
+skips all three costs. That is why ADR-0011 targets >50% of turns.
 
 ## Standing assumptions
 

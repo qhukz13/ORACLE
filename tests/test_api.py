@@ -29,13 +29,46 @@ def test_status_reports_reality_not_fiction(client: TestClient) -> None:
     body = client.get("/api/v1/status").json()
     assert body["protocol"] == 1
     assert body["schema_version"] >= 1
-    # P0 has no model. Saying so beats inventing one.
-    assert body["agent"] == {"kind": "echo", "model": None}
+    # With the LLM disabled the status says so rather than implying a live model.
+    assert body["agent"]["kind"] == "router"
+    assert body["agent"]["degraded"]
+    assert body["agent"]["structured_output"]["attempts"] == 0
+
+
+def test_slash_command_works_without_a_model(client: TestClient) -> None:
+    """The degraded-mode guarantee (ADR-0011): with no LLM, deterministic paths still
+    answer. This client fixture has llm_enabled=False."""
+    with client.websocket_connect("/api/v1/stream?since_seq=0") as ws:
+        ws.send_json({"type": "session.message", "payload": {"text": "/help"}})
+        reply = ""
+        for _ in range(40):
+            ev = ws.receive_json()
+            if ev["type"] == "message.completed":
+                reply = str(ev["payload"]["text"])
+            if ev["type"] == "turn.finished":
+                assert ev["payload"]["route"] == "pre-router"
+                break
+    assert "/status" in reply and "/halt" in reply
+
+
+def test_chat_without_a_model_degrades_clearly(client: TestClient) -> None:
+    with client.websocket_connect("/api/v1/stream?since_seq=0") as ws:
+        ws.send_json({"type": "session.message", "payload": {"text": "why is auth broken"}})
+        outcome, reply = None, ""
+        for _ in range(40):
+            ev = ws.receive_json()
+            if ev["type"] == "message.completed":
+                reply = str(ev["payload"]["text"])
+            if ev["type"] == "turn.finished":
+                outcome = ev["payload"]["outcome"]
+                break
+    assert outcome == "degraded"
+    assert "offline" in reply.lower()
 
 
 def test_message_produces_the_full_event_sequence(client: TestClient) -> None:
     with client.websocket_connect("/api/v1/stream?since_seq=0") as ws:
-        ws.send_json({"type": "session.message", "payload": {"text": "hello"}})
+        ws.send_json({"type": "session.message", "payload": {"text": "/status"}})
         types: list[str] = []
         for _ in range(40):
             ev = ws.receive_json()
@@ -45,8 +78,7 @@ def test_message_produces_the_full_event_sequence(client: TestClient) -> None:
 
     assert types[0] == "session.created"
     assert "turn.started" in types
-    assert "agent.state" in types
-    assert types.count("message.delta") >= 1
+    assert "message.completed" in types
     assert types[-1] == "turn.finished"
 
 
@@ -149,3 +181,21 @@ def test_malformed_command_is_ignored_not_fatal(client: TestClient) -> None:
         for _ in range(40):
             if ws.receive_json()["type"] == "turn.finished":
                 break  # reaching here at all is the assertion
+
+
+def test_since_seq_ahead_of_server_resyncs_instead_of_hanging(client: TestClient) -> None:
+    """Found by a live smoke test: a client whose since_seq is ahead of the server —
+    e.g. after the database was reset — used to have every subsequent event filtered
+    out as a duplicate, leaving the socket open, live, and permanently silent."""
+    with client.websocket_connect("/api/v1/stream?since_seq=999999") as ws:
+        first = ws.receive_json()
+        assert first["type"] == "session.resync"
+        assert first["payload"]["reason"] == "since_seq ahead of server"
+
+        ws.send_json({"type": "session.message", "payload": {"text": "/status"}})
+        for _ in range(40):
+            ev = ws.receive_json()
+            if ev["type"] == "turn.finished":
+                break
+        else:  # pragma: no cover
+            raise AssertionError("stream went silent after a forward since_seq")

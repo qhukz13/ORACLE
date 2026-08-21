@@ -10,13 +10,15 @@ dependencies = [
     "pydantic-settings>=2.6",
     "aiosqlite>=0.20",
     "structlog>=24.4",
+    "httpx2>=2.12",
+    "pyyaml>=6.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
-    "httpx2>=0.1",
+    "types-pyyaml>=6.0",
     "ruff>=0.7",
     "mypy>=1.13",
 ]
@@ -41,7 +43,13 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "RUF"]
 ignore = ["S101"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S105", "S106"]
+# Russian test fixtures are the point, not an ambiguity (RUF001).
+"tests/*" = ["S105", "S106", "RUF001"]
+# Few-shot examples are literal prompt content, not code. Wrapping them would change
+# what the model sees, and RUF001 flags Cyrillic as "ambiguous" in what is deliberately
+# a bilingual prompt.
+"src/oracle/router/intent.py" = ["E501", "RUF001"]
+"scripts/*" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

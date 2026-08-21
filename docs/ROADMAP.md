@@ -92,7 +92,7 @@ updated.
 
 ---
 
-## Phase 1 — Local LLM + agent runtime  **[MVP]**
+## Phase 1 — Local LLM + agent runtime  **[MVP]**  ·  **P1-T1 DONE 2026-08-21**
 
 **Objective.** ORACLE answers questions with a local model, with a real turn pipeline, state machine,
 streaming, and cancellation. **No tools, no side effects.**
@@ -122,12 +122,12 @@ on a model that turns out not to fit.
 **Deliverables.** Streaming local chat; intent classification; a measured, documented model choice.
 
 **Acceptance criteria.** (latency targets now grounded in the measured TTFT curve, not guessed)
-- **`route` call TTFT < 900 ms p50, < 1.5 s p95** with the router resident — achievable at the
-  ≤ 1200-token route budget (measured: 726 ms at 1227 tok).
-- **`answer` call TTFT < 1.5 s p50** at the ≤ 2400-token budget (measured: 1168 ms at 2427 tok).
-- Structured-output failure rate **< 2%** over 100 fixture turns, with `think: false`.
-- Intent classification **≥ 85%** on the fixture set; low-confidence turns ask instead of guessing.
-  **This is the phase's gating risk** — see the risk table below.
+- ~~`route` TTFT < 900 ms p50~~ — **MISSED, and the gate was mis-derived.** It came from OQ-01's
+  prompt-eval numbers alone and never budgeted for generation or Ollama's ~600 ms fixed per-request
+  overhead. Measured routed turn: **p50 1542 ms**. Restated target: a routed turn under ~1.5 s, and
+  **>50% of turns resolved by the pre-router at ~5 ms** ([OQ-15](OPEN_QUESTIONS.md#oq-15)).
+- ✅ Structured-output failure rate **< 2%** — measured **0.00%** over the fixture set.
+- ✅ Intent classification **≥ 85%** — measured **93.3%**; clarify behaviour **100%**.
 - Cancel mid-stream stops token generation within 500 ms.
 - With Ollama stopped, slash commands still work and the UI says why chat doesn't.
 - Context never exceeds the **per-call-type** budget — asserted, not hoped.

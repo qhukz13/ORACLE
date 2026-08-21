@@ -1,0 +1,230 @@
+# Intent classification fixtures — P1-T1 gate (>= 85% correct).
+#
+# Grounded in the projects that actually exist on this machine, not placeholder
+# names: Asterim, GameRecs, Source2DemViewer, GrowAMonster, asterim-pipeline.
+#
+# Mixed Russian and English on purpose. The hard case this suite exists to catch is a
+# Russian question about an English codebase — the one most likely to regress silently
+# (docs/RAG.md#8-quality-measurement makes the same argument for retrieval).
+#
+# Fields:
+#   intent          expected label, or null when the right answer is "ask me"
+#   project         expected resolved project, or null
+#   clarify         true when confidence SHOULD fall below threshold
+#   why             what this case is protecting against
+
+version: 1
+cases:
+  # ---------------------------------------------------------------- run
+  - id: en-run-tests
+    text: "run the tests for Asterim"
+    lang: en
+    intent: run
+    project: Asterim
+    why: baseline imperative with an explicit project
+
+  - id: ru-run-tests
+    text: "запусти тесты для Asterim"
+    lang: ru
+    intent: run
+    project: Asterim
+    why: same request in Russian; must not degrade
+
+  - id: ru-run-build
+    text: "собери GameRecs"
+    lang: ru
+    intent: run
+    project: GameRecs
+    why: Russian imperative verb, Latin project name
+
+  - id: en-run-lint
+    text: "lint asterim-pipeline please"
+    lang: en
+    intent: run
+    project: asterim-pipeline
+    why: hyphenated project name must not be split or fuzzy-matched to Asterim
+
+  # ---------------------------------------------------------------- status
+  - id: en-status-agent
+    text: "what are you doing right now"
+    lang: en
+    intent: status
+    project: null
+    why: status refers to ORACLE itself, not a project
+
+  - id: ru-status-agent
+    text: "что ты сейчас делаешь"
+    lang: ru
+    intent: status
+    project: null
+
+  - id: en-status-git
+    text: "is Asterim clean or do I have uncommitted changes"
+    lang: en
+    intent: status
+    project: Asterim
+    why: project state is status, not investigate
+
+  # ---------------------------------------------------------------- investigate
+  - id: en-investigate-auth
+    text: "why is Asterim authentication broken"
+    lang: en
+    intent: investigate
+    project: Asterim
+    why: the reference scenario from docs/INTEGRATIONS.md
+
+  - id: ru-investigate-auth
+    text: "почему сломалась авторизация в Asterim"
+    lang: ru
+    intent: investigate
+    project: Asterim
+    why: THE hard case - Russian question about an English codebase
+
+  - id: en-investigate-tests
+    text: "the GameRecs tests started failing after the last commit, what happened"
+    lang: en
+    intent: investigate
+    project: GameRecs
+
+  - id: ru-investigate-slow
+    text: "почему Source2DemViewer так долго компилируется"
+    lang: ru
+    intent: investigate
+    project: Source2DemViewer
+
+  # ---------------------------------------------------------------- search
+  - id: en-search-symbol
+    text: "find where the token refresh is implemented"
+    lang: en
+    intent: search
+    project: null
+    why: no project named; resolution happens later, intent is still search
+
+  - id: ru-search-notes
+    text: "найди мои заметки про эмбеддинги"
+    lang: ru
+    intent: search
+    project: null
+
+  - id: en-search-in-project
+    text: "search Asterim for anything mentioning websocket"
+    lang: en
+    intent: search
+    project: Asterim
+
+  # ---------------------------------------------------------------- question
+  - id: en-question-doc
+    text: "what does the relay Dockerfile in Asterim actually do"
+    lang: en
+    intent: question
+    project: Asterim
+    why: asking for an explanation, not an investigation of a fault
+
+  - id: ru-question-general
+    text: "чем отличается pgvector от sqlite-vec"
+    lang: ru
+    intent: question
+    project: null
+    why: general knowledge, no project, no tools
+
+  - id: en-question-about-oracle
+    text: "which model are you running locally"
+    lang: en
+    intent: question
+    project: null
+
+  # ---------------------------------------------------------------- modify
+  - id: en-modify-small
+    text: "add a null check in token.ts before the refresh call"
+    lang: en
+    intent: modify
+    project: null
+    why: small, specific, local edit - should NOT escalate to delegate
+
+  - id: ru-modify-small
+    text: "поправь опечатку в README у GameRecs"
+    lang: ru
+    intent: modify
+    project: GameRecs
+
+  - id: en-modify-commit
+    text: "commit my changes in Asterim with a sensible message"
+    lang: en
+    intent: modify
+    project: Asterim
+
+  # ---------------------------------------------------------------- delegate
+  - id: en-delegate-refactor
+    text: "refactor the entire authentication module in Asterim to use the new session API"
+    lang: en
+    intent: delegate
+    project: Asterim
+    why: large, multi-file, needs real code reasoning -> hand to a coding agent
+
+  - id: ru-delegate-feature
+    text: "реализуй полностью новую систему инвентаря в GrowAMonster"
+    lang: ru
+    intent: delegate
+    project: GrowAMonster
+
+  - id: en-delegate-explicit
+    text: "ask Claude to fix the failing GameRecs migration"
+    lang: en
+    intent: delegate
+    project: GameRecs
+    why: names the agent explicitly - must not be read as modify
+
+  # ---------------------------------------------------------------- pipeline
+  - id: en-pipeline-named
+    text: "run the asterim-check pipeline"
+    lang: en
+    intent: pipeline
+    project: Asterim
+
+  - id: ru-pipeline-named
+    text: "запусти пайплайн проверки для Asterim"
+    lang: ru
+    intent: pipeline
+    project: Asterim
+
+  # ---------------------------------------------------------------- control
+  - id: en-control-stop
+    text: "stop what you're doing"
+    lang: en
+    intent: control
+    project: null
+    why: must never be misread as chat; this is the safety path
+
+  - id: ru-control-stop
+    text: "остановись"
+    lang: ru
+    intent: control
+    project: null
+
+  # ---------------------------------------------------------------- chat
+  - id: en-chat-greeting
+    text: "hey"
+    lang: en
+    intent: chat
+    project: null
+
+  # ---------------------------------------------------------------- clarify
+  - id: en-ambiguous-project
+    text: "run the tests"
+    lang: en
+    intent: run
+    project: null
+    clarify: true
+    why: >
+      intent is clear but the project is not, and there are 7 candidates.
+      Must resolve to a clarifying question, never a guessed project.
+
+  - id: ru-ambiguous-it
+    text: "почини это"
+    lang: ru
+    intent: null
+    project: null
+    clarify: true
+    why: >
+      no intent, no target, no referent. The correct behaviour is to ask.
+      A confident answer here is worse than no answer.

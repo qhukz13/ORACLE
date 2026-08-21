@@ -10,7 +10,7 @@ Format per record: Decision · Context · Options · Chosen · Why · Trade-offs
 | [0001](#adr-0001--orchestrator-not-a-monolithic-agent) | Orchestrator, not a monolithic agent | accepted |
 | [0002](#adr-0002--python-312-managed-by-uv) | Python 3.12 managed by `uv` | accepted |
 | [0003](#adr-0003--tool-execution-in-a-separate-process) | Tool execution in a separate process | accepted |
-| [0004](#adr-0004--two-tier-local-model-router--reasoner) | Two-tier local model (router + reasoner) | accepted, pending benchmark |
+| [0004](#adr-0004--two-tier-local-model-router--reasoner) | Two-tier local model (router + reasoner) | accepted, benchmarked |
 | [0005](#adr-0005--one-policy-gate-risk-tiers-taint-tracking) | One policy gate, risk tiers, taint tracking | accepted |
 | [0006](#adr-0006--sqlite-only-storage-two-files-sqlite-vec--fts5) | SQLite-only storage, two files (sqlite-vec + FTS5) | accepted |
 | [0007](#adr-0007--clients-are-peers-of-one-local-api) | Clients are peers of one local API | accepted |
@@ -23,6 +23,7 @@ Format per record: Decision · Context · Options · Chosen · Why · Trade-offs
 | [0014](#adr-0014--embeddings-on-cpu-gpu-reserved-for-the-router) | Embeddings on CPU, GPU reserved for the router | accepted |
 | [0015](#adr-0015--intent-shaped-tools-no-general-shell) | Intent-shaped tools, no general shell | accepted |
 | [0016](#adr-0016--mvp-excludes-the-interesting-parts) | MVP excludes the interesting parts | accepted |
+| [0017](#adr-0017--constrain-what-the-decoder-can-enforce) | Constrain what the decoder can enforce | accepted |
 
 ---
 
@@ -119,7 +120,8 @@ than the quality difference between 2B and 4B for classification work. Partial o
 every turn rather than only on rare ones.
 
 **Trade-offs.** Two models to manage. The reasoner is slow when used (~5 tok/s for 9B on CPU). Router
-quality is a real ceiling on intent accuracy — and at 0.8b that ceiling is lower than hoped.
+quality is a real ceiling on intent accuracy — measured at 93.3%, which is above the 85% gate but
+means roughly one turn in fifteen is misrouted and must be recoverable by the user.
 
 **Consequences.** Context length is a hardware decision, not a model decision. The Context Assembler
 becomes first-class. Measured prompt-processing rates (~1300–2200 tok/s) forced the context budget to
@@ -127,9 +129,9 @@ be **split by call type** rather than set globally
 ([AGENT_RUNTIME.md §5](AGENT_RUNTIME.md#5-context-budget)), and made intent-based tool pre-filtering
 load-bearing rather than merely tidy: ~1200 tokens of tool schemas costs ~730 ms of latency *per turn*.
 
-**Still open:** the *accuracy* half of [OQ-01](OPEN_QUESTIONS.md#oq-01). If `0.8b` proves too weak on
-the fixture set, nothing else fits this GPU — that is the main Phase 1 risk, with fallbacks listed in
-OQ-01.
+**Resolved 2026-08-21:** `qwen3.5:0.8b` reaches **93.3% intent accuracy** with 0% structured-output
+failures on the 30-case fixture set. The feared fallback to `2b` was not needed. Routed-turn latency
+is ~1.5 s, floored by a ~600 ms Ollama per-request overhead ([OQ-15](OPEN_QUESTIONS.md#oq-15)).
 
 ---
 
@@ -416,3 +418,35 @@ and the easiest to leave at 80%; they attach to a working product rather than su
 **Consequences.** The MVP definition in [ROADMAP.md](ROADMAP.md#the-mvp-stated-once) is the
 scope-creep test — anything not required by that paragraph is not in the MVP. Definition of done for
 Phase 4 is behavioural: **a full working day using ORACLE without opening a terminal manually.**
+
+
+---
+
+## ADR-0017 — Constrain what the decoder can enforce
+
+**Context.** Structured output relies on JSON-Schema-constrained decoding. The first fixture run
+produced a 27.9% structured-output failure rate and 23.3% intent accuracy, which looked like the 0.8B
+model being hopeless.
+
+**It was a schema bug.** `confidence: float = Field(ge=0.0, le=1.0)` renders as `minimum`/`maximum`,
+and **Ollama's constrained decoding ignores numeric ranges**. The model emitted `95` (meaning 95%) and
+failed pydantic validation on 12 of 30 cases. Enums *are* enforced, at the token level.
+
+**Options.** (a) Keep the float, coerce out-of-range values on our side. (b) Keep the float and lean on
+the repair attempt. (c) Express the field as an enum the decoder can actually enforce.
+
+**Chosen.** (c). `Literal["high","medium","low"]`, mapped to a score for thresholding.
+
+**Why.** Coercion hides a model that does not understand the field. Repair costs a full extra round
+trip — ~1.5 s here — to fix something the schema should have prevented. And a three-value enum is a
+more honest ask: a 0.8B model has no calibrated notion of 0.73, and we only ever compare to a
+threshold. The change alone took structured failures 27.9% → **0%**.
+
+**Trade-offs.** Coarser confidence. Some constraints cannot be expressed as enums and must be
+validated after the fact.
+
+**Consequences.** A rule for all schemas in this codebase: **express constraints the decoder can
+enforce — enums, required fields, types. Never depend on `minimum`, `maximum`, `pattern` or
+`minLength`; validate them, but do not rely on them.** Also a general lesson recorded in
+`logs/development/2026-08-21-p1-router-accuracy.md`: when a small model looks catastrophically bad,
+suspect the contract before the model.

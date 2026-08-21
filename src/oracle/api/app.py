@@ -17,11 +17,16 @@ from fastapi import APIRouter, FastAPI, Query, WebSocket, WebSocketDisconnect
 
 from oracle import __version__
 from oracle.config import Settings, get_settings
-from oracle.core.echo import EchoAgent
 from oracle.core.eventlog import EventLog
 from oracle.core.events import PROTOCOL_VERSION, ClientCommand, Event
+from oracle.core.projects import discover_projects
 from oracle.core.sessions import SessionStore
+from oracle.llm.ollama import OllamaProvider
+from oracle.llm.structured import StructuredStats
+from oracle.llm.types import ProviderUnavailable
 from oracle.logsink import bind_trace, configure, get_logger
+from oracle.router.intent import IntentClassifier
+from oracle.router.pipeline import TurnPipeline
 from oracle.storage.db import connect, migrate
 
 log = get_logger(__name__)
@@ -33,8 +38,10 @@ class AppState:
     conn: aiosqlite.Connection
     eventlog: EventLog
     sessions: SessionStore
-    agent: EchoAgent
+    agent: TurnPipeline
+    provider: OllamaProvider | None
     schema_version: int = 0
+    projects: list[str] = field(default_factory=list)
     tasks: set[asyncio.Task[None]] = field(default_factory=set)
 
     def spawn(self, coro: Any) -> None:
@@ -54,14 +61,39 @@ async def _build_state(settings: Settings) -> AppState:
     version = await migrate(conn)
     eventlog = EventLog(conn, queue_size=settings.ws_queue_size)
     await eventlog.load_head()
-    return AppState(
+
+    projects = discover_projects(settings.projects_root)
+    stats = StructuredStats()
+
+    provider: OllamaProvider | None = None
+    classifier: IntentClassifier | None = None
+    degraded: str | None = None
+
+    if not settings.llm_enabled:
+        degraded = "llm disabled by configuration"
+    else:
+        provider = OllamaProvider(model=settings.router_model, num_ctx=settings.router_ctx)
+        try:
+            await provider.preflight()
+            classifier = IntentClassifier(provider, projects=projects, stats=stats)
+        except ProviderUnavailable as exc:
+            # Start anyway. Deterministic paths work without a model, and a banner is
+            # a better first-run experience than a crash loop.
+            degraded = exc.reason
+            log.warning("llm.unavailable", reason=exc.reason, remedy=exc.remedy)
+
+    state = AppState(
         settings=settings,
         conn=conn,
         eventlog=eventlog,
         sessions=SessionStore(conn),
-        agent=EchoAgent(eventlog),
+        agent=TurnPipeline(eventlog, provider, classifier, projects=projects, stats=stats),
+        provider=provider,
         schema_version=version,
+        projects=projects,
     )
+    state.agent.degraded = degraded
+    return state
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -87,6 +119,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for task in list(st.tasks):
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await task
+            if st.provider is not None:
+                await st.provider.aclose()
             await st.conn.close()
             log.info("oracled.stopped")
 
@@ -121,8 +155,13 @@ def _register_routes(app: FastAPI) -> None:
             "schema_version": st.schema_version,
             "last_seq": st.eventlog.last_seq,
             "subscribers": st.eventlog.subscriber_count,
-            # No model is loaded in P0 — stated plainly rather than faked.
-            "agent": {"kind": "echo", "model": None},
+            "agent": {
+                "kind": "router",
+                "model": st.provider.model if st.provider else None,
+                "degraded": st.agent.degraded,
+                "structured_output": st.agent.stats.snapshot(),
+            },
+            "projects": st.projects,
         }
 
     @app.get("/api/v1/sessions")
@@ -157,16 +196,28 @@ async def _ws_handler(app: FastAPI, ws: WebSocket, since_seq: int) -> None:
     await ws.accept()
     trace = bind_trace()
 
-    # A since_seq older than what we retain cannot be honoured; say so explicitly
-    # rather than silently starting a stream with a hole in it.
-    floor = max(0, st.eventlog.last_seq - st.settings.resume_window)
-    resync = since_seq > 0 and since_seq < floor
+    # Two ways a client's since_seq can be unusable, both resolved by a resync:
+    #  * older than retention  -> we cannot replay the gap
+    #  * AHEAD of our last_seq -> the client is from a previous database. Without this
+    #    branch the stream filters out every subsequent event as a "duplicate" and the
+    #    connection hangs forever, live but silent. Found by a live smoke test.
+    head = st.eventlog.last_seq
+    floor = max(0, head - st.settings.resume_window)
+    stale = since_seq > 0 and since_seq < floor
+    ahead = since_seq > head
+    resync = stale or ahead
     if resync:
+        floor = floor if stale else head
         await ws.send_json(
             Event(
                 type="session.resync",
                 trace_id=trace,
-                payload={"reason": "since_seq older than retention", "baseline": floor},
+                payload={
+                    "reason": "since_seq ahead of server"
+                    if ahead
+                    else "since_seq older than retention",
+                    "baseline": floor,
+                },
             ).wire()
         )
         since_seq = floor

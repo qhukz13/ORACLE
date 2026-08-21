@@ -38,7 +38,7 @@ GREEN, RED, DIM, RESET = "\033[32m", "\033[31m", "\033[2m", "\033[0m"
 
 
 def run(step: Step, verbose: bool) -> tuple[bool, float, str]:
-    name, cmd, cwd = step
+    _name, cmd, cwd = step
     start = time.monotonic()
     proc = subprocess.run(  # noqa: S603 - fixed command list, no shell
         cmd, cwd=cwd, capture_output=not verbose, text=True, encoding="utf-8", errors="replace"

@@ -28,6 +28,16 @@ class Settings(BaseSettings):
 
     log_level: str = "info"
 
+    #: Router model. Chosen by measurement, not taste: qwen3.5:0.8b is the largest
+    #: Qwen3.5 that runs 100% on this 4 GB Pascal card (OQ-01).
+    #: Tests and CI set this False so the suite is hermetic — no test may require
+    #: Ollama to be running (docs/TESTING.md).
+    llm_enabled: bool = True
+    router_model: str = "qwen3.5:0.8b"
+    router_ctx: int = 16384
+
+    projects_root: Path = Path("C:/Projects")
+
     @property
     def db_path(self) -> Path:
         return self.data_dir / "oracle.db"
