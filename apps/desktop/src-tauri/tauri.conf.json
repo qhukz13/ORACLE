@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ORACLE",
+  "version": "0.0.1",
+  "identifier": "dev.oracle.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5273",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "ORACLE",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 600,
+        "theme": "Dark",
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8787 ws://127.0.0.1:8787 http://localhost:5273 ws://localhost:5273; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi"],
+    "icon": ["icons/icon.ico"]
+  }
+}
