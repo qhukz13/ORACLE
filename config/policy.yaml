@@ -173,6 +173,11 @@ tools:
   term.read:  { tier: T0, scopes: [projects, notes, scratch] }
   term.write: { tier: T2, scopes: [projects, notes, scratch] }   # typing into a live shell = full user rights
   term.close: { tier: T1, scopes: [projects, notes, scratch] }
+  # The human's own keystrokes and window size, arriving from the terminal dock.
+  # Hidden from the model (contract), so this tier can never be the agent's route
+  # around term.write's confirmation.
+  term.input:  { tier: T1, scopes: [projects, notes, scratch] }
+  term.resize: { tier: T1, scopes: [projects, notes, scratch] }
 
   app.launch: { tier: T1, scopes: [projects, notes, scratch] }
   app.close:  { tier: T2 }

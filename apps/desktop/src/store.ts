@@ -15,6 +15,12 @@ import { create } from "zustand";
 import type { AgentState, Approval, ConnectionState, OracleEvent, Tier, ToolCall } from "./protocol";
 import { asRecord, num, str } from "./protocol";
 
+export interface TermChunk {
+  seq: number;
+  data: string;
+  dropped: number;
+}
+
 export interface Turn {
   turnId: string;
   sessionId: string | null;
@@ -38,7 +44,18 @@ interface State {
   /** Resolved approvals, newest first, kept briefly so the card can show the outcome. */
   decided: Approval[];
   gapWarning: string | null;
+  /**
+   * Set by `system.degraded`. A missing model is a NORMAL state, not an error
+   * (ADR-0011): the pre-router, slash commands and every deterministic path keep
+   * working, so this is a banner explaining what is unavailable — never a modal, and
+   * never something that blocks the composer.
+   */
+  degraded: { component: string; reason: string; remedy: string } | null;
   lastSeq: number;
+  /** The attached PTY, if any. One at a time in v1 — sub-tabs are later. */
+  terminal: { ptyId: string | null; cwd: string };
+  /** Output chunks in arrival order. Bounded: xterm.js owns the real scrollback. */
+  termChunks: TermChunk[];
 
   apply(ev: OracleEvent): void;
   setConnection(c: ConnectionState, retryInSec: number): void;
@@ -48,6 +65,9 @@ interface State {
 
 const MAX_EVENTS = 500;
 const MAX_DECIDED = 10;
+/** Only what xterm.js has not consumed needs to live here — it keeps 5000 lines of its
+ *  own scrollback, and duplicating that in the store would be pure waste. */
+const MAX_TERM_CHUNKS = 200;
 
 /** The most recent turn id, so a tool card lands on the turn that caused it. */
 function attachTool(turns: Turn[], turnId: string | null, call: ToolCall): Turn[] {
@@ -91,14 +111,28 @@ export const useStore = create<State>((set) => ({
   approvals: [],
   decided: [],
   gapWarning: null,
+  degraded: null,
   lastSeq: 0,
+  terminal: { ptyId: null, cwd: "" },
+  termChunks: [],
 
   setConnection: (connection, retryInSec) => set({ connection, retryInSec }),
 
   setGap: (expected, got) =>
     set({ gapWarning: `missed events ${expected}..${got - 1} — history may be incomplete` }),
 
-  reset: () => set({ turns: [], events: [], approvals: [], decided: [], gapWarning: null, lastSeq: 0 }),
+  reset: () =>
+    set({
+      turns: [],
+      events: [],
+      approvals: [],
+      decided: [],
+      termChunks: [],
+      terminal: { ptyId: null, cwd: "" },
+      gapWarning: null,
+      degraded: null,
+      lastSeq: 0,
+    }),
 
   apply: (ev) =>
     set((s) => {
@@ -119,6 +153,14 @@ export const useStore = create<State>((set) => ({
             events: [ev],
             gapWarning: "resynced from server",
           };
+
+        case "system.degraded":
+          next.degraded = {
+            component: str(ev.payload["component"], "reasoning"),
+            reason: str(ev.payload["reason"]),
+            remedy: str(ev.payload["remedy"]),
+          };
+          break;
 
         case "agent.state":
           next.agentState = str(ev.payload["state"], "idle") as AgentState;
@@ -196,6 +238,30 @@ export const useStore = create<State>((set) => ({
           // rule, applied on arrival rather than on a timer.
           if (approval.issuedAt + approval.expiresInSec * 1000 <= Date.now()) break;
           next.approvals = [...s.approvals, approval];
+          break;
+        }
+
+        case "term.opened":
+          next.terminal = { ptyId: str(ev.payload["pty_id"]), cwd: str(ev.payload["cwd"]) };
+          next.termChunks = [];
+          break;
+
+        case "term.closed":
+          // Only clear if it is OUR session closing. A stale event replayed from a
+          // previous backend must not detach the terminal being looked at right now.
+          if (str(ev.payload["pty_id"]) === s.terminal.ptyId) {
+            next.terminal = { ptyId: null, cwd: "" };
+          }
+          break;
+
+        case "term.output": {
+          if (str(ev.payload["pty_id"]) !== s.terminal.ptyId) break;
+          const chunk: TermChunk = {
+            seq: ev.seq,
+            data: str(ev.payload["data"]),
+            dropped: num(ev.payload["dropped"], 0),
+          };
+          next.termChunks = [...s.termChunks, chunk].slice(-MAX_TERM_CHUNKS);
           break;
         }
 

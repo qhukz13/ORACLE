@@ -22,6 +22,7 @@ from oracle.core.eventlog import EventLog
 from oracle.core.events import PROTOCOL_VERSION, ClientCommand, Event
 from oracle.core.projects import discover_projects
 from oracle.core.sessions import SessionStore
+from oracle.core.terminal import TerminalBridge
 from oracle.llm.ollama import OllamaProvider
 from oracle.llm.structured import StructuredStats
 from oracle.llm.types import ProviderUnavailable
@@ -54,6 +55,7 @@ class AppState:
     host: ToolHost
     undo: UndoJournal
     approvals: ApprovalStore
+    terminals: TerminalBridge
     schema_version: int = 0
     projects: list[str] = field(default_factory=list)
     tasks: set[asyncio.Task[None]] = field(default_factory=set)
@@ -102,6 +104,7 @@ async def _build_state(settings: Settings) -> AppState:
     # the journal dispatches those back through the gate as `git.undo` (ADR-0003).
     undo.set_git_runner(git_undo_runner(executor))
     approvals = ApprovalStore(eventlog, executor)
+    terminals = TerminalBridge(eventlog, executor)
     log.info("tools.registered", count=len(registry), tools=[c.id for c in registry.all()])
 
     provider: OllamaProvider | None = None
@@ -147,6 +150,7 @@ async def _build_state(settings: Settings) -> AppState:
         host=host,
         undo=undo,
         approvals=approvals,
+        terminals=terminals,
         schema_version=version,
         projects=projects,
     )
@@ -187,6 +191,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for task in list(st.tasks):
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await task
+            await st.terminals.stop()
             await st.host.stop()
             if st.provider is not None:
                 await st.provider.aclose()
@@ -231,6 +236,9 @@ def _register_routes(app: FastAPI) -> None:
                 "structured_output": st.agent.stats.snapshot(),
             },
             "projects": st.projects,
+            # The UI needs a real path to open a terminal in, and it must be one the
+            # runtime chose — not one assembled in the browser.
+            "projects_root": str(st.settings.projects_root),
             "policy": {
                 "source": st.policy.policy.source,
                 "read_only": st.policy.policy.read_only,
@@ -245,6 +253,7 @@ def _register_routes(app: FastAPI) -> None:
             "toolhost": {"running": st.host.running, **st.host.stats.snapshot()},
             "undo": {"available": len(st.undo.latest(50))},
             "approvals": {"open": st.approvals.open_requests()},
+            "terminals": st.terminals.snapshot(),
         }
 
     @app.get("/api/v1/sessions")
@@ -327,6 +336,12 @@ async def _ws_handler(app: FastAPI, ws: WebSocket, since_seq: int) -> None:
         log.info("ws.disconnected")
 
 
+def session_of(cmd: ClientCommand) -> str | None:
+    """The session a command belongs to, when it names one."""
+    value = cmd.payload.get("session_id")
+    return str(value) if value else None
+
+
 async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
     try:
         cmd = ClientCommand.model_validate(raw)
@@ -380,6 +395,29 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
         st.audit.append(actor="user", tool="oracle.undo", decision="undo", undo_id=record)
         await st.eventlog.append(Event(type="agent.state", trace_id=bind_trace(), payload=payload))
 
+    elif cmd.type == "term.open":
+        # The human opening a shell. Everything about it still goes through the gate —
+        # the path is canonicalised and scope-checked like any other.
+        await st.terminals.open(str(cmd.payload.get("path") or ""), session_id=session_of(cmd))
+
+    elif cmd.type == "term.input":
+        # The person typing, NOT the agent. `term.write` is the agent's route and is
+        # confirmed every time; asking someone to approve their own keystrokes would be
+        # theatre (docs/API.md, docs/SECURITY.md#4b).
+        await st.terminals.input(
+            str(cmd.payload.get("pty_id") or ""), str(cmd.payload.get("data") or "")
+        )
+
+    elif cmd.type == "term.resize":
+        await st.terminals.resize(
+            str(cmd.payload.get("pty_id") or ""),
+            int(cmd.payload.get("cols") or 100),
+            int(cmd.payload.get("rows") or 30),
+        )
+
+    elif cmd.type == "term.close":
+        await st.terminals.close(str(cmd.payload.get("pty_id") or ""), session_id=session_of(cmd))
+
     elif cmd.type == "halt":
         # Real now, not a stub. Order matters: flip policy to deny-all FIRST, so a
         # task that is mid-flight cannot slip one more tool call through while we are
@@ -390,6 +428,9 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
         # Kill the whole tool process tree. This is the part that makes HALT real:
         # cancelling tasks does not kill `npm install`'s grandchildren, the job does.
         await st.host.kill_tree()
+        # The shells die with the job; stop polling for output that will never
+        # come rather than logging a failure per session per 120 ms.
+        await st.terminals.stop()
         # An approval left live after a stop is a click that executes something nobody
         # is watching for any more.
         refused = await st.approvals.refuse_all(reason)

@@ -54,6 +54,12 @@ KNOWN_TYPES: Final[frozenset[str]] = CRITICAL_TYPES | frozenset(
         # *approval* for a tool call is the critical part, and that is a separate type.
         "tool.started",
         "tool.finished",
+        # Terminal traffic. Coalescable: a dropped chunk of build output is a
+        # gap in a log, and the backpressure rules shed these before anything
+        # that carries a decision (docs/API.md#backpressure).
+        "term.output",
+        "term.opened",
+        "term.closed",
         "log.entry",
         "system.metrics",
     }

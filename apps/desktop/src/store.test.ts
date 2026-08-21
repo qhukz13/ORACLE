@@ -209,3 +209,90 @@ describe("approvals", () => {
     expect(useStore.getState().approvals).toHaveLength(1);
   });
 });
+
+describe("terminal", () => {
+  beforeEach(() => useStore.getState().reset());
+
+  const opened = (id = "term_1") =>
+    evt("term.opened", { pty_id: id, cwd: "C:/Projects", shell: "cmd.exe", banner: "" }, 20, null);
+
+  const output = (id: string, data: string, seq: number, dropped = 0) =>
+    evt("term.output", { pty_id: id, stream: "stdout", data, dropped }, seq, null);
+
+  it("attaches on open and collects output in order", () => {
+    const s = useStore.getState();
+    s.apply(opened());
+    expect(useStore.getState().terminal.ptyId).toBe("term_1");
+
+    s.apply(output("term_1", "first", 21));
+    s.apply(output("term_1", "second", 22));
+    expect(useStore.getState().termChunks.map((c) => c.data)).toEqual(["first", "second"]);
+  });
+
+  it("ignores output from a terminal that is not the attached one", () => {
+    // Two clients can have different terminals open against one backend. Writing
+    // somebody else's output into this xterm would be a genuine confusion of sessions.
+    const s = useStore.getState();
+    s.apply(opened("term_mine"));
+    s.apply(output("term_theirs", "not mine", 21));
+    expect(useStore.getState().termChunks).toHaveLength(0);
+  });
+
+  it("carries the dropped count so the UI can say scrollback was trimmed", () => {
+    const s = useStore.getState();
+    s.apply(opened());
+    s.apply(output("term_1", "tail of a long build", 21, 4096));
+    expect(useStore.getState().termChunks[0]!.dropped).toBe(4096);
+  });
+
+  it("clears the buffer when a new terminal opens", () => {
+    const s = useStore.getState();
+    s.apply(opened("term_1"));
+    s.apply(output("term_1", "old", 21));
+    s.apply(opened("term_2"));
+    expect(useStore.getState().termChunks).toHaveLength(0);
+    expect(useStore.getState().terminal.ptyId).toBe("term_2");
+  });
+
+  it("detaches only when OUR terminal closes", () => {
+    const s = useStore.getState();
+    s.apply(opened("term_mine"));
+    s.apply(evt("term.closed", { pty_id: "term_theirs" }, 22, null));
+    expect(useStore.getState().terminal.ptyId).toBe("term_mine");
+
+    s.apply(evt("term.closed", { pty_id: "term_mine" }, 23, null));
+    expect(useStore.getState().terminal.ptyId).toBeNull();
+  });
+
+  it("bounds the chunk list — xterm owns the real scrollback", () => {
+    const s = useStore.getState();
+    s.apply(opened());
+    for (let i = 0; i < 260; i++) s.apply(output("term_1", `line ${i}`, 100 + i));
+    const chunks = useStore.getState().termChunks;
+    expect(chunks.length).toBeLessThanOrEqual(200);
+    // The most recent survive: the tail is what has not been rendered yet.
+    expect(chunks.at(-1)!.data).toBe("line 259");
+  });
+});
+
+describe("degradation", () => {
+  beforeEach(() => useStore.getState().reset());
+
+  it("records what is unavailable without blocking anything", () => {
+    // ADR-0011: a missing model is a normal state. The banner explains; the composer
+    // and every deterministic path keep working.
+    useStore
+      .getState()
+      .apply(
+        evt(
+          "system.degraded",
+          { component: "llm", reason: "ollama is not running", remedy: "start ollama" },
+          5,
+          null,
+        ),
+      );
+    const d = useStore.getState().degraded;
+    expect(d?.component).toBe("llm");
+    expect(d?.remedy).toBe("start ollama");
+  });
+});

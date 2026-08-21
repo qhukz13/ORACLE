@@ -386,6 +386,92 @@ async def term_write(*, ctx: ToolContext, args: TermWriteArgs) -> TermWriteResul
     return TermWriteResult(session_id=session.id, wrote=args.text, submitted=args.submit)
 
 
+# ---------------------------------------------------- term.input (not offered)
+
+
+class TermInputArgs(ToolArgs):
+    session_id: str
+    text: str
+
+
+class TermInputResult(ToolResult):
+    session_id: str
+    chars: int
+
+
+@tool(
+    id="term.input",
+    summary="Internal: deliver a human's keystrokes to a session. Not selectable.",
+    args=TermInputArgs,
+    result=TermInputResult,
+    capabilities={Capability.TERM_WRITE},
+    scopes={"projects", "notes", "scratch"},
+    # T1, not T2 — and the difference is *who is typing*.
+    #
+    # docs/SECURITY.md#4b and docs/API.md draw this line deliberately: `term.write` is
+    # the AGENT typing into a shell, which is full user privilege with no scope an
+    # allowlist can inspect, so it is confirmed every time. This is the HUMAN typing,
+    # arriving from the terminal dock. Asking someone to approve their own keystrokes
+    # is not a security control, it is a way to teach them to click Approve.
+    #
+    # It is hidden, so the model can never reach it: a tool the agent could call would
+    # be `term.write` with the confirmation removed, which is exactly the hole this
+    # separation exists to prevent.
+    risk=Tier.T1,
+    reversible=False,
+    intents=frozenset(),
+    side_effects="Types the user's own input into their shell.",
+    hidden=True,
+)
+async def term_input(*, ctx: ToolContext, args: TermInputArgs) -> TermInputResult:
+    session = _get(args.session_id)
+    if "\x00" in args.text:
+        raise TerminalError("refusing to write a NUL byte into a shell")
+    # Written raw and unmodified: this is a keystroke stream, so control characters,
+    # arrow-key escapes and a bare Ctrl-C must arrive exactly as they were typed. It is
+    # deliberately NOT line-oriented like `term.write` — there is no approval to scope
+    # here, because the person typing is the authority the gate exists to protect.
+    session.pty.write(args.text)
+    return TermInputResult(session_id=session.id, chars=len(args.text))
+
+
+# ---------------------------------------------------- term.resize (not offered)
+
+
+class TermResizeArgs(ToolArgs):
+    session_id: str
+    cols: int = 100
+    rows: int = 30
+
+
+class TermResizeResult(ToolResult):
+    session_id: str
+    cols: int
+    rows: int
+
+
+@tool(
+    id="term.resize",
+    summary="Internal: match the PTY to the window size. Not selectable.",
+    args=TermResizeArgs,
+    result=TermResizeResult,
+    capabilities={Capability.TERM_WRITE},
+    scopes={"projects", "notes", "scratch"},
+    risk=Tier.T1,
+    reversible=False,
+    intents=frozenset(),
+    side_effects="Changes the terminal's dimensions. Nothing is executed.",
+    hidden=True,
+)
+async def term_resize(*, ctx: ToolContext, args: TermResizeArgs) -> TermResizeResult:
+    session = _get(args.session_id)
+    cols, rows = max(20, min(args.cols, 500)), max(5, min(args.rows, 200))
+    # MEASURED (OQ-09): resize mid-stream is safe — the session survives and keeps
+    # streaming, including through a 300-line burst.
+    session.pty.set_size(cols, rows)
+    return TermResizeResult(session_id=session.id, cols=cols, rows=rows)
+
+
 # ------------------------------------------------------------------ term.close
 
 
@@ -446,6 +532,6 @@ def sessions() -> list[dict[str, Any]]:
     ]
 
 
-TERM_TOOLS = [term_open, term_read, term_write, term_close]
+TERM_TOOLS = [term_open, term_read, term_write, term_input, term_resize, term_close]
 
 __all__ = ["MAX_SESSIONS", "TERM_TOOLS", "TerminalError", "sessions", "strip_ansi"]

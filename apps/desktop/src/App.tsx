@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OracleClient } from "./client";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmationCenter } from "./components/ConfirmationCenter";
+import { TerminalDock } from "./components/TerminalDock";
 import { ToolCard } from "./components/ToolCard";
 import { useStore } from "./store";
 
@@ -40,6 +41,7 @@ export default function App() {
   const [sidebar, setSidebar] = useState(true);
   const [dock, setDock] = useState(false);
   const [projects, setProjects] = useState<string[]>([]);
+  const [projectsRoot, setProjectsRoot] = useState("");
   const clientRef = useRef<OracleClient | null>(null);
   const logEnd = useRef<HTMLDivElement>(null);
 
@@ -61,7 +63,9 @@ export default function App() {
     fetch("/api/v1/status")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (!cancelled && d && Array.isArray(d.projects)) setProjects(d.projects as string[]);
+        if (cancelled || !d) return;
+        if (Array.isArray(d.projects)) setProjects(d.projects as string[]);
+        if (typeof d.projects_root === "string") setProjectsRoot(d.projects_root);
       })
       .catch(() => undefined);
     return () => {
@@ -100,6 +104,37 @@ export default function App() {
 
   const undo = useCallback((undoId: string) => {
     clientRef.current?.send({ type: "undo", payload: { undo_id: undoId } });
+  }, []);
+
+  // Stable callbacks: xterm.js subscribes once on mount and holds these in a closure.
+  const termInput = useCallback((data: string) => {
+    clientRef.current?.send({
+      type: "term.input",
+      payload: { pty_id: useStore.getState().terminal.ptyId, data },
+    });
+  }, []);
+
+  const termResize = useCallback((cols: number, rows: number) => {
+    clientRef.current?.send({
+      type: "term.resize",
+      payload: { pty_id: useStore.getState().terminal.ptyId, cols, rows },
+    });
+  }, []);
+
+  const termOpen = useCallback(() => {
+    // Opens in the project root, which is inside a scope. A terminal ORACLE cannot
+    // reach the working directory of would be a terminal in name only.
+    clientRef.current?.send({
+      type: "term.open",
+      payload: { path: projectsRoot, session_id: useStore.getState().sessionId },
+    });
+  }, [projectsRoot]);
+
+  const termClose = useCallback(() => {
+    clientRef.current?.send({
+      type: "term.close",
+      payload: { pty_id: useStore.getState().terminal.ptyId },
+    });
   }, []);
 
   const halt = useCallback(() => {
@@ -171,6 +206,16 @@ export default function App() {
       {s.gapWarning && (
         <div className="banner warn" role="alert">
           ⚠ {s.gapWarning}
+        </div>
+      )}
+      {s.degraded && (
+        // A banner, never a modal: everything deterministic still works without a
+        // model, and blocking the UI would make a degraded ORACLE useless rather than
+        // reduced (ADR-0011).
+        <div className="banner warn" role="status">
+          ⚠ {s.degraded.component} is offline — {s.degraded.reason}
+          {s.degraded.remedy ? `. Try: ${s.degraded.remedy}` : ""}. Slash commands and the
+          command palette still work.
         </div>
       )}
 
@@ -260,23 +305,15 @@ export default function App() {
       </div>
 
       {dock && (
-        <section className="dock" aria-label="Logs">
-          <div className="dock-tabs">
-            <span className="dock-tab sel">LOGS</span>
-            <span className="spacer" />
-            <button className="ghost" onClick={() => setDock(false)} title="Ctrl+`">
-              ▾
-            </button>
-          </div>
-          <div className="dock-body">
-            {s.events.slice(-100).map((e) => (
-              <div key={e.seq} className="log-row">
-                <span className="muted">{e.ts.slice(11, 19)}</span> <span className="type">{e.type}</span>{" "}
-                <span className="muted">{JSON.stringify(e.payload).slice(0, 120)}</span>
-              </div>
-            ))}
-          </div>
-        </section>
+        <TerminalDock
+          ptyId={s.terminal.ptyId}
+          cwd={s.terminal.cwd}
+          chunks={s.termChunks}
+          onInput={termInput}
+          onResize={termResize}
+          onOpen={termOpen}
+          onClose={termClose}
+        />
       )}
 
       <footer className="composer">
