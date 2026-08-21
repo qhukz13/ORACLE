@@ -21,6 +21,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from oracle.logsink import get_logger, trace_id_var
+from oracle.policy.apps import AppEntry, AppRejected
 from oracle.policy.audit import AuditLog, digest_args
 from oracle.policy.engine import PolicyEngine
 from oracle.policy.model import Capability, Decision, PolicyVerdict, Provenance, Tier
@@ -169,14 +170,16 @@ class ToolExecutor:
 
     def _pin_programs(
         self, contract: ToolContract, args: Any
-    ) -> tuple[dict[str, Path], tuple[str, Tier] | None]:
-        """Resolve every program this call may spawn, on the parent side.
+    ) -> tuple[dict[str, Path], AppEntry | None, tuple[str, Tier] | None]:
+        """Resolve everything this call may start, on the parent side.
 
-        Returns the pinned paths and, for the gated escape hatch, the tier floor its
-        argv earned. Raises `ProgramRejected` — which the caller turns into a denial
-        naming the rule, because "refused" without "by what" is useless.
+        Returns the pinned program paths, the app catalogue entry if the tool names
+        one, and the tier floor any of it earned. Raises `ProgramRejected` /
+        `AppRejected` — which the caller turns into a denial naming the rule, because
+        "refused" without "by what" is useless.
         """
         pinned: dict[str, Path] = {}
+        app: AppEntry | None = None
         floor: tuple[str, Tier] | None = None
 
         for name in sorted(contract.programs):
@@ -200,10 +203,17 @@ class ToolExecutor:
         if contract.program_field is not None:
             chosen = str(getattr(args, contract.program_field))
             argv = [str(a) for a in (getattr(args, "args", None) or [])]
-            floor = (chosen, self._engine.check_program(chosen, argv))
+            floor = (f"programs.{chosen}", self._engine.check_program(chosen, argv))
             pinned[chosen] = self._engine.resolve_program(chosen)
 
-        return pinned, floor
+        if contract.app_field is not None:
+            alias = str(getattr(args, contract.app_field))
+            app = self._engine.resolve_app(alias)
+            # The catalogue decides how much opening this costs. `browser` is T2
+            # because it opens the network; `explorer` is not.
+            floor = (f"apps.{alias}", app.tier)
+
+        return pinned, app, floor
 
     def preview(
         self, tool_id: str, raw_args: dict[str, Any], *, cwd: Path | None = None
@@ -219,14 +229,15 @@ class ToolExecutor:
         resolved = {
             f: self._engine.resolve_path(str(getattr(args, f)), cwd=cwd)
             for f in contract.path_fields
+            if getattr(args, f, None) is not None
         }
-        _, floor = self._pin_programs(contract, args)
+        _, _, floor = self._pin_programs(contract, args)
         verdict = self._engine.evaluate(
             tool_id,
             capabilities=contract.capabilities,
             paths=list(resolved.values()),
             declared_tier=contract.risk,
-            program_floor=floor,
+            floor=floor,
         )
         return verdict, _digest(raw_args, resolved)
 
@@ -268,7 +279,11 @@ class ToolExecutor:
         resolved: dict[str, ResolvedPath] = {}
         try:
             for fname in contract.path_fields:
-                raw = getattr(args, fname)
+                raw = getattr(args, fname, None)
+                # An optional path field left unset is not a path to check. `None` here
+                # would otherwise canonicalise the literal string "None".
+                if raw is None:
+                    continue
                 resolved[fname] = self._engine.resolve_path(str(raw), cwd=cwd)
         except PathRejected as exc:
             self._audit_denial(tool_id, raw_args, rule=f"path.{exc.reason}", reason=exc.detail)
@@ -284,8 +299,8 @@ class ToolExecutor:
         #     program the allowlist does not name is refused here, before the gate ever
         #     sees a tier.
         try:
-            pinned, program_floor = self._pin_programs(contract, args)
-        except ProgramRejected as exc:
+            pinned, app, floor = self._pin_programs(contract, args)
+        except (ProgramRejected, AppRejected) as exc:
             self._audit_denial(tool_id, raw_args, rule=exc.rule, reason=exc.detail)
             return self._fail(
                 tool_id,
@@ -302,7 +317,7 @@ class ToolExecutor:
             paths=list(resolved.values()),
             provenances=provenances,
             declared_tier=contract.risk,
-            program_floor=program_floor,
+            floor=floor,
         )
 
         args_digest = _digest(raw_args, resolved)
@@ -379,7 +394,22 @@ class ToolExecutor:
         # 7. execute. Across the process boundary when a host is configured; the
         #    in-process path exists only for read-only tools and tests.
         try:
-            if self._host is not None:
+            if contract.app_field is not None:
+                # THE deliberate exception to ADR-0003, and the only one. An app the
+                # user opened must outlive HALT, and nothing inside the toolhost's Job
+                # Object can. The launch is detached, holds no pipes, and returns
+                # nothing but a pid — see tools/apps.py for the alternatives that were
+                # rejected.
+                ctx = ToolContext(
+                    resolved={k: v.real for k, v in resolved.items()},
+                    app=app,
+                    cwd=cwd,
+                    dry_run=dry_run,
+                )
+                result = await asyncio.wait_for(
+                    contract.handler(ctx=ctx, args=args), timeout=contract.timeout_s
+                )
+            elif self._host is not None:
                 response = await self._host.call(
                     tool_id,
                     raw_args,

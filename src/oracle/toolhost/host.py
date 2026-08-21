@@ -84,7 +84,10 @@ class HostStats:
         }
 
 
-def _child_env() -> dict[str, str]:
+def child_env() -> dict[str, str]:
+    """The environment a spawned process gets. Public because `app.launch` needs the
+    same guarantee from the parent side, and two definitions of "what may be in the
+    environment" is one too many — the one that drifts is the one that leaks."""
     env = {k: os.environ[k] for k in _ENV_ALLOW if k in os.environ}
     # A minimal PATH: enough for the interpreter to start, not the user's full PATH.
     system_root = env.get("SystemRoot", r"C:\Windows")
@@ -129,7 +132,7 @@ class ToolHost:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self._cwd) if self._cwd else None,
-                env=_child_env(),
+                env=child_env(),
                 # No new console window; the child is headless.
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
@@ -320,4 +323,4 @@ def _process_handle(proc: asyncio.subprocess.Process) -> int:
     return int(handle)
 
 
-__all__ = ["HostStats", "ToolHost", "ToolHostError", "ToolHostUnavailable"]
+__all__ = ["HostStats", "ToolHost", "ToolHostError", "ToolHostUnavailable", "child_env"]

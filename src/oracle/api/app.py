@@ -78,7 +78,7 @@ async def _build_state(settings: Settings) -> AppState:
 
     # The policy gate. load_policy NEVER raises: bad or missing policy yields
     # read-only lockdown, loudly (docs/SECURITY.md#2).
-    policy = load_policy(settings.policy_path)
+    policy = load_policy(settings.policy_path, settings.apps_path)
     if policy.read_only:
         log.error(
             "policy.lockdown",

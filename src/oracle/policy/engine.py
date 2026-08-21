@@ -20,6 +20,7 @@ from typing import Any
 import yaml
 
 from oracle.logsink import get_logger
+from oracle.policy.apps import EMPTY_CATALOGUE, AppCatalogue, AppEntry, AppRejected
 from oracle.policy.model import (
     TIER_DECISION,
     UNTRUSTED,
@@ -55,6 +56,8 @@ class Policy:
     #: Which programs may be spawned at all, pinned to absolute paths at load
     #: (docs/SECURITY.md#4b). Empty means nothing may be spawned.
     programs: ProgramAllowlist = EMPTY_ALLOWLIST
+    #: Which applications may be opened, by alias. Empty means none.
+    apps: AppCatalogue = EMPTY_CATALOGUE
     #: True when we could not load real policy and are running locked down.
     read_only: bool = False
     source: str = "config/policy.yaml"
@@ -69,14 +72,14 @@ class Policy:
 LOCKDOWN = Policy(scopes=[], deny_always=["**"], tools={}, read_only=True, source="lockdown")
 
 
-def load_policy(path: Path) -> Policy:
+def load_policy(path: Path, apps_path: Path | None = None) -> Policy:
     """Load policy, or return LOCKDOWN. **Never raises to the caller** — a startup that
     crashes on bad policy is a startup that tempts someone to delete the policy file."""
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raise PolicyError(f"{path} is not a mapping")
-        return _parse(raw, source=str(path))
+        return _parse(raw, source=str(path), apps_path=apps_path)
     except FileNotFoundError:
         log.error("policy.missing", path=str(path), effect="read-only lockdown")
         return LOCKDOWN
@@ -85,7 +88,7 @@ def load_policy(path: Path) -> Policy:
         return LOCKDOWN
 
 
-def _parse(raw: dict[str, Any], source: str) -> Policy:
+def _parse(raw: dict[str, Any], source: str, apps_path: Path | None = None) -> Policy:
     scopes: list[Scope] = []
     for name, body in (raw.get("scopes") or {}).items():
         if name == "deny_always":
@@ -121,8 +124,18 @@ def _parse(raw: dict[str, Any], source: str) -> Policy:
         raise PolicyError("policy declares no scopes; refusing to run wide open")
 
     programs = ProgramAllowlist.parse(raw.get("programs"))
+    # The app catalogue lives in its own file (see policy/apps.py for why it is not
+    # the same kind of thing as a program), so `load_policy` pulls it in alongside.
+    apps = AppCatalogue.load(apps_path or Path("config/apps.yaml"))
 
-    return Policy(scopes=scopes, deny_always=deny, tools=tools, programs=programs, source=source)
+    return Policy(
+        scopes=scopes,
+        deny_always=deny,
+        tools=tools,
+        programs=programs,
+        apps=apps,
+        source=source,
+    )
 
 
 class PolicyEngine:
@@ -171,6 +184,10 @@ class PolicyEngine:
         """Validate an argv ORACLE built itself. Shape only, no subcommand grammar."""
         self.policy.programs.check_fixed(name, args)
 
+    def resolve_app(self, alias: str) -> AppEntry:
+        """The catalogue entry for an alias, or a refusal naming the rule."""
+        return self.policy.apps.resolve(alias)
+
     # ------------------------------------------------------------------ evaluate
 
     def evaluate(
@@ -181,7 +198,7 @@ class PolicyEngine:
         paths: list[ResolvedPath] | None = None,
         provenances: frozenset[Provenance] = frozenset(),
         declared_tier: Tier | None = None,
-        program_floor: tuple[str, Tier] | None = None,
+        floor: tuple[str, Tier] | None = None,
     ) -> PolicyVerdict:
         """The gate. Returns a verdict; never performs anything."""
         paths = paths or []
@@ -261,13 +278,14 @@ class PolicyEngine:
                 base = override
                 rule_name = f"tools.{tool_id}.scope_tiers.{p.scope.name}"
 
-        # A program allowlist entry can only RAISE the tier: `dev.execute git push`
-        # must not run at the tier `dev.execute` alone would have earned.
-        if program_floor is not None:
-            prog_name, prog_tier = program_floor
-            if prog_tier > base:
-                base = prog_tier
-                rule_name = f"programs.{prog_name}"
+        # An allowlist or catalogue entry can only RAISE the tier: `dev.execute git
+        # push` must not run at the tier `dev.execute` alone would have earned, and
+        # opening a browser must not run at the tier opening Explorer earns.
+        if floor is not None:
+            floor_rule, floor_tier = floor
+            if floor_tier > base:
+                base = floor_tier
+                rule_name = floor_rule
 
         # Taint escalation: a plan built from untrusted content does not get to
         # auto-write. T0 is unaffected — reading more is not the risk.
@@ -294,6 +312,7 @@ class PolicyEngine:
 
 __all__ = [
     "LOCKDOWN",
+    "AppRejected",
     "PathRejected",
     "Policy",
     "PolicyEngine",

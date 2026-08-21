@@ -28,6 +28,7 @@ def build_registry(*, writes: bool = True) -> ToolRegistry:
     `writes=False` yields the Phase 2 read-only set, which the security suite uses to
     assert that a read-only deployment really cannot mutate anything.
     """
+    from oracle.tools.apps import APP_TOOLS
     from oracle.tools.dev import DEV_TOOLS
     from oracle.tools.filesystem import WRITE_TOOLS
     from oracle.tools.git import GIT_TOOLS
@@ -40,7 +41,7 @@ def build_registry(*, writes: bool = True) -> ToolRegistry:
         # Spawning tools are excluded from the read-only set even when they only read:
         # the gate denies `proc.spawn` in lockdown, so a read-only build that listed
         # them would be advertising something that can never run.
-        for contract in (*SPAWNING_READ_TOOLS, *WRITE_TOOLS, *GIT_TOOLS, *DEV_TOOLS):
+        for contract in (*SPAWNING_READ_TOOLS, *WRITE_TOOLS, *GIT_TOOLS, *DEV_TOOLS, *APP_TOOLS):
             registry.register(contract)
     return registry
 

@@ -1,0 +1,53 @@
+# Applications ORACLE may open, by alias.
+#
+# The model names an ALIAS — `{"app": "editor"}` — never a path. That is the whole
+# point: an executable path chosen by a model is an arbitrary-execution primitive, and
+# no amount of confirmation makes one safe to accept (docs/TOOLS.md, `app.launch`).
+#
+# Like config/policy.yaml this file is data, edited by a human, loaded at startup and
+# never written by a tool. Each path is pinned when it loads; an alias whose executable
+# is missing refuses loudly rather than falling back to a PATH lookup.
+#
+# `accepts_path: true` means the alias may be given one extra argument — a path, which
+# is canonicalised and scope-checked exactly like any other path argument before it is
+# passed. Aliases without it take no arguments at all.
+#
+# tier:
+#   T1  opening it is unremarkable and reversible by closing the window
+#   T2  it costs something to open, or it acts on the world when it starts
+
+apps:
+  editor:
+    path: "C:/Program Files/Microsoft VS Code/Code.exe"
+    tier: T1
+    accepts_path: true
+    description: "Visual Studio Code"
+
+  antigravity:
+    path: "C:/Users/qhukz/AppData/Local/Programs/Antigravity IDE/Antigravity IDE.exe"
+    tier: T1
+    accepts_path: true
+    description: "Antigravity IDE"
+
+  explorer:
+    path: "C:/Windows/explorer.exe"
+    tier: T1
+    accepts_path: true
+    description: "Windows File Explorer"
+
+  browser:
+    path: "C:/Program Files/Google/Chrome/Application/chrome.exe"
+    tier: T2          # a browser opens the network; it is not a local-only action
+    accepts_path: false
+    description: "Google Chrome"
+
+  lmstudio:
+    path: "C:/Users/qhukz/AppData/Local/Programs/LM Studio/LM Studio.exe"
+    tier: T2          # loads a model and takes the GPU ORACLE's own router is using
+    accepts_path: false
+    description: "LM Studio"
+
+# Deliberately absent:
+#   a generic "open this with its default handler" alias — that is ShellExecute by
+#   another name, and the set of things it can start is the set of file associations on
+#   the machine. `explorer` with a canonicalised path is the bounded version of it.

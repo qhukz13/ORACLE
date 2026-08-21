@@ -16,6 +16,7 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
+from oracle.policy.apps import AppEntry
 from oracle.policy.model import Capability, Tier
 
 
@@ -53,6 +54,9 @@ class ToolContext:
 
     resolved: dict[str, Path] = field(default_factory=dict)
     programs: dict[str, Path] = field(default_factory=dict)
+    #: Set only for a tool with an `app_field`. Resolved from the catalogue by the
+    #: parent, which is also where such a tool runs (see tools/apps.py).
+    app: AppEntry | None = None
     cwd: Path | None = None
     dry_run: bool = False
 
@@ -97,6 +101,11 @@ class ToolContract:
     #: (`dev.execute`). Its argv is checked against the subcommand rules; a tool with a
     #: fixed program is not.
     program_field: str | None = None
+    #: The argument naming an entry in `config/apps.yaml`. A tool that declares this
+    #: runs in the PARENT and launches detached — the one deliberate exception to
+    #: ADR-0003, because an application the user opened must outlive HALT and the
+    #: toolhost's Job Object cannot let anything escape it. See tools/apps.py.
+    app_field: str | None = None
     #: Never offered to the model. Used for recipes the undo journal executes, which
     #: must exist in the registry (the child dispatches by id) but must not be
     #: selectable — a model that could call `git.uncommit` could undo work unasked.
@@ -184,7 +193,7 @@ class ToolRegistry:
                 f"writes happen inside a spawned program, declare proc.spawn instead."
             )
 
-        spawns = bool(c.programs or c.program_field)
+        spawns = bool(c.programs or c.program_field or c.app_field)
         if spawns and Capability.PROC_SPAWN not in c.capabilities:
             raise ToolRegistryError(
                 f"{c.id}: names a program but does not declare proc.spawn. The capability "
@@ -197,6 +206,19 @@ class ToolRegistry:
             )
         if c.program_field is not None and c.program_field not in c.args_model.model_fields:
             raise ToolRegistryError(f"{c.id}: program_field {c.program_field!r} not in args model")
+
+        if c.app_field is not None:
+            # This is the only escape from the Job Object, so the shape of a tool that
+            # takes it is pinned down here rather than trusted to review.
+            if c.app_field not in c.args_model.model_fields:
+                raise ToolRegistryError(f"{c.id}: app_field {c.app_field!r} not in args model")
+            if c.programs or c.program_field:
+                raise ToolRegistryError(
+                    f"{c.id}: an app launcher runs in the parent and cannot also spawn "
+                    f"an allowlisted program there"
+                )
+            if Capability.PROC_SPAWN not in c.capabilities:
+                raise ToolRegistryError(f"{c.id}: declares app_field but not proc.spawn")
 
     def get(self, tool_id: str) -> ToolContract:
         try:
@@ -240,6 +262,7 @@ def tool(
     path_fields: set[str] | frozenset[str] = frozenset(),
     programs: set[str] | frozenset[str] = frozenset(),
     program_field: str | None = None,
+    app_field: str | None = None,
     hidden: bool = False,
 ) -> Callable[[Callable[..., Awaitable[ToolResult]]], ToolContract]:
     """Declare a tool. Returns the contract, so the module-level name *is* the contract."""
@@ -263,6 +286,7 @@ def tool(
             path_fields=frozenset(path_fields),
             programs=frozenset(programs),
             program_field=program_field,
+            app_field=app_field,
             hidden=hidden,
         )
 
