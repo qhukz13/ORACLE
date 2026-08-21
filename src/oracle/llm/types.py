@@ -18,6 +18,11 @@ class CallType(StrEnum):
     would make the router take ~4 s to answer 'run the tests'."""
 
     ROUTE = "route"
+    #: Choosing a tool. A separate type from ROUTE because the shape is inverted: a
+    #: small system prompt and a comparatively large TOOLS band, where routing is the
+    #: other way round. Sharing ROUTE's allowances silently TRUNCATED the tool
+    #: descriptions — which are the entire basis for the model's choice.
+    SELECT = "select"
     ANSWER = "answer"
     REASON = "reason"
     SUMMARIZE = "summarize"
@@ -29,6 +34,10 @@ BUDGETS: dict[CallType, int] = {
     # lift intent accuracy from 63% to 93%. Cost is real (~570 ms prompt-eval/turn):
     # Ollama does not reuse a shared prefix across differing user messages.
     CallType.ROUTE: 2000,
+    # Selection: measured at 180 (system) + 229 (examples) + up to 211 (descriptions)
+    # + the request. 1200 leaves headroom for the catalogue to grow to the 40-tool cap
+    # without silently cutting a summary off mid-sentence.
+    CallType.SELECT: 1200,
     CallType.ANSWER: 2400,
     CallType.REASON: 8000,
     CallType.SUMMARIZE: 16000,

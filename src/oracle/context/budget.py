@@ -58,6 +58,18 @@ ALLOWANCE: dict[CallType, dict[Band, int]] = {
         Band.RETRIEVAL: 0,
         Band.HISTORY: 0,
     },
+    # Selection inverts ROUTE's shape: the system prompt is small and fixed, and the
+    # TOOLS band carries the descriptions the choice is actually made from. Sized from
+    # measurement (scripts/eval_selection.py), not from symmetry with ROUTE.
+    CallType.SELECT: {
+        Band.SYSTEM: 500,
+        Band.TOOLS: 500,
+        Band.TASK: 150,
+        Band.SIGNALS: 50,
+        Band.MEMORY: 0,
+        Band.RETRIEVAL: 0,
+        Band.HISTORY: 0,
+    },
     CallType.ANSWER: {
         Band.SYSTEM: 300,
         Band.TOOLS: 400,

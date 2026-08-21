@@ -77,13 +77,39 @@ _SYSTEM = """Choose ONE tool that does what the user asked, or "none".
 
 Rules:
 - Pick from the list. Never invent a name.
-- "none" if no tool fits, or if you would be guessing.
+- "none" whenever no tool clearly does it. A near-miss is worse than "none":
+  the user gets an action they did not ask for.
 - text: ONLY when the tool needs a message or a filter. Otherwise leave it empty.
   * a commit message -> the words the user wants recorded, nothing else
   * a test filter -> the test name or keyword they mentioned
 
 Never put a file path, a directory or a command in `text`. Those are not yours to
 choose."""
+
+#: MEASURED: few-shot examples took selection accuracy from 83.3% to 100% on the
+#: eval set (scripts/eval_selection.py). Same lever, same reason as the intent
+#: classifier's: prompt processing runs ~1700 tok/s on this GPU while generation runs at
+#: ~45, so examples are close to free and generated tokens are not.
+#:
+#: Chosen to cover the pairs that actually confused the model, not to be tidy:
+#:   * add vs commit — "commit my changes" selected `git.add` in a live run, and staged
+#:     without committing. Plausible, wrong, and silent.
+#:   * status vs diff — "is X clean" wants a verdict, not a patch.
+#:   * "none" appears twice, because a model that never sees a refusal never produces
+#:     one: both misses in the baseline were the model reaching for the nearest tool.
+_EXAMPLES = """Examples:
+
+"commit my changes with message fix the login redirect"
+  -> {"tool":"git.commit","text":"fix the login redirect"}
+"закоммить с сообщением почини редирект"
+  -> {"tool":"git.commit","text":"почини редирект"}
+"stage everything" -> {"tool":"git.add","text":""}
+"is the repo clean" -> {"tool":"git.status","text":""}
+"what changed since the last commit" -> {"tool":"git.diff","text":""}
+"run the tests" -> {"tool":"dev.run_tests","text":""}
+"run only the login tests" -> {"tool":"dev.run_tests","text":"login"}
+"delete all the log files" -> {"tool":"none","text":""}
+"send this to the printer" -> {"tool":"none","text":""}"""
 
 
 class SelectionError(Exception):
@@ -162,9 +188,10 @@ class ToolSelector:
 
         plan_model = _plan_model(candidates)
         assembled = self._assembler.assemble(
-            CallType.ROUTE,
+            CallType.SELECT,
             [
                 Item(Band.SYSTEM, _SYSTEM, role="system", provenance="system"),
+                Item(Band.SYSTEM, _EXAMPLES, role="system", provenance="system"),
                 Item(Band.TOOLS, _describe(candidates), role="system", provenance="system"),
                 Item(Band.TASK, f"Request: {text}", role="user", provenance="user"),
             ],
@@ -175,7 +202,7 @@ class ToolSelector:
             plan_model,
             stats=self.stats,
             max_tokens=80,
-            call_type=CallType.ROUTE,
+            call_type=CallType.SELECT,
         )
 
         # `getattr`, not attribute access: the model class was built at call time by

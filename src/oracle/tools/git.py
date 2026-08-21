@@ -104,7 +104,10 @@ class GitStatusResult(ToolResult):
 
 @tool(
     id="git.status",
-    summary="Branch, ahead/behind, and which files are staged, changed or untracked.",
+    summary=(
+        "Whether the repository is clean: branch, ahead/behind, and which files are "
+        "staged, changed or untracked. Does not show the changes themselves."
+    ),
     args=GitStatusArgs,
     result=GitStatusResult,
     capabilities={Capability.FS_READ, Capability.PROC_SPAWN},
@@ -190,7 +193,10 @@ class GitDiffResult(ToolResult):
 
 @tool(
     id="git.diff",
-    summary="Show changes as a patch plus a per-file stat. Large diffs are truncated.",
+    summary=(
+        "The actual line-by-line changes, as a patch. For whether anything changed at "
+        "all, use git.status."
+    ),
     args=GitDiffArgs,
     result=GitDiffResult,
     capabilities={Capability.FS_READ, Capability.PROC_SPAWN},
@@ -312,7 +318,7 @@ class GitAddResult(ToolResult):
 
 @tool(
     id="git.add",
-    summary="Stage a file or directory. Pass the repository root to stage everything.",
+    summary="Stage files so a later commit can include them. Does NOT create a commit.",
     args=GitAddArgs,
     result=GitAddResult,
     capabilities={Capability.FS_READ, Capability.GIT_WRITE, Capability.PROC_SPAWN},
@@ -370,7 +376,10 @@ class GitCommitResult(ToolResult):
 
 @tool(
     id="git.commit",
-    summary="Commit staged changes with a message. Undo restores the staged state.",
+    summary=(
+        "Record the staged changes as a commit. Requires a message. Undo puts the "
+        "changes back in the staging area."
+    ),
     args=GitCommitArgs,
     result=GitCommitResult,
     capabilities={Capability.FS_READ, Capability.GIT_WRITE, Capability.PROC_SPAWN},

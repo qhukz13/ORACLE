@@ -56,6 +56,10 @@ ignore = ["S101"]
 # what the model sees, and RUF001 flags Cyrillic as "ambiguous" in what is deliberately
 # a bilingual prompt.
 "src/oracle/router/intent.py" = ["E501", "RUF001"]
+# Same reasoning as intent.py: the few-shot block is literal prompt content, not code.
+# Reflowing it would change what the model sees, and RUF001 flags Cyrillic as
+# "ambiguous" in what is deliberately a bilingual prompt.
+"src/oracle/router/selection.py" = ["E501", "RUF001"]
 "scripts/*" = ["E501"]
 # ASYNC240: tool handlers do blocking file I/O on purpose. They execute inside the
 # toolhost child, which handles exactly one invocation at a time and has no event loop
