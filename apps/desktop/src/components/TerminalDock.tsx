@@ -23,7 +23,7 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface TerminalDockProps {
   /** Open PTY id, or null when nothing is attached yet. */
@@ -70,47 +70,109 @@ export function TerminalDock({
   const writtenRef = useRef(0);
   const [dropped, setDropped] = useState(0);
 
-  useEffect(() => {
-    if (!hostRef.current || termRef.current) return;
-    const term = new Terminal({
-      fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
-      fontSize: 12,
-      theme: THEME,
-      cursorBlink: true,
-      convertEol: false,
-      scrollback: 5000,
-      // The window's own reduced-motion preference, honoured here too.
-      cursorStyle: "block",
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(hostRef.current);
-    fit.fit();
-    termRef.current = term;
-    fitRef.current = fit;
+  /**
+   * `fit()` throws if the host has no layout yet, or if the renderer has been torn
+   * down: it reads `dimensions` off a renderer that is `undefined`, and the error
+   * surfaces as an unhandled TypeError from deep inside xterm rather than as anything
+   * that names the cause. Seen in practice on HMR and when the dock is toggled.
+   *
+   * A zero-size host is a normal transient state — the dock mounts before layout, and
+   * a hidden pane never lays out at all — so this is a guard, not a swallowed bug.
+   */
+  const safeFit = useCallback(() => {
+    const host = hostRef.current;
+    const fit = fitRef.current;
+    if (!host || !fit || host.clientWidth === 0 || host.clientHeight === 0) return false;
+    try {
+      fit.fit();
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
 
-    const sub = term.onData((data) => onInput(data));
-    return () => {
-      sub.dispose();
-      term.dispose();
-      termRef.current = null;
+  /**
+   * Attach only once the host is actually laid out.
+   *
+   * xterm measures a character by rendering one. Where it cannot — a zero-size host,
+   * which happens because the dock mounts before layout — the renderer's `dimensions`
+   * stays undefined and xterm throws from inside its own animation frame:
+   * `Cannot read properties of undefined (reading 'dimensions')`. That is *uncatchable*
+   * from here, being raised asynchronously rather than from the call, so it has to be
+   * prevented instead. A `ResizeObserver` waits for a real size and attaches then.
+   *
+   * **Measured limitation, stated plainly:** this guard does NOT fix the same error in
+   * a browser pane that never composites (a headless preview). There the host has a
+   * perfectly good 1280×217 layout and the character still cannot be measured, because
+   * nothing paints. The backend pipeline and the terminal *buffer* were verified in
+   * that environment; the rendering half was not, and could not be.
+   *
+   * Nothing is lost by waiting — output stays in the store until a terminal exists to
+   * receive it.
+   */
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || termRef.current) return;
+
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+
+    const attach = () => {
+      if (disposed || termRef.current) return;
+      if (host.clientWidth === 0 || host.clientHeight === 0) return;
+
+      const term = new Terminal({
+        fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
+        fontSize: 12,
+        theme: THEME,
+        cursorBlink: true,
+        convertEol: false,
+        scrollback: 5000,
+        cursorStyle: "block",
+      });
+      const fit = new FitAddon();
+      term.loadAddon(fit);
+      term.open(host);
+      termRef.current = term;
+      fitRef.current = fit;
+      safeFit();
+      // Anything that arrived while we were waiting for layout.
+      writtenRef.current = 0;
+
+      const sub = term.onData((data) => onInput(data));
+      cleanup = () => {
+        sub.dispose();
+        term.dispose();
+        termRef.current = null;
+        fitRef.current = null;
+      };
     };
-    // Mount once. `onInput` is read through the closure that the subscription captured,
-    // so the parent passes a stable callback.
+
+    attach();
+    const observer = new ResizeObserver(attach);
+    observer.observe(host);
+
+    return () => {
+      disposed = true;
+      observer.disconnect();
+      cleanup?.();
+    };
+    // Mount once. `onInput` is captured by the subscription, so the parent passes a
+    // stable callback.
   }, []);
 
   // Resize with the pane, and tell the PTY — otherwise the shell wraps at the wrong
   // column and a build log becomes unreadable.
   useEffect(() => {
     const onWindowResize = () => {
-      fitRef.current?.fit();
+      if (!safeFit()) return;
       const term = termRef.current;
       if (term && ptyId) onResize(term.cols, term.rows);
     };
     window.addEventListener("resize", onWindowResize);
     onWindowResize();
     return () => window.removeEventListener("resize", onWindowResize);
-  }, [ptyId, onResize]);
+  }, [ptyId, onResize, safeFit]);
 
   useEffect(() => {
     const term = termRef.current;
@@ -118,7 +180,13 @@ export function TerminalDock({
     for (let i = writtenRef.current; i < chunks.length; i++) {
       const chunk = chunks[i];
       if (!chunk) continue;
-      term.write(chunk.data);
+      try {
+        term.write(chunk.data);
+      } catch {
+        // A disposed terminal mid-flush. Losing a chunk here is a cosmetic gap in a
+        // log, not a correctness problem — the event stream still holds it.
+        break;
+      }
       if (chunk.dropped > dropped) setDropped(chunk.dropped);
     }
     writtenRef.current = chunks.length;
