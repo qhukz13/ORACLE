@@ -23,20 +23,22 @@ your code. Heavy reasoning is delegated to agents that are good at it; ORACLE's 
 
 ## Status
 
-**Phases 0–3 done. Next: [Phase 4 — Desktop UI v1](docs/ROADMAP.md#phase-4--desktop-ui-v1---mvp-milestone), which is the MVP milestone.**
+★ **The MVP is complete.** Phases 0–4 done. Next: [Phase 5 — Project knowledge](docs/ROADMAP.md#phase-5--project-knowledge-rag--post-mvp).
 
-ORACLE runs, routes, and acts. Ask it to commit your changes and it commits them — through a 0.8B
-local router, across a process boundary, with an undo you can use afterwards.
+ORACLE runs, routes, acts, and has an interface. Ask it to check a repository and it runs `git.status`
+and shows you the card. Ask it to push and it stops and shows you the commits that would leave the
+machine. Type in the terminal dock and your keystrokes reach a real ConPTY inside a Job Object that
+the HALT key can kill.
 
 | | |
 |---|---|
-| Tools | **27** behind the policy gate (26 offerable; one is a hidden undo recipe) |
-| Tests | **360**, of which the security suite is a merge gate |
-| Router | `qwen3.5:0.8b`, 93.3% intent accuracy, 100% tool-selection accuracy on the eval set |
+| Tools | **29** behind the policy gate (26 offerable, 11 reachable from a routed turn) |
+| Tests | **370 Python** + **77 TypeScript**; the security suite is a merge gate |
+| Router | `qwen3.5:0.8b`, 93.3% intent accuracy, 100% tool selection on the eval set |
 | Isolation | every tool runs in a separate low-privilege process inside a Job Object |
 
-What is not there yet: the desktop UI (approvals are emitted but nothing renders them), knowledge
-retrieval, delegation to Claude/Antigravity, pipelines, and mobile.
+What is not there yet: knowledge retrieval, delegation to Claude/Antigravity, pipelines, mobile, and
+the orbital view.
 
 Read `docs/` first — this repository is design-first and the documents lead the code.
 

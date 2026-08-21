@@ -278,7 +278,7 @@ DONE      indexed Obsidian (161 docs)     2m ago
 
 ---
 
-## 9. Confirmation Center
+## 9. Confirmation Center  `BUILT 2026-08-21`
 
 The most safety-critical surface in the product. **It must show the real action, never a paraphrase.**
 
@@ -306,6 +306,28 @@ The most safety-critical surface in the product. **It must show the real action,
 └────────────────────────────────────────────────────────┘
 ```
 
+### What was built, and the two places it differs from this sketch
+
+The card renders `approval.requested` and nothing else: if a fact is not in the event it
+could not have informed the decision. Verified live — asking ORACLE to push itself
+produced a card listing **the exact nine commits** that would be published, computed
+from local refs.
+
+- **"Always for X" was not built, and should not be.** A scoped standing approval is a
+  way to make prompts cheaper, and the answer to prompt fatigue is *fewer* prompts —
+  which reversibility and the T1 tier already deliver. Revisit only with data from
+  [OQ-13](OPEN_QUESTIONS.md#oq-13).
+- **EFFECT comes from a real dry run**, not from a description. `dry_run=True` is a
+  contract promise that the call performs nothing, which is why it needs no approval of
+  its own — and why `git.push`'s preview is computed from local refs rather than
+  `--dry-run`, which would contact the remote.
+
+One thing the sketch did not anticipate: **a replayed approval looks live.** History
+replays from seq 0 after a reload, so a request from a backend that has since exited
+arrives looking new and sits at the head of the queue where nothing can answer it.
+Expiry is counted from the server's timestamp, and an already-expired approval never
+joins the queue.
+
 Rules:
 
 - The command block is the **actual resolved argv**, monospaced, selectable, never re-worded by a model.
@@ -320,7 +342,7 @@ Rules:
 
 ---
 
-## 10. Command palette (`Ctrl+K`) — **Phase 4**
+## 10. Command palette (`Ctrl+K`)  `BUILT 2026-08-21`
 
 The fastest path to anything, and the UI half of the pre-router
 ([AGENT_RUNTIME.md](AGENT_RUNTIME.md#step-1-in-detail--the-pre-router-earns-its-keep)). Every action

@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OracleClient } from "./client";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmationCenter } from "./components/ConfirmationCenter";
+import { Inspector } from "./components/Inspector";
 import { TerminalDock } from "./components/TerminalDock";
 import { ToolCard } from "./components/ToolCard";
 import { useStore } from "./store";
@@ -40,6 +41,8 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidebar, setSidebar] = useState(true);
   const [dock, setDock] = useState(false);
+  const [inspector, setInspector] = useState(true);
+  const [selectedTurn, setSelectedTurn] = useState<string | null>(null);
   const [projects, setProjects] = useState<string[]>([]);
   const [projectsRoot, setProjectsRoot] = useState("");
   const clientRef = useRef<OracleClient | null>(null);
@@ -151,6 +154,9 @@ export default function App() {
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
         setSidebar((v) => !v);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "i") {
+        e.preventDefault();
+        setInspector((v) => !v);
       } else if ((e.ctrlKey || e.metaKey) && e.key === "`") {
         e.preventDefault();
         setDock((v) => !v);
@@ -284,7 +290,11 @@ export default function App() {
           ) : (
             <ul className="turns">
               {s.turns.map((t) => (
-                <li key={t.turnId}>
+                <li
+                  key={t.turnId}
+                  className={t.turnId === selectedTurn ? "sel" : undefined}
+                  onClick={() => setSelectedTurn(t.turnId)}
+                >
                   <div className="msg user">{t.userText}</div>
                   {t.tools.map((call, i) => (
                     <ToolCard key={`${t.turnId}-${i}`} call={call} onUndo={undo} />
@@ -302,6 +312,15 @@ export default function App() {
           )}
           <div ref={logEnd} />
         </main>
+
+        {inspector && (
+          <Inspector
+            // Defaults to the most recent turn: that is the one being watched.
+            turn={s.turns.find((t) => t.turnId === selectedTurn) ?? s.turns.at(-1) ?? null}
+            traceId={s.events.at(-1)?.trace_id ?? ""}
+            onUndo={undo}
+          />
+        )}
       </div>
 
       {dock && (

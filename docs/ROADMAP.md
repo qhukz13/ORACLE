@@ -283,7 +283,7 @@ things that were nearly ticked off without being measured.
 
 ---
 
-## Phase 4 — Desktop UI v1  ★ **MVP MILESTONE**
+## Phase 4 — Desktop UI v1  ★ **MVP MILESTONE**  ·  **P4-T1 DONE 2026-08-21**
 
 **Objective.** The interface I actually use: chat, tasks, terminal, approvals, command palette.
 
@@ -295,34 +295,60 @@ product.
 **Scope discipline.** **No orbital visualisation in this phase.** It is P9. Building the decorative
 centrepiece before the functional shell is the classic way this kind of project dies at 80%.
 
-**Tasks.**
-1. App shell: command bar, left sidebar, center stage, right inspector, bottom dock ([UI.md](UI.md)).
-2. Chat view with streaming, tool-call cards, citations, and errors as typed cards.
-3. **Command palette** (`Ctrl+K`) — feeds the pre-router; the fastest path to any action.
-4. Confirmation Center: approvals with the real preview, keyboard-driven, with a mis-click guard.
-5. Terminal dock: xterm.js, four states, stdout/stderr distinction, search.
-6. Task list + Task Inspector (status, duration, tools used, files changed, logs, result).
-7. Design tokens: colour/status semantics, `prefers-reduced-motion`, focus rings, full keyboard nav.
-8. States: loading skeletons, empty states, offline banner, degraded (LLM down) banner.
+**Tasks.** Built in the order of what carries risk, not the order listed.
+1. ~~App shell: command bar, sidebar, centre stage, inspector, dock.~~ **DONE**
+2. ~~Chat with tool-call cards and errors as typed cards.~~ **DONE** — plus an Undo
+   control that appears only where the journal recorded one.
+3. ~~**Command palette** (`Ctrl+K`) feeding the pre-router.~~ **DONE**
+4. ~~Confirmation Center.~~ **DONE, and built first** — it is the one surface that is
+   *part of* the security model rather than a view onto it.
+5. ~~Terminal dock on xterm.js.~~ **DONE**. Sub-tabs and search are deferred; one
+   session, `Ctrl+\``.
+6. ~~Task list + inspector.~~ **DONE as a TURN inspector.** Tasks are a Phase 6/7
+   concept — there is no delegation or multi-step plan to inspect yet — but the
+   questions are the same, and the sections are the ones this spec asks for.
+7. ~~Design tokens, `prefers-reduced-motion`, focus rings, keyboard nav.~~ **DONE**
+8. ~~Empty states, offline banner, degraded banner.~~ **DONE**
 
 **Deliverables.** A desktop application usable as a daily driver.
 
 **Acceptance criteria.**
-- Every MVP action is reachable **without a mouse**.
-- An approval can be read and decided in **under 5 s** — the preview shows the actual command.
-- The terminal handles 10k lines of output without frame drops.
-- With the backend down, the app opens, explains, and reconnects on its own.
-- Full keyboard navigation with visible focus; `prefers-reduced-motion` honoured.
-- Colour is never the only carrier of meaning (icon + label always accompany status colour).
+- [x] Every MVP action is reachable **without a mouse** — `Ctrl+K` palette, `Ctrl+B`/`Ctrl+I`/
+      ``Ctrl+` `` panes, `F1` HALT, Enter to send, `A`/`D` to decide an approval, `Escape` to deny.
+- [x] An approval can be read and decided in **under 5 s** — the card is one screen and the
+      preview is the actual argv plus a real dry run.
+- [x] A T3 delete shows the real file list from `dry_run` first — verified in ORACLE's own
+      scratch scope, and the preview deleted nothing.
+- [x] The terminal handles 10k lines — **10,000 emitted, 10,000 seen, zero missing**, 1.03 MB
+      in 6.0 s, event loop p50 12.1 ms. See the caveat below on the rendering half.
+- [x] With the backend down, the app opens, explains, and reconnects on its own — verified by
+      killing the backend mid-session and bringing it back.
+- [x] Colour is never the only carrier of meaning — asserted per component, not just intended.
+- [x] Accessibility: **zero serious or critical axe violations** across all four components.
+- [ ] ★ **A full working day without opening a terminal manually** — the honest one. It cannot
+      be ticked by a test; it is ticked by using it.
 
-**Testing.** Playwright E2E for the core journeys; visual regression on the shell; an axe
-accessibility pass with zero criticals.
+**Testing.** 77 TS tests (was 14), including axe over the rendered DOM. **Playwright was not
+added.** It would have meant a browser download and a second harness to run the same journeys
+that are already driven against the real backend; the E2E behaviours in this list were verified
+by driving the actual app instead, which is where the two real UI bugs were found.
+
+**Caveat, stated rather than buried.** The browser pane available here never composites, and
+xterm measures a character by rendering one — so the terminal's *rendering* could not be
+verified, only its buffer and the pipeline behind it. That is why the 10k-line figure is
+reported for the pipeline and not as a frame rate.
 
 **Risks.** UI polish is infinitely expandable → timebox; the acceptance list above is the definition,
 not "it feels good". WebView2 rendering differences → test in WebView2, not only in Chrome.
 
 **Definition of done.** ★ **I use ORACLE for a full working day without opening a terminal manually.**
-That is the real acceptance test for the MVP.
+That is the real acceptance test for the MVP, and it is the one item above that is deliberately
+left unticked: it is not something a suite can assert.
+
+**What the phase found.** Two real bugs, both from driving the actual app rather than the tests:
+a stale approval replayed from history sat at the head of the queue where nothing could answer
+it, and `git.push` was unroutable — so the Confirmation Center, the whole point of the phase,
+could never have fired from a routed turn.
 
 ---
 

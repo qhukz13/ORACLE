@@ -3,141 +3,116 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** P3-T1 — Process isolation, then PC & dev control tools
-**Status:** `DONE` — all 11 requirements, all acceptance criteria verified live
+**Task:** P4-T1 — Desktop UI v1
+**Status:** `DONE` — ★ **the MVP is complete**, with one criterion that only using it can tick
 **Date:** 2026-08-21
 
 ---
 
-## The headline
+## Where the project is
 
-**ORACLE can now do things.** Ask it to commit your changes and it commits them, through a 0.8B
-router, across a process boundary, with an undo you can use afterwards:
+**Phases 0–4 are done. ORACLE is a working local agent with a working interface.**
 
-```
-"commit my changes in Asterim with message add the feature"
-  -> git.commit  ->  "Committed 59eef851 on main — 3 file(s), +10/-0."
-  -> undo        ->  "commit 59eef851 undone; the changes are staged again"
-```
+Ask it to check a repository and it runs `git.status` and shows you the card. Ask it to push and it
+stops and shows you the nine commits that would leave the machine. Type in the terminal dock and the
+keystrokes reach a real ConPTY inside a Job Object that HALT can kill.
 
-**27 tools** (26 offerable, `git.undo` hidden). **360 tests**, 1 skipped. Gate green: ruff, mypy
-`--strict`, pytest, TS typecheck, vitest.
+| | |
+|---|---|
+| Tools | **29** registered, 26 offerable, 11 reachable from a routed turn |
+| Tests | **370 Python** + **77 TypeScript**; the security suite is a merge gate |
+| Router | 93.3% intent accuracy, **100% tool selection** on the eval set, p50 1.16 s |
+| Gate | ruff · mypy `--strict` · pytest · tsc · vitest — green |
 
-## Acceptance criteria — measured, not inferred
-
-Every one was run against real things: a real git repo with a real bare remote, a real ConPTY, the
-real toolhost, the real model.
+## Acceptance criteria — measured, not asserted
 
 | criterion | result |
 |---|---|
-| commit end to end, undoable | ✅ routed to `git.commit`; undo restores HEAD and leaves the work staged |
-| tests return structured counts | ✅ `1 passed, 1 failed, 0 skipped`, source `junit-xml` |
-| `git.push` prompts; approving runs the previewed argv | ✅ `push origin main`, and the remote received it |
-| recursive delete previews a real file list | ✅ and a dry run performs nothing |
-| terminal streams a long burst losing nothing | ✅ **2000/2000 lines**, loop p50 13.5 ms |
-| unlisted program refused, naming the rule | ✅ `programs.allowlist` |
-| `shell=True` absent, lint enforces it | ✅ plus a security test, because a lint rule is one `# noqa` from advisory |
-| project detection classifies all seven projects | ✅ eight directories, including an empty one that correctly says `unknown` |
+| Every MVP action without a mouse | ✅ `Ctrl+K` · `Ctrl+B` · `Ctrl+I` · ``Ctrl+` `` · `F1` · Enter · `A`/`D`/`Esc` |
+| Approval readable and decidable in < 5 s | ✅ one screen: the real argv, the rule, a real dry run, a live countdown |
+| T3 delete previews a real file list | ✅ verified in ORACLE's scratch scope; the preview deleted nothing |
+| Terminal handles 10k lines | ✅ **10,000 / 10,000**, 1.03 MB in 6.0 s, loop p50 12.1 ms |
+| Backend down → opens, explains, reconnects | ✅ killed mid-session; resumed at `since_seq=251` when it returned |
+| Colour never the only carrier of meaning | ✅ asserted per component |
+| Zero serious/critical axe violations | ✅ across all four components |
+| ★ A full working day without a terminal | ⬜ **not something a suite can tick.** Left honest. |
 
-## Three things that were nearly ticked off without being measured
+## The two bugs that came from driving the app, not the tests
 
-This is the part worth reading. Each looked done and was not.
+Both were invisible to a green suite, and both were in the surface the phase exists for.
 
-### 1. The terminal silently deleted its own output
+**1. A stale approval blocked the live one.** History replays from seq 0 after a reload, so a request
+issued by a backend that has since exited arrives looking brand new. It sat at the head of the queue —
+with a live countdown — where nothing could ever answer it, hiding the real approval behind it.
+Expiry now counts from the **server's** timestamp, and an already-expired approval never joins the
+queue. That is the server's own rule, applied on arrival.
 
-`term.*` had 13 green tests and worked interactively. Measuring the ROADMAP criterion properly — 2000
-numbered lines, so "no bytes dropped" is arithmetic — lost 226 of them.
-
-Two plausible hypotheses were wrong and had to be eliminated by measurement (ConPTY coalescing;
-a slow pump). The real bug: **`term.read` emptied the whole buffer and returned only its last
-16 KB.** The rest was thrown away — which is why the missing lines were always the oldest, and why
-the drop counter honestly reported zero. `truncated` was a field that meant "we deleted some" while
-reading like "there is more".
-
-The same run surfaced a second bug: **the child's structlog output was going to stdout, which is the
-toolhost's protocol pipe.** Benign only by luck — a log line that happened to be valid JSON would
-have been parsed as a tool response.
-
-Full account: [`2026-08-21-terminal-loses-output.md`](../logs/development/2026-08-21-terminal-loses-output.md).
-
-### 2. Tool selection picked the wrong tool, confidently
-
-The first live run of *"commit my changes"* selected `git.add`, staged the files, and **reported
-success**. A plausible adjacent wrong action is a small model's characteristic failure, and it is far
-worse than a crash because it looks like it worked.
-
-Fixed by measuring first: `scripts/eval_selection.py`, 18 cases, two of which must select *nothing*.
-Baseline **83.3%** — and two of the three misses were the same thing, the model reaching for the
-nearest tool instead of declining. Few-shot examples (with "none" appearing twice) plus summaries
-rewritten to *distinguish* neighbouring tools took it to **100%**, at no latency cost.
-
-That change then exposed a silent truncation: selection had been borrowing `ROUTE`'s context budget,
-whose shape is inverted, and **the tool descriptions were being cut off before the model saw them**.
-
-Full account: [`2026-08-21-selection-accuracy.md`](../logs/development/2026-08-21-selection-accuracy.md).
-
-### 3. `fs.delete` declared `dry_run=True` and ignored it
-
-The registry *requires* `dry_run` for T3 so the confirmation card can show a real preview. The
-handler deleted regardless. Fixed — and it exposed a circularity: a dry run required the approval it
-existed to inform. A dry run now skips the approval requirement, which puts an obligation on the
-contract instead: **`dry_run=True` means the call performs nothing**, network egress included. That
-is why `git.push`'s preview is computed from local refs rather than `--dry-run`, which would contact
-the remote.
+**2. `git.push` was unroutable, so the Confirmation Center could never fire.** Every routable tool was
+T0 or T1. The most safety-critical surface in the product had no path to appearing in normal use, and
+nothing said so. `git.push` turns out to be buildable honestly from the project alone — `origin` and
+the checked-out branch are what "push my changes" means — and a test now asserts that it being the
+only routable tool above T1 stays a decision rather than an accident.
 
 ## What was built
 
 ```
-policy/programs.py   the program allowlist: pinned at load, deny-wins, batch-argv rule
-policy/apps.py       the app catalogue: aliases, never paths
-tools/proc.py        the one place a process is spawned; argv lists, caps, blobs
-tools/git.py         9 tools; porcelain v2, never scraped prose
-tools/dev.py         4 tools; junit-xml / json reports, and one honest `scraped`
-tools/terminal.py    4 tools on ConPTY; a reader thread per session
-tools/apps.py        1 tool, in the parent, detached — the only exception to ADR-0003
-core/projects.py     detection by marker file; test/build/lint commands per project
-core/approvals.py    the approval.requested / approval.resolved round trip
-router/selection.py  one tool from an enum, one string, everything else built in code
+components/ConfirmationCenter.tsx   the card; the one UI that is part of the security model
+components/ToolCard.tsx             one card per call: tier, verbatim args, Undo where real
+components/CommandPalette.tsx       Ctrl+K into the pre-router; never dead-ends
+components/TerminalDock.tsx         xterm.js over a real ConPTY
+components/Inspector.tsx            what a turn decided, ran, and cost
+core/terminal.py                    the bridge: PTY output onto the event stream
+tools/terminal.py                   + term.input, term.resize (hidden)
 ```
 
-## Decisions that came out of building it
+### The distinction the terminal is built around
 
-- **[ADR-0018](DECISIONS.md#adr-0018--a-launched-application-is-not-a-tool-call)** — a launched
-  application cannot live in the Job Object. HALT must not close your editor. The alternative
-  (`JOB_OBJECT_LIMIT_BREAKAWAY_OK`) would let *anything* the child spawns escape HALT, which is not
-  a trade worth making to open Explorer. **ADR-0003 confirmed** against the implementation in the
-  same pass, with the measurements in its record.
-- **`fs.write` now means "writes a path the contract names".** That is what makes an undo plan
-  possible. A tool whose writes happen inside a spawned program declares `proc.spawn` instead —
-  enforced in the registry, because `dev.build` claiming `fs.write` would have promised a backup
-  nothing could take.
-- **`term.write` is its own capability**, not `proc.spawn`. `docs/SECURITY.md#4b` said so and was
-  right: a spawn is an argv the allowlist can inspect, and a line of shell input is not.
-- **Hidden tools are a category the contract needed.** `git.undo` must exist in the registry and must
-  never be selectable.
+`term.write` is **the agent** typing into a shell: T2, confirmed every single time, one line per call
+so an approval cannot cover a script. `term.input` is **the human** typing: T1, and hidden so the
+model can never reach it.
 
-## What the model is allowed to decide
+Asking someone to approve their own keystrokes is not a security control — it is a way to teach them
+to click Approve. But a tool the agent *could* call would be `term.write` with the confirmation
+removed, which is the exact hole the separation exists to prevent. Hence two tools.
 
-Worth restating, because 100% on 18 cases is not a licence to trust it:
+### Why the terminal polls
 
-- it picks a **name from an enum** built out of intent-filtered candidates, so an off-menu name is
-  unspellable rather than validated afterwards;
-- it supplies **one string** that is inherently text — a commit message, a test filter;
-- **it never writes a path.** The project path is composed from a root the runtime owns, after the
-  classifier has checked the name against the registry.
+The PTY lives in the toolhost, because a runaway `npm install` must die with HALT. The parent polls
+each session through the ordinary tool path and republishes the output as `term.output`. A push
+channel would mean the parent's frame reader had to tell a reply from an announcement — a protocol
+seam exactly where correctness matters. Polling costs one ~28 ms round trip per session per 120 ms
+and reuses the gate, the audit log and the timeouts unchanged.
 
-There is a test that puts `C:\Windows\System32` in the model's free-text field and shows it goes
-nowhere. That property does not depend on the accuracy number, which is the point of it.
+## Decisions worth knowing
+
+- **The Confirmation Center was built first, not fourth.** Everything else in the phase is an
+  interface to something that already worked. The card is the only piece where the UI *is* the
+  security model, and a confirmation the user cannot read is worse than no prompt at all.
+- **"Always for X" was deliberately not built.** A scoped standing approval makes prompts cheaper;
+  the answer to prompt fatigue is *fewer* prompts, which reversibility and T1 already deliver.
+- **Playwright was not added.** It meant a browser download and a second harness for journeys already
+  driven against the real backend — which is where both real bugs were found. 77 vitest tests
+  including axe over the rendered DOM cover the components.
+- **No orbital view.** Phase 9. Building the decorative centrepiece before the functional shell is
+  the classic way this kind of project dies at 80%.
 
 ## Known gaps, honestly
 
-- **Only 11 of 26 tools are reachable from a routed turn.** Selection offers a tool only when its
-  arguments can be built from *(project, one string)*. `dev.execute`, `term.write`, `fs.write` and
-  `git.push` need an argv, a command, file content or a remote. They are callable through the API
-  and will be reachable from a plan; half-filling them would mean inventing something.
-- **No UI for approvals yet.** The events are emitted and the WS command works; the card is Phase 4.
-- **Terminal sessions die with the toolhost.** Correct — a shell belongs in the Job Object — but it
-  means a crash loses your session, and that should be visible in the UI rather than silent.
-- **[OQ-13](OPEN_QUESTIONS.md#oq-13) (what approval rate causes prompt fatigue) is still an
-  assumption.** Now measurable: T1 covers writes, commits, tests, builds and branches, so daily use
-  should produce very few prompts. Worth counting once Phase 4 makes daily use real.
+- **The terminal's rendering was never visually verified.** The browser pane available here does not
+  composite, and xterm measures a character by rendering one — so what was verified is the pipeline
+  (10k lines, no loss) and the terminal *buffer* (`C:\Projects>echo terminal-dock-works`), not the
+  pixels. A guard was added for the genuinely-fixable half (attaching before layout exists); the
+  headless case is documented in the component rather than papered over.
+- **11 of 26 tools are reachable from a routed turn.** The rest need an argv, a command, file content
+  or a remote — none derivable from *(project, one string)* without inventing something.
+- **One terminal session, no sub-tabs, no search.** `Ctrl+F` in the dock is not built.
+- **No task system.** The inspector shows a *turn*; tasks arrive with delegation in Phase 6.
+- **[OQ-13](OPEN_QUESTIONS.md#oq-13) is still an assumption.** T1 covers writes, commits, tests,
+  builds and branches, so daily use should prompt rarely — but nobody has counted yet, and now
+  somebody can.
+
+## For whoever picks this up
+
+The next phase is **P5 — Project knowledge (RAG)**, and the MVP is behind you. Before starting it,
+consider spending a day *using* ORACLE: the unticked criterion above is the only one that matters,
+and it is the one most likely to produce a list of small things that make it genuinely daily-usable.
