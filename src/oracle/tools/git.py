@@ -647,11 +647,30 @@ async def git_push(*, ctx: ToolContext, args: GitPushArgs) -> GitPushResult:
         raise ValueError("HEAD is detached; refusing to guess which branch to push")
 
     argv = ["push", args.remote, branch]
+
     if ctx.dry_run:
-        # `--dry-run` contacts the remote and reports what WOULD be sent. That is a real
-        # preview rather than a description of one, which is what a confirmation card
-        # is required to show (docs/TOOLS.md, contract note on dry_run).
-        argv.insert(1, "--dry-run")
+        # NOT `git push --dry-run`. That contacts the remote, and a dry run must have no
+        # side effect at all — network egress included — because it runs without an
+        # approval. The local answer is also the better one: the user wants to know
+        # WHICH COMMITS would be published, not that the transport works.
+        pending = await _git(
+            ctx, repo, ["log", "--format=%h %s", f"{args.remote}/{branch}..{branch}"]
+        )
+        commits = [line for line in pending.stdout.splitlines() if line] if pending.ok else []
+        note = (
+            f"{len(commits)} commit(s) would be published to {args.remote}/{branch}"
+            if pending.ok
+            else f"{args.remote}/{branch} is unknown locally; everything on {branch} would be new"
+        )
+        return GitPushResult(
+            repo=str(repo),
+            remote=args.remote,
+            branch=branch,
+            argv=" ".join(["git", *argv]),
+            dry_run=True,
+            output="\n".join([note, *commits[:50]]),
+            undo=UndoPlan(note="a push cannot be undone"),
+        )
 
     r = await _git(ctx, repo, argv, timeout_s=120)
     if not r.ok:
@@ -662,7 +681,7 @@ async def git_push(*, ctx: ToolContext, args: GitPushArgs) -> GitPushResult:
         remote=args.remote,
         branch=branch,
         argv=r.argv_display(),
-        dry_run=ctx.dry_run,
+        dry_run=False,
         output=clip(r.combined.strip(), 4000)[0],
         undo=UndoPlan(note="a push cannot be undone"),
     )

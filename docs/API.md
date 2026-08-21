@@ -73,11 +73,20 @@ never produces duplicates or holes. If `since_seq` is older than retention, the 
 | `session.message` | `{text, attachments?}` | the main entry point |
 | `session.cancel` | `{turn_id}` | |
 | `task.cancel` | `{task_id}` | |
-| `approval.respond` | `{approval_id, decision, nonce, scope?}` | **T3 rejected from non-desktop devices** |
+| `approval.respond` | `{approval_id, decision: "approve"\|"reject"}` | **T3 rejected from non-desktop devices**. Implemented 2026-08-21; `nonce` and `scope` are deferred — see below |
+| `undo` | `{undo_id?}` | reverses one journalled mutation; omit the id for the most recent |
 | `term.input` | `{pty_id, data}` | human input only; agent PTY writes go through the tool path |
 | `term.resize` | `{pty_id, cols, rows}` | |
 | `halt` | `{reason}` | must work in every state, never touches the LLM |
 | `subscribe` | `{topics[]}` | mobile subscribes narrowly to save battery |
+
+**On `nonce` and `scope`.** Both were in the original sketch and neither is implemented, on purpose.
+A `nonce` guards against a replayed approval; approvals are already single-use and keyed by an
+unguessable id, and resolving one twice cannot overturn the recorded answer, so a nonce would add a
+field without adding a property. A `scope` ("approve for this session") is deliberately absent: the
+answer to prompt fatigue is *fewer prompts*, via reversibility and the T1 tier, not cheaper ones
+([SECURITY.md](SECURITY.md#2-design-principles)). Revisit only with data from
+[OQ-13](OPEN_QUESTIONS.md#oq-13).
 
 ### Backpressure
 

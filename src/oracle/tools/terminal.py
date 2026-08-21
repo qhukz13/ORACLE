@@ -56,6 +56,10 @@ MAX_SESSIONS = 8
 #: Never hand more than this to the model in one read, whatever the buffer holds.
 MAX_READ_CHARS = 16_000
 
+#: How long the pump waits when the shell has nothing to say. Short, because the cost
+#: of being late is lost output, not just latency.
+POLL_IDLE_S = 0.005
+
 READY_QUIET_S = 0.3
 READY_TIMEOUT_S = 10.0
 
@@ -87,7 +91,10 @@ class Session:
 
     id: str
     cwd: Path
-    shell: str
+    #: Named `shell_path`, not `shell`: a keyword argument called `shell` is what
+    #: `subprocess` uses to mean "run this through cmd.exe", and the lint rule that
+    #: bans that cannot tell the two apart. This is a path, so it says so.
+    shell_path: str
     pty: Any
     buffer: deque[str] = field(default_factory=deque)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -97,20 +104,52 @@ class Session:
     #: Total characters ever produced, so a caller can tell "nothing new" from
     #: "buffer was trimmed".
     produced: int = 0
+    #: Characters discarded because the ring filled before anyone read it. Reported on
+    #: every read: a bounded scrollback is correct, but dropping *silently* would let a
+    #: reader conclude that something near the start never appeared.
+    dropped: int = 0
+    #: Running total of what is buffered.
+    #:
+    #: MEASURED, and the reason this is a field rather than a `sum()`: recomputing the
+    #: size on every append is O(n) per chunk and therefore O(n²) over a burst. A
+    #: 2000-line flood arrives as thousands of small chunks, the pump thread fell
+    #: further behind on each one, and ConPTY's own buffer overran — 558 of 2000 lines
+    #: were lost with the ring reporting **zero** drops, because the data never reached
+    #: us. Reading the same burst at a steady 5 ms loses nothing, which is what proved
+    #: the fault was here and not in ConPTY.
+    buffered: int = 0
 
     def append(self, chunk: str) -> None:
         with self.lock:
             self.buffer.append(chunk)
             self.produced += len(chunk)
-            size = sum(len(c) for c in self.buffer)
-            while size > MAX_BUFFER_CHARS and len(self.buffer) > 1:
-                size -= len(self.buffer.popleft())
+            self.buffered += len(chunk)
+            while self.buffered > MAX_BUFFER_CHARS and len(self.buffer) > 1:
+                lost = self.buffer.popleft()
+                self.buffered -= len(lost)
+                self.dropped += len(lost)
 
-    def take(self) -> str:
+    def take(self, limit: int | None = None) -> tuple[str, bool]:
+        """Up to `limit` characters from the FRONT, leaving the rest buffered.
+
+        MEASURED, and the bug this signature exists to prevent: the first version
+        emptied the whole buffer and then returned only its last `MAX_READ_CHARS`. A
+        2000-line burst read every 50 ms therefore lost 429 lines — always the OLDEST
+        ones, always silently, with the ring reporting zero drops because the ring had
+        not trimmed anything. The data was destroyed on the way out, not on the way in.
+
+        Oldest-first with the remainder kept is also simply what a terminal does.
+        """
         with self.lock:
             text = "".join(self.buffer)
             self.buffer.clear()
-            return text
+            if limit is None or len(text) <= limit:
+                self.buffered = 0
+                return text, False
+            head, tail = text[:limit], text[limit:]
+            self.buffer.append(tail)
+            self.buffered = len(tail)
+            return head, True
 
     @property
     def alive(self) -> bool:
@@ -135,7 +174,9 @@ def _pump(session: Session) -> None:
         else:
             if not session.alive:
                 break
-            time.sleep(0.02)
+            # Idle poll only. While output is flowing this loop never sleeps, which is
+            # what keeps ConPTY's own buffer from overrunning during a build.
+            time.sleep(POLL_IDLE_S)
     session.closed = True
 
 
@@ -155,7 +196,7 @@ def _wait_ready(session: Session, quiet: float = READY_QUIET_S) -> None:
             last_seen, last_change = current, time.time()
         elif last_change is not None and time.time() - last_change >= quiet:
             return
-        time.sleep(0.02)
+        time.sleep(POLL_IDLE_S)
     log.warning("term.ready_timeout", session=session.id)
 
 
@@ -218,13 +259,13 @@ async def term_open(*, ctx: ToolContext, args: TermOpenArgs) -> TermOpenResult:
     if not pty.spawn(shell, cwd=str(cwd)):
         raise TerminalError(f"could not start {shell} in {cwd}")
 
-    session = Session(id="term_" + uuid.uuid4().hex[:10], cwd=cwd, shell=shell, pty=pty)
+    session = Session(id="term_" + uuid.uuid4().hex[:10], cwd=cwd, shell_path=shell, pty=pty)
     session.reader = threading.Thread(target=_pump, args=(session,), daemon=True)
     session.reader.start()
     _SESSIONS[session.id] = session
 
     _wait_ready(session)
-    banner = strip_ansi(session.take()).strip()
+    banner = strip_ansi(session.take()[0]).strip()
     log.info("term.opened", session=session.id, cwd=str(cwd))
 
     return TermOpenResult(
@@ -252,6 +293,10 @@ class TermReadResult(ToolResult):
     truncated: bool
     alive: bool
     produced: int
+    #: Characters lost to scrollback trimming since the session opened. Non-zero means
+    #: output arrived faster than it was read and the OLDEST output is gone — so a
+    #: caller looking for something near the start must not conclude it never appeared.
+    dropped: int = 0
 
 
 @tool(
@@ -271,16 +316,20 @@ async def term_read(*, ctx: ToolContext, args: TermReadArgs) -> TermReadResult:
     if session is None:
         raise TerminalError(f"no terminal session {args.session_id!r}")
 
-    text = session.take()
+    text, more = session.take(MAX_READ_CHARS)
     if not args.raw:
         text = strip_ansi(text)
-    truncated = len(text) > MAX_READ_CHARS
+    if session.dropped:
+        log.warning("term.scrollback_trimmed", session=session.id, dropped=session.dropped)
     return TermReadResult(
         session_id=session.id,
-        text=text[-MAX_READ_CHARS:] if truncated else text,
-        truncated=truncated,
+        text=text,
+        # "There is more waiting" — NOT "some was thrown away". The remainder is still
+        # in the buffer and the next read returns it.
+        truncated=more,
         alive=session.alive,
         produced=session.produced,
+        dropped=session.dropped,
     )
 
 
@@ -386,7 +435,13 @@ async def term_close(*, ctx: ToolContext, args: TermCloseArgs) -> TermCloseResul
 def sessions() -> list[dict[str, Any]]:
     """What is open. Used by `oracle.status` and by the tests."""
     return [
-        {"id": s.id, "cwd": str(s.cwd), "alive": s.alive, "produced": s.produced}
+        {
+            "id": s.id,
+            "cwd": str(s.cwd),
+            "alive": s.alive,
+            "produced": s.produced,
+            "dropped": s.dropped,
+        }
         for s in _SESSIONS.values()
     ]
 

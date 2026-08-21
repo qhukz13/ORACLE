@@ -21,12 +21,24 @@ import sys
 import time
 from typing import Any
 
+from oracle.logsink import configure
 from oracle.toolhost.protocol import HostEvent, Invocation, Response
+
+#: The protocol channel, captured before anything else can touch it.
+#:
+#: MEASURED: structlog's default logger writes to **stdout**, which is this pipe. Any
+#: tool that logs — every `term.*` call does — emitted a line the parent then tried to
+#: parse as a `Response`, visible as `toolhost.unparseable_frame`. That was benign only
+#: by luck: a log line that happened to be valid JSON would have been read as a reply.
+#:
+#: So stdout is taken away from everything but this function, and `sys.stdout` is
+#: pointed at stderr in `main()`.
+_PROTOCOL = sys.stdout
 
 
 def _emit(payload: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    _PROTOCOL.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    _PROTOCOL.flush()
 
 
 def _log(message: str) -> None:
@@ -131,6 +143,13 @@ def main() -> int:
         if leaky in os.environ:
             _log(f"toolhost: refusing to start — {leaky} is present in the environment")
             return 2
+
+    # Logs to stderr, no log file: this process holds nothing durable, and the parent
+    # owns the log directory. Then stdout is pointed at stderr so that a stray `print()`
+    # in any tool goes somewhere harmless instead of onto the protocol channel.
+    configure(None, os.environ.get("ORACLE_LOG_LEVEL", "info"))
+    sys.stdout = sys.stderr
+
     try:
         return asyncio.run(serve())
     except KeyboardInterrupt:  # pragma: no cover

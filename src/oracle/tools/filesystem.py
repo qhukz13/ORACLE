@@ -234,12 +234,23 @@ class FsDeleteArgs(ToolArgs):
     recursive: bool = False
 
 
+#: A confirmation card shows this many names. Enough to recognise "that is the wrong
+#: folder" at a glance, which is the only question the preview has to answer.
+MAX_PREVIEW_ENTRIES = 50
+
+
 class FsDeleteResult(ToolResult):
     path: str
     kind: str
     entries: int
     trashed_to: str
     undo: UndoPlan
+    #: What a dry run found. The confirmation card for a recursive delete has to show a
+    #: real file list rather than a count — "delete 3,915 files?" is not something
+    #: anybody can meaningfully approve.
+    would_delete: list[str] = Field(default_factory=list)
+    dry_run: bool = False
+    preview_truncated: bool = False
 
 
 @tool(
@@ -263,14 +274,34 @@ async def fs_delete(*, ctx: ToolContext, args: FsDeleteArgs) -> FsDeleteResult:
         raise ValueError(f"{real} does not exist")
 
     is_dir = real.is_dir()
-    entries = sum(1 for _ in real.rglob("*")) if is_dir else 1
     if is_dir and not args.recursive:
         raise ValueError(f"{real} is a directory; pass recursive=true to delete it")
+
+    # Enumerate BEFORE deciding anything. The same walk answers both questions — what
+    # would go, and how much — so a dry run and a real delete cannot disagree about the
+    # contents.
+    victims = [str(p.relative_to(real)) for p in real.rglob("*")] if is_dir else [real.name]
+    entries = len(victims)
+    kind = "dir" if is_dir else "file"
+
+    if ctx.dry_run:
+        # A real preview, not a description of one. This is what the contract's
+        # `dry_run=True` promises and what the T3 confirmation card renders.
+        return FsDeleteResult(
+            path=str(real),
+            kind=kind,
+            entries=entries,
+            trashed_to="",
+            undo=UndoPlan(note="nothing was deleted"),
+            would_delete=sorted(victims)[:MAX_PREVIEW_ENTRIES],
+            dry_run=True,
+            preview_truncated=entries > MAX_PREVIEW_ENTRIES,
+        )
 
     plan = _trash().move_to_trash(real)
     return FsDeleteResult(
         path=str(real),
-        kind="dir" if is_dir else "file",
+        kind=kind,
         entries=entries,
         trashed_to=plan.backup or "",
         undo=plan,

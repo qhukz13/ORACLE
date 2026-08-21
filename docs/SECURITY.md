@@ -143,7 +143,9 @@ and mount points, not just symlinks. If it does not, use `GetFinalPathNameByHand
 ## 4b. Command safety
 
 - **No shell, ever.** `subprocess` is called with an argv list; `shell=True` is banned repo-wide and
-  enforced by a lint rule and a security test.
+  enforced by a lint rule (ruff `S602`/`S605`) **and** a security test that reads the source
+  directly — a lint rule is one `# noqa` away from advisory, and the test also asserts nobody has
+  suppressed the lint rule. `IMPLEMENTED 2026-08-21`
 - `execute_command` does not accept a command string. It accepts `{program, args[], cwd, timeout}`
   where `program` must resolve to an entry in the program allowlist:
 
@@ -157,10 +159,27 @@ and mount points, not just symlinks. If it does not, use `GetFinalPathNameByHand
 
 - The program is resolved to an **absolute path once at startup** and pinned. Never rely on `PATH`
   at call time — `PATH` is attacker-influenceable and `git.exe` in a project directory is a real
-  Windows attack (current-directory search order).
+  Windows attack (current-directory search order). `IMPLEMENTED 2026-08-21` — the pin happens on the
+  **parent** side and the absolute path is handed across the boundary, because a child that could
+  look up its own program would move the decision to the wrong side of the pipe. There is a test
+  that puts a decoy earlier on `PATH` after loading and shows the pinned path does not move.
+
+- **The subcommand grammar is consulted only for model-supplied argv.** An intent-shaped tool
+  (`git.commit`) builds its own argv and is a promise by construction; only `dev.execute` lets the
+  model choose, and that is the only place the allow/confirm/deny lists apply. The *values* an
+  intent-shaped tool interpolates (a commit message, a test filter) still get the shape checks.
+
+- **Batch targets refuse dangerous arguments rather than escaping them.** `npm` and `uv` resolve to
+  `.cmd` shims on Windows, which `cmd.exe` re-parses after Python has finished quoting
+  (CVE-2024-3566, "BatBadBut"). There is no correct escaping to apply, so an argument containing a
+  character `cmd.exe` would reinterpret is refused.
 - The interactive PTY (`terminal`) is a **separate capability from `proc.spawn`**. The agent may
   *read* a PTY's output; writing into a human's PTY session is T2 and confirmed every time. An agent
   that can type into your shell has all your permissions regardless of any allowlist.
+  `IMPLEMENTED 2026-08-21` as `Capability.TERM_WRITE`, with two consequences worth stating: a fresh
+  approval is bound to the exact text of **each** command, and `term.write` refuses more than one
+  line per call — otherwise one approval would cover a script while the confirmation card showed
+  only its first line.
 - Environment is **scrubbed by default**: the child gets a minimal constructed environment, not
   `os.environ`. Secrets are injected only for tools that declare `secret.read` and only the specific
   named secrets.

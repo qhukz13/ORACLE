@@ -104,6 +104,29 @@ The model provider (Ollama) is a **fourth, separate** process we do not own. It 
 untrusted network dependency behind an adapter: it may be down, slow, or return garbage, and ORACLE
 must degrade rather than fail.
 
+### The one exception, and why it is only one  `2026-08-21`
+
+`app.launch` runs in **oracled**, not in the toolhost, and launches detached. An application the user
+asked for has to survive a toolhost restart and a HALT — "stop what you are doing" must not mean
+"close my editor with unsaved work in it". Making the job breakaway-capable would let *anything* the
+child spawns escape HALT, which is not a trade worth making for the ability to open Explorer.
+
+The exception is one shape and the registry enforces it: a contract with an `app_field` runs in the
+parent and **may not also name an allowlisted program**. It launches a path pinned from
+`config/apps.yaml`, with the same constructed environment the toolhost gets, holding no pipes and
+never waiting. Recorded as [ADR-0018](DECISIONS.md#adr-0018--a-launched-application-is-not-a-tool-call).
+
+`term.*` is the mirror image and stays inside the toolhost: a runaway `npm install` in a shell is
+exactly what HALT exists to stop.
+
+Two rules make the boundary above hold in practice, both enforced rather than documented:
+
+- **The child resolves nothing.** Paths are canonicalised and programs are pinned to absolute paths
+  on the parent side, then handed over. A child that resolved its own would move the sandbox decision
+  to the wrong side of the pipe.
+- **A tool declaring `proc.spawn` cannot run in-process.** The executor refuses. Without the Job
+  Object there is no tree termination, and HALT would be a lie.
+
 ---
 
 ## 4. Layers

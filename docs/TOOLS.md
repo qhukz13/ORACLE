@@ -55,57 +55,78 @@ startup; a contract error is a boot failure, not a runtime surprise.
 ```python
 @tool(
     id="git.commit",
-    summary="Commit staged changes in a project.",
-    capabilities={"fs.write", "proc.spawn", "git.write"},
+    summary=(
+        "Record the staged changes as a commit. Requires a message. Undo puts the "
+        "changes back in the staging area."
+    ),
+    args=GitCommitArgs,
+    result=GitCommitResult,
+    capabilities={Capability.FS_READ, Capability.GIT_WRITE, Capability.PROC_SPAWN},
     scopes={"projects"},
-    risk="T1",
+    risk=Tier.T1,
     reversible=True,
     undo="git reset --soft HEAD~1",
-    timeout_s=30,
-    dry_run=True,
     intents={"modify", "run"},          # controls context-budget pre-filtering
-    side_effects="Creates a commit in the project's git history.",
+    side_effects="Creates a commit. Nothing leaves the machine — that is `git.push`.",
+    path_fields={"path"},               # canonicalised before the gate
+    programs={"git"},                   # pinned by the PARENT from the allowlist
 )
-class GitCommit(ToolArgs):
-    project: ProjectRef                 # resolved against the registry, never free text
-    message: str = Field(min_length=3, max_length=2000)
-    all_tracked: bool = False
-
-class GitCommitResult(ToolResult):
-    sha: str
-    files_changed: int
-    insertions: int
-    deletions: int
+async def git_commit(*, ctx: ToolContext, args: GitCommitArgs) -> GitCommitResult:
+    ...
 ```
 
 Notes that matter:
 
-- `ProjectRef`, `ScopedPath`, `ProgramRef` are **custom types that resolve and validate**. A plain
-  `str` path in a tool signature is a review rejection — it bypasses the canonicaliser.
+- **`ScopedPath` is a marker, not magic.** The resolution happens in the executor, driven by
+  `path_fields`; the handler receives an already-canonicalised `Path` in its context. A path argument
+  that is not listed in `path_fields` bypasses the canonicaliser, which is a review rejection.
+- **`programs` names allowlist keys, never paths.** The parent pins each to an absolute path and
+  hands it over. A handler that resolved its own program would defeat the pin, and a security test
+  greps for exactly that.
 - `intents` drives which tools even appear in the model's context.
 - `dry_run=True` means the tool can compute and return its effect without performing it. Every T3
-  tool must support this, so the confirmation card can show a real preview (an actual file list, an
-  actual diff) rather than a description.
-- `undo` is a *recipe*, executed by the toolhost's undo journal, never by the model.
+  tool must support this, so the confirmation card can show a real preview.
+- `undo` is a *recipe*, executed by the undo journal, never by the model. Where reversing it needs a
+  process (`git reset --soft`), the journal dispatches it back through the gate as a **hidden** tool
+  rather than running it in the parent.
+
+### What the summary is for  `MEASURED 2026-08-21`
+
+The summary is not documentation — it is **the entire basis on which the model chooses**. Rewriting
+four summaries to *distinguish* neighbouring tools rather than describe them, plus few-shot examples,
+took selection accuracy from **83.3% to 100%** on the eval set. Before that, "commit my changes"
+selected `git.add`, staged, and reported success.
+
+So: write the summary against its nearest neighbour. `git.add` says "Does NOT create a commit";
+`git.status` says "Does not show the changes themselves". Measured by
+[`scripts/eval_selection.py`](../scripts/eval_selection.py).
 
 ### Execution envelope
 
 ```python
-class ToolInvocation(BaseModel):
-    invocation_id: str
-    trace_id: str
+class Invocation(BaseModel):          # src/oracle/toolhost/protocol.py
+    id: str
     tool: str
-    args: dict            # already validated & resolved
-    scope: ResolvedScope  # concrete allowed roots for THIS call
-    approval: Approval | None
+    args: dict[str, Any]              # already validated against the contract
+    resolved: dict[str, str]          # absolute, canonicalised paths
+    programs: dict[str, str]          # absolute, pinned from the allowlist
+    cwd: str | None
     timeout_s: int
     dry_run: bool
-    cwd: Path             # pinned; the toolhost never inherits a working directory
-    env: dict[str, str]   # constructed, not inherited
 ```
 
 The toolhost receives this and nothing else. It cannot look up policy, cannot read secrets it was not
-handed, and cannot widen `scope`.
+handed, and cannot widen a scope.
+
+Two differences from the original sketch, both from building it:
+
+- **No `scope` and no `approval` cross the boundary.** They were in the sketch, and neither is
+  needed: by the time an invocation exists, the scope check has already happened and the approval has
+  already been spent. Sending them would give the child something to reason about, and the whole
+  point is that it has nothing to reason about.
+- **`resolved` and `programs` are the interesting fields.** Everything the call may touch is an
+  absolute path decided on the parent side. The child never canonicalises a path and never looks up a
+  program — doing either would move the sandbox decision to the wrong side of the pipe.
 
 ---
 
@@ -118,8 +139,8 @@ Tiers are *baseline* — the effective tier is computed from resolved arguments 
 
 | Tool | Tier | Phase | Notes |
 |---|---|---|---|
-| `sys.info` | T0 | 3 | CPU/RAM/GPU/disk snapshot |
-| `sys.processes` | T0 | 3 | filtered list; no full command lines by default (they leak secrets) |
+| `sys.info` | T0 | 3 | **built.** CPU/RAM/disk snapshot; CPU load is sampled over 120 ms, not faked |
+| `sys.processes` | T0 | 3 | **built.** Filtered list; no full command lines (they leak secrets). Declares `proc.spawn` — it runs `tasklist` — so it is absent from a read-only build |
 | `sys.screenshot` | T0 | 3 | **image, not OCR.** Written to a blob; never auto-fed to a cloud agent |
 | `sys.notify` | T0 | 3 | native toast |
 
@@ -127,9 +148,9 @@ Tiers are *baseline* — the effective tier is computed from resolved arguments 
 
 | Tool | Tier | Phase | Notes |
 |---|---|---|---|
-| `app.launch` | T1/T2 | 3 | T1 for allowlisted apps (`code`, `obsidian`, `explorer`); T2 for anything else |
-| `app.close` | T2 | 3 | T2 always: unsaved work is real work |
-| `app.list_running` | T0 | 3 | |
+| `app.launch` | T1/T2 | 3 | **built.** Tier comes from the catalogue entry: `explorer` is T1, `browser` is T2 because it opens the network. **Runs in the parent and launches detached** — [ADR-0018](DECISIONS.md#adr-0018--a-launched-application-is-not-a-tool-call) |
+| `app.close` | T2 | later | T2 always: unsaved work is real work. Not built — closing a window is the user's job, and `app.launch` deliberately keeps no control over what it started |
+| `app.list_running` | T0 | later | `sys.processes` covers this today |
 
 `app.launch` takes an **alias**, not a path — `{"app": "obsidian"}`, resolved through
 `config/apps.yaml`. The model never supplies an executable path.
@@ -142,9 +163,9 @@ Tiers are *baseline* — the effective tier is computed from resolved arguments 
 | `fs.list` | T0 | 2 | respects excludes; never recurses into `node_modules`/`target` unasked |
 | `fs.write` | T1 | 2 | **backs up the previous version to the trash journal first** |
 | `fs.patch` | T1 | 2 | apply a unified diff; preferred over `write` — smaller, reviewable, safer |
-| `fs.move` | T1 | 3 | |
-| `fs.delete` | T3 | 3 | → trash journal, never a real delete; `recursive` requires `dry_run` preview |
-| `fs.open_in_os` | T1 | 3 | hand a path to the shell's default handler |
+| `fs.move` | T1 | 3 | **built.** Both paths are canonicalised; refuses to overwrite |
+| `fs.delete` | T3 | 3 | **built.** → trash, never a real delete |
+| `fs.open_in_os` | — | — | **dropped.** "Hand a path to the shell's default handler" is `ShellExecute`: what it starts is the set of file associations on the machine, which no contract can promise. `app.launch` with an alias is the bounded version |
 
 `fs.trash` is not a tool — it is the *implementation* of delete. A genuine unrecoverable delete is T4
 and simply absent from the catalogue. If I want that, I use Explorer.
@@ -161,30 +182,31 @@ and simply absent from the catalogue. If I want that, I use Explorer.
 | `git.branch` | T1 | 3 | create/list/switch |
 | `git.stash` | T1 | 3 | |
 | `git.worktree` | T1 | 6 | the isolation primitive for delegated agents |
-| `git.push` | **T2** | 3 | visible to others, cannot be unpublished |
-| `git.reset_hard` / `git.clean` | **T3** | 3 | destroys uncommitted work; `dry_run` mandatory |
-| `git.push --force` | **T4** | — | not exposed. Deliberate. |
+| `git.push` | **T2** | 3 | **built.** Visible to others, cannot be unpublished — and therefore declared **not reversible**, so it can never slide to T1 and stop asking |
+| `git.undo` | T1 | 3 | **built, hidden.** The recipe the undo journal executes. Registered so the child can dispatch it, never offered to the model: an agent that could undo at will could erase work it was asked to do |
+| `git.reset_hard` / `git.clean` | **T3** | later | tiered in policy, not built. Nothing needs them yet, and the trash covers the recoverable cases |
+| `git.push --force` | **T4** | — | not exposed. Deliberate, and also denied at the argv level: `push --force` is on the program allowlist's deny list, matched however it is spelled |
 
 ### `dev.*` — development
 
 | Tool | Tier | Phase | Notes |
 |---|---|---|---|
-| `dev.run_tests` | T1 | 3 | auto-detects pytest/vitest/jest/cargo; returns structured results |
-| `dev.build` | T1 | 3 | |
-| `dev.install_deps` | T2 | 3 | network + arbitrary postinstall scripts — T2 is not paranoia |
-| `dev.lint` | T1 | 3 | |
-| `dev.run_script` | T1/T2 | 3 | only scripts declared in `package.json` / `pyproject.toml`; never arbitrary |
+| `dev.run_tests` | T1 | 3 | **built.** Detects pytest/vitest/jest/cargo from marker files; asks each for a machine-readable report and **labels the one case where it scrapes** |
+| `dev.build` | T1 | 3 | **built.** Declares `proc.spawn`, not `fs.write`: what a build writes is not a path this contract can name |
+| `dev.install_deps` | T2 | later | network + arbitrary postinstall scripts. Not built; `dev.execute` covers it under confirmation |
+| `dev.lint` | T1 | 3 | **built** |
+| `dev.run_script` | — | later | subsumed by detection: `dev.build`/`dev.lint` already run only what `package.json` declares |
 | `dev.docker` | T1–T3 | 7 | `ps`/`logs` T0–T1, `run`/`build` T2, `prune`/`rmi` T3 |
-| `dev.execute` | **T2+** | 3 | the gated escape hatch — allowlisted program + argv, never a shell string |
+| `dev.execute` | **T2** | 3 | **built.** The gated escape hatch — allowlisted program + argv, never a shell string. The only tool whose argv the model chooses, and therefore the only one the subcommand rules inspect |
 
 ### `term.*` — terminal
 
 | Tool | Tier | Phase | Notes |
 |---|---|---|---|
-| `term.open` | T1 | 4 | opens a PTY bound to a project; streams to the UI |
-| `term.read` | T0 | 4 | agent reads recent output |
-| `term.write` | **T2, always confirmed** | 4 | typing into a live human shell = full user privilege. Never auto. |
-| `term.close` | T1 | 4 | |
+| `term.open` | T1 | 3 | **built.** ConPTY via `pywinpty`. Lives in the toolhost, so a runaway shell dies with HALT. Waits for a *measured* readiness condition — input sent before the shell is reading is swallowed silently ([OQ-09](OPEN_QUESTIONS.md#oq-09)) |
+| `term.read` | T0 | 3 | **built.** A reader thread drains the PTY continuously; ANSI is stripped for the model and kept for the UI |
+| `term.write` | **T2, always confirmed** | 3 | **built.** Typing into a live shell = full user privilege. Declares its own `term.write` capability, **not** `proc.spawn`: a spawn is an argv the allowlist can inspect, and a line of shell input is not. One line per call, so an approval cannot cover a script |
+| `term.close` | T1 | 3 | **built** |
 
 ### `know.*` — knowledge
 
@@ -240,23 +262,36 @@ than a rubber stamp.
 
 ---
 
-## 4. MVP tool set
+## 4. MVP tool set  `SHIPPED 2026-08-21`
 
-Phases 1–4 ship **19 tools**, not 40. Enough to be genuinely useful, small enough to keep selection
-accuracy high on a 2B model:
+**27 registered, 26 offerable** (`git.undo` is hidden). Still well under the cap of 40, which is the
+point — see rule 2.
 
 ```
-oracle.status  oracle.task_list  oracle.halt
-fs.read  fs.list  fs.write  fs.patch
-git.status  git.diff  git.log  git.add  git.commit  git.branch
-dev.run_tests  dev.execute
+fs.read  fs.list  fs.stat  fs.write  fs.patch  fs.move  fs.delete
+git.status  git.diff  git.log  git.add  git.commit  git.branch  git.stash  git.push  [git.undo]
+dev.run_tests  dev.build  dev.lint  dev.execute
+term.open  term.read  term.write  term.close
 app.launch  sys.info  sys.processes
-term.open
 ```
 
-Notably absent from MVP: delegation, knowledge, pipelines, delete, push. Those arrive with the phases
-that make them meaningful — and each one arrives with its policy rules and security tests, never
-before them.
+Two things the original sketch got wrong, both found by building it:
+
+- **`push` and `delete` shipped after all.** They were deferred to "the phase that makes them
+  meaningful" — but the phase that makes a commit meaningful is the same one that makes pushing it
+  meaningful. They arrived *with* their tiers and their security tests, which was the actual
+  requirement all along.
+- **A hidden tool is a category the contract needed.** `git.undo` must exist in the registry (the
+  toolhost dispatches by id) and must never be selectable. `hidden=True` is enforced: a hidden
+  contract may declare no intents and never appears in `for_intent`.
+
+**Only 11 of these are reachable from a routed turn.** Selection offers a tool only when its
+arguments can be built from *(resolved project, one model-supplied string)*. `dev.execute` needs an
+argv, `term.write` needs a command, `fs.write` needs file content, `git.push` needs a remote —
+half-filling any of them would mean inventing something. They stay callable by a human through the
+API, and by a plan once plans exist.
+
+Notably still absent: delegation, knowledge, pipelines.
 
 ---
 

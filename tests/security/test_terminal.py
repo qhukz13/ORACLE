@@ -274,6 +274,70 @@ class TestRefusals:
         await ex.execute("term.close", {"session_id": session_id})
 
 
+class TestNothingIsLostOnTheWayOut:
+    """The bug this class exists for: `term.read` used to empty the whole buffer and
+    then return only its LAST 16 KB. A long build lost its oldest output silently, and
+    the scrollback counter reported zero drops — because nothing had been dropped on the
+    way *in*. It was destroyed on the way out."""
+
+    def test_a_bounded_read_leaves_the_remainder(self) -> None:
+        from oracle.tools.terminal import Session
+
+        session = Session(id="t", cwd=Path("."), shell_path="cmd.exe", pty=None)
+        session.append("A" * 100)
+        session.append("B" * 100)
+
+        head, more = session.take(120)
+        assert more is True
+        assert head == "A" * 100 + "B" * 20
+
+        rest, more = session.take(120)
+        assert more is False
+        assert rest == "B" * 80
+        # And nothing was counted as lost, because nothing was.
+        assert session.dropped == 0
+
+    def test_an_unbounded_read_takes_everything(self) -> None:
+        from oracle.tools.terminal import Session
+
+        session = Session(id="t", cwd=Path("."), shell_path="cmd.exe", pty=None)
+        session.append("hello")
+        assert session.take() == ("hello", False)
+        assert session.take() == ("", False)
+
+    def test_the_ring_reports_what_it_trims(self) -> None:
+        """A bounded scrollback is correct. Trimming *silently* is not — a reader would
+        conclude that something near the start never appeared."""
+        from oracle.tools import terminal
+
+        session = terminal.Session(id="t", cwd=Path("."), shell_path="cmd.exe", pty=None)
+        chunk = "x" * 10_000
+        for _ in range((terminal.MAX_BUFFER_CHARS // len(chunk)) + 3):
+            session.append(chunk)
+        assert session.dropped > 0
+        assert session.buffered <= terminal.MAX_BUFFER_CHARS
+
+    async def test_a_long_burst_arrives_complete(self, ex: ToolExecutor, workspace: Path) -> None:
+        """The Phase 3 acceptance criterion, scaled down to keep the suite quick: a
+        flood is delivered in full across successive bounded reads."""
+        import re
+
+        opened = await ex.execute("term.open", {"path": str(workspace)})
+        session_id = opened.result.session_id  # type: ignore[union-attr]
+
+        lines = 300
+        await _approved_write(
+            ex, session_id, f"for /L %i in (1,1,{lines}) do @echo N-%i-Z", "ap_burst"
+        )
+        blob = await _read_until(ex, session_id, f"N-{lines}-Z", give_up_after=20.0)
+
+        found = {int(n) for n in re.findall(r"N-(\d+)-Z", blob)}
+        missing = sorted(set(range(1, lines + 1)) - found)
+        assert not missing, f"{len(missing)} lines lost, first {missing[:5]}"
+
+        await ex.execute("term.close", {"session_id": session_id})
+
+
 class TestAnsiStripping:
     def test_escape_sequences_never_reach_the_model(self) -> None:
         """cmd.exe emits cursor moves and an OSC title on every prompt. Feeding those

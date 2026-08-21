@@ -128,6 +128,34 @@ Rules: transitions are events (§ event log); `halted` is reachable from every s
 by explicit human action; `error` is terminal for the turn but never for the session; every state has
 a timeout that moves it to `error` rather than hanging forever.
 
+### What `planning` actually does today  `IMPLEMENTED 2026-08-21`
+
+For an actionable intent (`run`, `modify`, `investigate`, `search`, `status`), `planning` is **tool
+selection**: one structured call that picks a single tool and supplies at most one string.
+
+```
+classify -> SELECT ONE TOOL -> gate -> (awaiting_approval) -> executing -> report
+```
+
+Three properties, and none of them depend on the model being good:
+
+1. **The tool name is an enum** built from `registry.for_intent(intent)`, so an off-menu name is
+   *unspellable* rather than validated after the fact ([ADR-0017](DECISIONS.md#adr-0017--constrain-what-the-decoder-can-enforce)).
+2. **The model never writes a path.** It names a project; the classifier checks that name against the
+   registry; the path is composed from a root the runtime owns. A hallucinated project asks for
+   clarification instead of becoming a filesystem argument.
+3. **Only tools whose arguments can be built honestly are offered** — 11 of 26. Everything else needs
+   an argv, a command or file content, none of which can be derived from *(project, one string)*
+   without inventing something.
+
+Selection has its own `CallType.SELECT` budget rather than sharing `ROUTE`'s. They have inverted
+shapes — routing is a large system prompt and a tiny tools band, selection is the reverse — and
+sharing silently **truncated the tool descriptions**, which are the entire basis for the choice.
+
+Measured: **100% on 18 cases**, p50 1157 ms
+([`scripts/eval_selection.py`](../scripts/eval_selection.py), write-up in
+`logs/development/2026-08-21-selection-accuracy.md`).
+
 ---
 
 ## 4. Planning

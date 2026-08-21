@@ -305,7 +305,9 @@ class TurnPipeline:
     ) -> None:
         assert self._selector is not None and self._executor is not None
         emit = self._emit
-        await emit("agent.state", session_id, turn_id, trace, {"state": "selecting"})
+        # `planning` in the documented state machine (docs/AGENT_RUNTIME.md#3): choosing
+        # a tool IS the plan here. One vocabulary, no translation layer for the UI.
+        await emit("agent.state", session_id, turn_id, trace, {"state": "planning"})
 
         project_path = self._project_path(project)
         try:
@@ -382,7 +384,7 @@ class TurnPipeline:
                 )
                 return
             await self._emit(
-                "agent.state", session_id, turn_id, trace, {"state": "waiting_for_approval"}
+                "agent.state", session_id, turn_id, trace, {"state": "awaiting_approval"}
             )
             pending = await self._approvals.request(
                 tool_id,

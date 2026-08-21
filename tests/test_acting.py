@@ -140,7 +140,7 @@ class TestAToolRuns:
         await h.pipeline.run(session, "what is in Asterim")
 
         states = [e.payload.get("state") for e in await h.events("agent.state")]
-        assert "selecting" in states
+        assert "planning" in states
         assert "executing" in states
 
         planning = [e for e in await h.events("agent.state") if e.payload.get("tool")]

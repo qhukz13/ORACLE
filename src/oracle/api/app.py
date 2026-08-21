@@ -352,12 +352,12 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
         await st.sessions.touch(session_id)
         st.spawn(st.agent.run(session_id, text))
 
-    elif cmd.type == "approval.resolve":
+    elif cmd.type == "approval.respond":
         # The ONLY way an approval is granted. Note what is not here: the client sends
-        # an id and a yes/no, never a digest or a tier — those come from what the user
+        # an id and a decision, never a digest or a tier — those come from what the user
         # was actually shown (docs/SECURITY.md#5).
         approval_id = str(cmd.payload.get("approval_id") or "")
-        approved = bool(cmd.payload.get("approved"))
+        approved = str(cmd.payload.get("decision", "")).lower() in ("approve", "approved", "yes")
         if approval_id:
             resolution = await st.approvals.resolve(approval_id, approved, by="user")
             st.audit.append(

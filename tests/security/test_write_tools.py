@@ -276,6 +276,55 @@ class TestPatchIsStrict:
         assert workspace.joinpath("code.py").read_text(encoding="utf-8") == "x = 1\ny = 2\nz = 1\n"
 
 
+class TestDryRunPreviewsTheDamage:
+    """A T3 tool must be able to show its effect without performing it. That is what
+    the registry demands `dry_run=True` for, and what a recursive delete needs: nobody
+    can meaningfully approve "delete 3,915 files?" — they need to see which ones."""
+
+    async def test_a_recursive_delete_lists_the_files_and_deletes_nothing(
+        self, ex: ToolExecutor, workspace: Path
+    ) -> None:
+        victim = workspace / "doomed"
+        (victim / "nested").mkdir(parents=True)
+        (victim / "a.txt").write_text("a", encoding="utf-8")
+        (victim / "nested" / "b.txt").write_text("b", encoding="utf-8")
+
+        out = await ex.execute("fs.delete", {"path": str(victim), "recursive": True}, dry_run=True)
+        assert out.ok, out.error and out.error.message
+        result = out.result
+        assert result is not None
+        assert result.dry_run is True  # type: ignore[attr-defined]
+        assert set(result.would_delete) >= {"a.txt"}  # type: ignore[attr-defined]
+        assert result.entries == 3  # type: ignore[attr-defined]
+
+        # The whole point: nothing moved.
+        assert victim.exists()
+        assert (victim / "nested" / "b.txt").exists()
+
+    async def test_a_dry_run_journals_no_undo(self, ex: ToolExecutor, workspace: Path) -> None:
+        """A preview that recorded an undo would leave a journal entry for a mutation
+        that never happened."""
+        target = workspace / "a.txt"
+        out = await ex.execute("fs.delete", {"path": str(target)}, dry_run=True)
+        assert out.ok
+        assert out.undo_id is None
+        assert target.exists()
+
+    async def test_the_preview_is_capped_but_says_so(
+        self, ex: ToolExecutor, workspace: Path
+    ) -> None:
+        big = workspace / "big"
+        big.mkdir()
+        for i in range(60):
+            (big / f"f{i}.txt").write_text("x", encoding="utf-8")
+
+        out = await ex.execute("fs.delete", {"path": str(big), "recursive": True}, dry_run=True)
+        assert out.ok and out.result is not None
+        assert out.result.entries == 60  # type: ignore[attr-defined]
+        assert len(out.result.would_delete) == 50  # type: ignore[attr-defined]
+        assert out.result.preview_truncated is True  # type: ignore[attr-defined]
+
+
 class TestJournalIntegrity:
     async def test_every_mutation_is_journalled(self, ex: ToolExecutor, workspace: Path) -> None:
         await ex.execute("fs.write", {"path": str(workspace / "a.txt"), "content": "1"})

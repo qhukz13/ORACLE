@@ -85,6 +85,12 @@ class ToolContract:
     #: Recipe executed by the undo journal, never by the model.
     undo: str | None
     timeout_s: int
+    #: The tool can compute and report its effect WITHOUT performing it.
+    #:
+    #: Declaring this is a promise the executor relies on: a dry run skips the approval
+    #: requirement, because the confirmation card the user answers is rendered from it,
+    #: and requiring approval to produce it would be circular. A tool whose dry run has
+    #: any side effect — including network egress — may not declare this.
     dry_run: bool
     #: Drives context-budget pre-filtering: sending all tool schemas every turn is the
     #: most common way to waste a small model's context (~730 ms per turn measured).

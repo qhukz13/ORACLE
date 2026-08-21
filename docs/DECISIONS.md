@@ -9,7 +9,7 @@ Format per record: Decision · Context · Options · Chosen · Why · Trade-offs
 |---|---|---|
 | [0001](#adr-0001--orchestrator-not-a-monolithic-agent) | Orchestrator, not a monolithic agent | accepted |
 | [0002](#adr-0002--python-312-managed-by-uv) | Python 3.12 managed by `uv` | accepted |
-| [0003](#adr-0003--tool-execution-in-a-separate-process) | Tool execution in a separate process | accepted |
+| [0003](#adr-0003--tool-execution-in-a-separate-process) | Tool execution in a separate process | accepted, **confirmed in implementation** |
 | [0004](#adr-0004--two-tier-local-model-router--reasoner) | Two-tier local model (router + reasoner) | accepted, benchmarked |
 | [0005](#adr-0005--one-policy-gate-risk-tiers-taint-tracking) | One policy gate, risk tiers, taint tracking | accepted |
 | [0006](#adr-0006--sqlite-only-storage-two-files-sqlite-vec--fts5) | SQLite-only storage, two files (sqlite-vec + FTS5) | accepted |
@@ -24,6 +24,7 @@ Format per record: Decision · Context · Options · Chosen · Why · Trade-offs
 | [0015](#adr-0015--intent-shaped-tools-no-general-shell) | Intent-shaped tools, no general shell | accepted |
 | [0016](#adr-0016--mvp-excludes-the-interesting-parts) | MVP excludes the interesting parts | accepted |
 | [0017](#adr-0017--constrain-what-the-decoder-can-enforce) | Constrain what the decoder can enforce | accepted |
+| [0018](#adr-0018--a-launched-application-is-not-a-tool-call) | A launched application is not a tool call | accepted |
 
 ---
 
@@ -94,6 +95,31 @@ separate process makes tree termination a guarantee.
 **Consequences.** The toolhost receives a pre-authorised `ToolInvocation` and nothing else — no
 policy, no secrets it wasn't handed, no way back into the runtime. It can later be hardened further
 (restricted token, AppContainer, separate user) without touching agent code.
+
+### Confirmed against the implementation  `2026-08-21`
+
+All three justifications were re-checked once tools that actually spawn processes existed, because
+the original argument was made before any of them did.
+
+| claim | measured |
+|---|---|
+| killing a thread does not kill grandchildren | HALT terminates child, its child **and its grandchild** — all three go false together |
+| a tool cannot read `ANTHROPIC_API_KEY` | the child gets a constructed env and **refuses to start** if a key is present; enforced from both sides |
+| IPC cost < 50 ms | **p50 27.9 ms**, p95 29.0 ms warm; 1.3 s cold, so the host is pre-warmed at boot |
+| no orphans | 100-call soak leaves **zero** orphaned processes |
+
+Two rules were added that the ADR implied but did not state, and both are now enforced rather than
+documented:
+
+- **The child never resolves anything.** Paths and program locations are canonicalised and pinned on
+  the parent side and handed over as absolute paths. A child that could resolve a path or look up a
+  program on `PATH` would put the sandbox decision on the wrong side of the pipe.
+- **A spawning tool may not take the in-process path.** `ToolExecutor` refuses to run a contract
+  declaring `proc.spawn` when no host is configured. Without the Job Object there is no tree
+  termination, and HALT would be a lie. The in-process fallback remains, for tools that cannot spawn.
+
+One exception was found to be necessary and is recorded separately as
+[ADR-0018](#adr-0018--a-launched-application-is-not-a-tool-call).
 
 ---
 
@@ -450,3 +476,47 @@ enforce — enums, required fields, types. Never depend on `minimum`, `maximum`,
 `minLength`; validate them, but do not rely on them.** Also a general lesson recorded in
 `logs/development/2026-08-21-p1-router-accuracy.md`: when a small model looks catastrophically bad,
 suspect the contract before the model.
+
+
+---
+
+## ADR-0018 — A launched application is not a tool call
+
+**Context.** [ADR-0003](#adr-0003--tool-execution-in-a-separate-process) puts every tool inside a Job
+Object with `KILL_ON_JOB_CLOSE`, so HALT can terminate a whole process tree. `app.launch` breaks that
+model on its own terms: an editor the user asked ORACLE to open must **outlive** the tool call, the
+turn, a toolhost restart, and HALT itself. HALT means "stop what you are doing", not "close my editor
+with unsaved work in it" — and the toolhost restarts on every crash and every timeout.
+
+**Options.**
+(a) Launch from the toolhost and accept that the app dies with it.
+(b) Add `JOB_OBJECT_LIMIT_BREAKAWAY_OK` to the job and use `CREATE_BREAKAWAY_FROM_JOB`.
+(c) Shell out to `explorer.exe` so the Windows shell re-parents the process.
+(d) Launch from the parent, detached, as a single narrow exception.
+
+**Chosen.** (d).
+
+**Why.** (a) is a data-loss bug wearing a security hat. (b) is the dangerous one: breakaway is a
+property of the **job**, not of one call, so anything the child spawns could then escape HALT —
+trading the containment guarantee for the ability to open Explorer is not a trade. (c) is
+`ShellExecute` by another name: it cannot pass arguments, and it widens what can be started to every
+file association on the machine.
+
+**Trade-offs.** One tool runs in the process that holds the API key. That is a real cost and the
+reason the exception is drawn as narrowly as it is.
+
+**Consequences.** The exception is one shape, and the registry enforces it rather than trusting
+review: a contract with an `app_field` runs in the parent and **may not also name an allowlisted
+program**. Within it:
+
+- the executable is pinned from `config/apps.yaml` and the model supplies an **alias**, never a path;
+- the environment is the same constructed one the toolhost child gets, so the API key is absent
+  rather than merely unused;
+- the launch is detached — no pipes, no console, never waited on — and returns a pid and nothing else.
+
+`term.*` is the deliberate mirror image: a shell **does** live in the toolhost, because a runaway
+`npm install` is exactly what HALT exists to stop. Nobody has unsaved work in a spinning install;
+everybody has unsaved work in an editor.
+
+There is a security test that kills the toolhost's entire process tree and asserts the launched
+window is still running.

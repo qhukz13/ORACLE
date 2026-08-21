@@ -334,7 +334,14 @@ class ToolExecutor:
             )
 
         # 5. approval, bound to these exact arguments.
-        if verdict.needs_approval:
+        #
+        # A DRY RUN does not need one. Requiring the approval that the preview exists to
+        # inform would be circular: the Confirmation Center calls this to render the
+        # card the user answers. The obligation that makes it safe is on the contract —
+        # `dry_run=True` means "this call performs nothing" — and it is audited as a
+        # dry run either way. Everything else still applies: a denial is still a denial,
+        # scopes are still checked, and a halted ORACLE still runs nothing.
+        if verdict.needs_approval and not dry_run:
             if approval_id is None:
                 self._audit.append(
                     actor="agent",
