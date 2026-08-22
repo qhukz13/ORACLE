@@ -43,6 +43,15 @@ COLLECTIONS = ROOT / "config/collections.yaml"
 
 G, R, Y, B, D, X = "\033[32m", "\033[31m", "\033[33m", "\033[34m", "\033[2m", "\033[0m"
 
+#: The fixture file is a document in the corpus like any other — `C:/Projects/ORACLE` is a
+#: declared collection root — and it contains all 21 questions verbatim. So it ranks for its
+#: own queries: once the phase-5 work was committed (untracked files are not indexed, so
+#: committing is what made it visible) it took a top-5 slot in 12 of 21 cases and pushed
+#: real answers out. That is a leak in the *measurement*, not a fault in retrieval: a file
+#: of questions is a legitimate corpus document, it just cannot be allowed to answer itself.
+#: Discarded before ranking rather than after, so the case still gets `limit` real chances.
+LEAKED = "tests/fixtures/retrieval/cases.yaml"
+
 
 def measure(store: KnowledgeStore, embedder: Embedder, limit: int = 5) -> int:
     """Recall@5 and retrieval latency over the fixture set. Returns an exit code."""
@@ -50,14 +59,19 @@ def measure(store: KnowledgeStore, embedder: Embedder, limit: int = 5) -> int:
     latencies: list[float] = []
     hits = 0
     misses: list[str] = []
+    leaked = 0
     by_kind: dict[str, list[bool]] = {}
 
     for case in cases:
+        # Timed at the production `limit`; recall is read from a wider call so that
+        # dropping the leaked file still leaves `limit` real candidates.
         started = time.perf_counter()
-        found = retrieve(case["q"], store, embedder, limit=limit)
+        retrieve(case["q"], store, embedder, limit=limit)
         latencies.append((time.perf_counter() - started) * 1000)
 
-        paths = [h.rel_path for h in found.hits]
+        ranked = [h.rel_path for h in retrieve(case["q"], store, embedder, limit=limit + 3).hits]
+        leaked += sum(1 for p in ranked[:limit] if p.endswith(LEAKED))
+        paths = [p for p in ranked if not p.endswith(LEAKED)][:limit]
         ok = any(any(e in p or p.endswith(e) for e in case["expect_any"]) for p in paths)
         by_kind.setdefault(case["kind"], []).append(ok)
         if ok:
@@ -77,6 +91,8 @@ def measure(store: KnowledgeStore, embedder: Embedder, limit: int = 5) -> int:
         print(f"    {kind:<10} {share:.0%}  ({sum(results)}/{len(results)})")
     if misses:
         print(f"  {Y}misses:{X} {misses}")
+    if leaked:
+        print(f"{D}  discarded {leaked} top-{limit} slots held by the fixture file itself{X}")
 
     lat = G if p95 < 400 else R
     print(f"  latency   p50 {p50:.0f} ms · {lat}p95 {p95:.0f} ms{X}   gate is p95 < 400 ms")
