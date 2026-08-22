@@ -93,6 +93,12 @@ export interface ToolCall {
   error?: string | null;
   undoId?: string | null;
   undone?: boolean;
+  /** Sources behind a `know.*` result. Metadata only — the chunk text stays in the index. */
+  citations?: unknown;
+  /** True when any source is `local_foreign`; the turn is tainted (docs/SECURITY.md#6). */
+  tainted?: boolean;
+  /** True when the embedding model was unavailable and only BM25 ran. */
+  degraded?: boolean;
 }
 
 export function asRecord(value: unknown): Record<string, unknown> {

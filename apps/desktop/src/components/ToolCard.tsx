@@ -12,10 +12,13 @@
  */
 
 import type { ToolCall } from "../protocol";
+import { Citations, toCitations } from "./Citations";
 
 export interface ToolCardProps {
   call: ToolCall;
   onUndo(undoId: string): void;
+  /** Open a cited source. Omitted where there is nothing to open into. */
+  onOpenSource?: (path: string) => void;
 }
 
 function argLine(args: Record<string, unknown>): string {
@@ -25,7 +28,10 @@ function argLine(args: Record<string, unknown>): string {
   return parts.join("  ");
 }
 
-export function ToolCard({ call, onUndo }: ToolCardProps) {
+export function ToolCard({ call, onUndo, onOpenSource }: ToolCardProps) {
+  // `know.*` results carry their sources. Every other tool has none, and
+  // `toCitations` returns an empty list, which `Citations` renders as nothing.
+  const citations = toCitations(call.citations);
   const status = call.running ? "running" : call.ok ? "ok" : "failed";
   const label = call.running ? "RUNNING" : call.ok ? "DONE" : "FAILED";
 
@@ -50,6 +56,15 @@ export function ToolCard({ call, onUndo }: ToolCardProps) {
         <p className="tc-error" role="alert">
           {call.error}
         </p>
+      )}
+
+      {citations.length > 0 && (
+        <Citations
+          citations={citations}
+          tainted={call.tainted}
+          degraded={call.degraded}
+          onOpen={(c) => onOpenSource?.(c.absPath)}
+        />
       )}
 
       {call.undoId && !call.undone && (

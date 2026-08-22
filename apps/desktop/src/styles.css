@@ -283,3 +283,52 @@ kbd {
 .ins-undo { list-style: none; margin: 0; padding: 0; }
 .ins-undo li { padding: 3px 0; }
 .turns > li.sel .msg.user { border-left-color: var(--st-think); }
+
+/* ── Citations ─────────────────────────────────────────────────────────────
+   docs/RAG.md#7. Sources are evidence, so they read as a list of places rather
+   than as chrome: monospace paths, the symbol beside them, and the foreign badge
+   carrying an icon as well as a colour (docs/UI.md#1 — never colour alone). */
+.citations { margin: 6px 0 2px; padding: 6px 10px;
+  background: var(--bg-1); border-left: 2px solid var(--st-ext); border-radius: 2px; }
+.cite-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  color: var(--fg-2); font-size: 11px; letter-spacing: .06em; }
+.cite-title { text-transform: uppercase; }
+.cite-taint { color: var(--st-wait); }
+.cite-degraded { color: var(--fg-1); }
+.cite-list { list-style: none; margin: 4px 0 0; padding: 0; }
+.cite-item { display: flex; align-items: baseline; gap: 8px; padding: 1px 0; }
+.cite-link { display: flex; align-items: baseline; gap: 6px; flex: 1;
+  background: none; border: 0; padding: 1px 0; color: var(--fg-0);
+  text-align: left; cursor: pointer; }
+.cite-link:hover .cite-path { text-decoration: underline; }
+.cite-index { color: var(--fg-2); }
+.cite-path { color: var(--fg-0); }
+.cite-anchor { color: var(--st-think); }
+.cite-meta { display: flex; align-items: baseline; gap: 8px; color: var(--fg-2); font-size: 11px; }
+.cite-foreign { color: var(--st-wait); }
+
+/* ── Index health ──────────────────────────────────────────────────────────
+   docs/RAG.md#9. Every state here is one that is otherwise silent: nothing built,
+   an index built by a different model, a collection that matched no files. */
+.know-health { padding: 10px 12px; background: var(--bg-1);
+  border: 1px solid var(--line); border-radius: 3px; }
+.kh-head { display: flex; align-items: center; gap: 10px; }
+.kh-title { font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: 11px; }
+.kh-model { color: var(--fg-2); font-size: 11px; }
+.kh-empty { color: var(--fg-1); }
+.kh-error { color: var(--st-err); white-space: pre-wrap; font-size: 11px; }
+.kh-note { color: var(--fg-2); font-size: 11px; }
+.kh-stats { display: flex; gap: 22px; margin: 8px 0; }
+.kh-stats div { display: flex; flex-direction: column; gap: 2px; }
+.kh-stats dt { color: var(--fg-2); font-size: 11px; letter-spacing: .06em; }
+.kh-stats dd { margin: 0; font-size: 15px; }
+.kh-collections { width: 100%; border-collapse: collapse; font-size: 12px; }
+.kh-collections th { text-align: left; color: var(--fg-2); font-weight: 500;
+  border-bottom: 1px solid var(--line); padding: 4px 6px; }
+.kh-collections td { padding: 3px 6px; border-bottom: 1px solid var(--bg-2); }
+.kh-collections tbody th { color: var(--fg-0); }
+.kh-zero td, .kh-zero th { color: var(--st-wait); }
+.kh-warn { color: var(--st-wait); font-size: 12px; }
+.kh-failures { margin-top: 6px; color: var(--fg-1); font-size: 12px; }
+.kh-failures code { color: var(--fg-0); }
+.kh-actions { display: flex; gap: 8px; margin-top: 8px; }

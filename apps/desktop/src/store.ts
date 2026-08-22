@@ -93,6 +93,11 @@ function closeTool(turns: Turn[], turnId: string | null, payload: Record<string,
           summary: str(payload["summary"]),
           error: payload["error"] === null ? null : str(payload["error"]),
           undoId: payload["undo_id"] === null ? null : str(payload["undo_id"]),
+          // Present only for `know.*`. Undefined everywhere else, so ToolCard renders
+          // nothing rather than an empty "0 sources" row.
+          citations: payload["citations"],
+          tainted: payload["tainted"] === true,
+          degraded: payload["degraded"] === true,
         };
         break;
       }
