@@ -28,7 +28,7 @@ doc, delete the marker.
 | [OQ-14](#oq-14) | Does the orbital view earn its place? | `UNKNOWN` | Phase 9 go/no-go | open |
 | [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | `EXPERIMENT NEEDED` | UX quality, not a phase | open |
 | [OQ-16](#oq-16) | Does `connect_read_pipe` work anywhere on Windows? | `UNKNOWN` | none — worked around | monitoring |
-| [OQ-17](#oq-17) | Is a ~1 h full reindex acceptable? | `ASSUMPTION` | Phase 5 tuning | open — raised by OQ-02 |
+| [OQ-17](#oq-17) | Is a ~43 min **cold** reindex acceptable? | `ASSUMPTION` | Phase 5 tuning | narrowed 2026-08-22 — warm rebuilds are 37 s |
 
 ---
 
@@ -89,9 +89,9 @@ runtime rather than of the model.
 Full write-up: [`logs/development/2026-08-22-oq02-embeddings.md`](../logs/development/2026-08-22-oq02-embeddings.md).
 Harness: `scripts/eval_embeddings.py`. Fixtures: `tests/fixtures/retrieval/cases.yaml`.
 
-Measured over the real corpus, 21 fixtures, identical chunks for every candidate:
-
-On a 3,000-chunk sample (comparison), and for the winner on the **whole corpus**:
+21 fixtures, identical chunks for every candidate. Recall from a 3,000-chunk sample for
+the comparison, plus the winner measured over the **whole corpus**; throughput from a
+dedicated idle-machine run:
 
 | candidate | dim | dense r@5 | hybrid r@5 | RU→EN r@5 | chunks/s |
 |---|---:|---:|---:|---:|---:|
@@ -128,37 +128,50 @@ and 2x resident memory. e5-base ships as the default; the switch is one `ModelSp
 rebuild, and `KnowledgeStore.bind` refuses an index built by the other model rather than
 returning nonsense.
 
+**The indexing cost is no longer the argument against it.** Since the embedding cache
+([OQ-17](#oq-17)) a model's ~2.5 h is paid *once*; every rebuild after that is seconds. What
+is left is the recall question, which is the one that actually needs answering.
+
 **Two measurements would settle it**, neither yet run:
 1. `bge-m3` over the **full** corpus — ~2.5 h of CPU, and the direct comparison.
 2. Expanding the Russian fixtures from 8 to ~25, which is cheap and makes both numbers
    mean something. n=8 cannot support a decision this expensive.
 
 **And one criterion it invalidated:** the Phase 5 "full index in < 10 min" target is not
-achievable on this CPU — a full build is ~58 min. See [OQ-17](#oq-17).
+achievable for a *cold* build on this CPU — measured at 42.8 min. With the embedding cache
+added afterwards, a warm rebuild is 37 s. See [OQ-17](#oq-17).
 
 ---
 
 ### OQ-17
-**Is a ~1 hour full reindex acceptable, or does indexing need a different strategy?**
-`ASSUMPTION` · Phase 5 tuning
+**Is a ~43-minute cold reindex acceptable?**
+`ASSUMPTION` · Phase 5 tuning · **narrowed 2026-08-22 by the embedding cache**
 
-Opened 2026-08-22 by [OQ-02](#oq-02), which replaced a guessed budget with a measured one:
-a full rebuild of 9,385 chunks took **42.8 minutes end to end**, not the "< 10 min" the
-acceptance criteria asked for or the "minutes" DATABASE.md claimed. Switching to `bge-m3`
-would make it ~2.5 h.
+Opened by [OQ-02](#oq-02), which replaced a guessed budget with a measured one. Then
+mostly answered by building the thing that made the question smaller
+([log](../logs/development/2026-08-22-embedding-cache.md)).
 
-The incremental path is measured at **1.4–4.4 s** for a no-change pass over 1,330
-documents (cold vs warm cache), so day-to-day work is unaffected. The assumption being made is that a rare, hour-long,
-background rebuild is tolerable — which holds only while rebuilds stay rare.
+The original worry was that *any* rebuild costs an hour, which would make the index's
+disposability — a load-bearing property of ADR-0006 — expensive enough that nobody uses it.
+That is no longer the case. Embeddings are cached by `sha256(text)` in a file separate from
+`knowledge.db`, so what a rebuild costs depends on whether the cache is warm:
 
-**It stops holding if chunking changes often.** Any change to chunk boundaries invalidates
-every embedding, and tree-sitter chunking is still pending. Two or three of those during
-development is a day of CPU.
+| | cost | how often |
+|---|---|---|
+| Cold — first build, or a change of embedding model | **~43 min** | once per model |
+| Warm — chunking changed, or the index was deleted | **~37 s** | every other time |
+| Incremental, nothing changed | 1.4–4.4 s | dozens of times a day |
 
-**Resolve by using it.** If rebuilds turn out to be frequent or disruptive, the levers, in
-order of preference: cache embeddings keyed by chunk hash so a re-chunk only re-embeds
-chunks whose *text* changed; embed only changed collections; accept `e5-small` for a first
-pass and upgrade in the background.
+**What remains an assumption** is only the first row: that a one-off 43 minutes, on a
+model change, is tolerable. Everything else is now fast enough not to be a design concern.
+
+It also removes indexing cost as an argument against `bge-m3` — its ~2.5 h is paid once,
+after which its rebuilds are as cheap as e5-base's. The recall question in
+[OQ-02](#oq-02) is untouched and still needs more Russian fixtures.
+
+**Resolve by using it.** If a cold rebuild ever becomes frequent, the remaining levers are
+to embed only changed collections, or to accept `e5-small` for a first pass and upgrade in
+the background.
 
 ---
 

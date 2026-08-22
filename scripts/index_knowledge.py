@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from oracle.config import Settings
 from oracle.logsink import configure
+from oracle.rag.cache import EmbeddingCache, cache_path, warm_from_index
 from oracle.rag.collections import load_registry
 from oracle.rag.embedding import E5_BASE, Embedder
 from oracle.rag.indexer import index
@@ -89,6 +90,12 @@ def main() -> int:
     ap.add_argument("--stats", action="store_true", help="report what is indexed, do nothing")
     ap.add_argument("--measure", action="store_true", help="run the fixture set after indexing")
     ap.add_argument("--no-embed", action="store_true", help="lexical half only")
+    ap.add_argument("--no-cache", action="store_true", help="ignore the embedding cache")
+    ap.add_argument(
+        "--warm-cache",
+        action="store_true",
+        help="seed the cache from vectors this index already holds, then exit",
+    )
     ap.add_argument("--db", default=None)
     args = ap.parse_args()
 
@@ -111,6 +118,22 @@ def main() -> int:
         except FileNotFoundError as exc:
             print(f"{Y}  {exc}{X}\n  continuing with the lexical index only.")
 
+    cache = None
+    if embedder is not None and not args.no_cache:
+        cache = EmbeddingCache(
+            cache_path(settings.data_dir, E5_BASE.name, E5_BASE.out_dim),
+            E5_BASE.name,
+            E5_BASE.out_dim,
+        )
+
+    if args.warm_cache:
+        if cache is None:
+            print(f"{R}  --warm-cache needs the embedding model and the cache enabled{X}")
+            return 1
+        added = warm_from_index(cache, store.db)
+        print(f"  seeded {added} vectors -> {cache.size()} entries, {cache.path}")
+        return 0
+
     registry = load_registry(COLLECTIONS)
     print(f"{B}indexing{X}  {'full rebuild' if args.full else 'incremental'} -> {db_path}")
 
@@ -123,15 +146,27 @@ def main() -> int:
             last[0] = now
 
     stats = index(
-        registry, store, embedder, only=args.collection, full=args.full, progress=progress
+        registry,
+        store,
+        embedder,
+        only=args.collection,
+        full=args.full,
+        cache=cache,
+        progress=progress,
     )
 
     minutes = stats.seconds / 60
     budget = G if minutes < 10 else R
     print(
         f"  {stats.documents} documents ({stats.unchanged} unchanged), {stats.chunks} chunks, "
-        f"{stats.embedded} embedded, {stats.pruned} pruned, {stats.failed} unreadable"
+        f"{stats.embedded} embedded, {stats.cached} from cache, {stats.pruned} pruned, "
+        f"{stats.failed} unreadable"
     )
+    if cache is not None:
+        print(
+            f"{D}  cache: {stats.cache_hit_rate:.0%} hit, {cache.size()} entries, "
+            f"{cache.path.stat().st_size / 1e6:.0f} MB{X}"
+        )
     print(
         f"  {budget}{stats.seconds:.1f}s ({minutes:.1f} min){X} at "
         f"{stats.chunks_per_second:.1f} chunks/s   gate is < 10 min for a full build"

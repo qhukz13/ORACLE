@@ -382,12 +382,17 @@ is the prerequisite for context assembly good enough to delegate well (P6).
 **Deliverables.** Working project- and note-aware retrieval with source attribution.
 
 **Acceptance criteria.**
-- ~~Full index of all projects + vaults completes in **< 10 min** on this CPU~~ — **struck 2026-08-22.
-  Measured at ~58 min and not achievable at any quality that passes the recall gate**
-  ([OQ-02](OPEN_QUESTIONS.md#oq-02)). The corpus is ~3.7M tokens; ten minutes would need ~6,200
-  tokens/s and `multilingual-e5-base` sustains ~1,100 on 24 Haswell threads. The budget was written
-  before anything was measured. Replaced by:
-  - Full rebuild **≤ 90 min**, background, explicitly initiated, with the cost stated before it starts.
+- ~~Full index of all projects + vaults completes in **< 10 min** on this CPU~~ — **struck
+  2026-08-22.** It was one number for two very different operations. Measured at **42.8 min** with no
+  embedding cache ([OQ-02](OPEN_QUESTIONS.md#oq-02)) — the corpus is ~3.7M tokens and
+  `multilingual-e5-base` sustains ~1,900 tokens/s on 24 Haswell threads, so ten minutes was never
+  reachable for a cold build. With the cache it is **37 s**, because the cost was never the index,
+  it was the forward passes. Replaced by:
+  - Full rebuild on a **cold** embedding cache — a first build, or a change of model — **≤ 60 min**,
+    background, explicitly initiated, with the cost stated before it starts. Measured: 42.8 min.
+  - Full rebuild on a **warm** cache — a chunking change, or the delete-and-rebuild the disposability
+    promise rests on — **< 2 min**. Measured: **37 s**, with zero forward passes
+    ([log](../logs/development/2026-08-22-embedding-cache.md)).
   - **Incremental update of a changed file in < 5 s** — unchanged, and measured at 4.4 s for a
     no-change pass over all 1,330 documents.
   - See [OQ-17](OPEN_QUESTIONS.md#oq-17): this makes the incremental path load-bearing rather than a

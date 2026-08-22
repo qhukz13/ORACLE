@@ -33,16 +33,23 @@
 
 ## The one decision this task must open with
 
-**The `< 10 min` full-index criterion is false and has to be replaced.** Measured end to end:
-**42.8 minutes** for a full build (1,330 docs, 9,385 chunks embedded, 85 MB), **1.4–4.4 s** for an
-incremental no-change pass. Nothing that passes the recall gate comes close to ten minutes.
+**Mostly answered by requirement 1, which is done.** The `< 10 min` criterion was one number for two
+very different operations, and separating them is the answer:
 
-Proposed replacement, to be confirmed before anything else in this task:
+| | measured | how often |
+|---|---|---|
+| Cold rebuild — first build, or a change of embedding model | **42.8 min** | once per model |
+| Warm rebuild — chunking changed, or the index was deleted | **37 s** | every other time |
+| Incremental, nothing changed | 1.4–4.4 s | dozens of times a day |
 
-- Full rebuild: **≤ 60 min**, background, explicitly initiated, never implicit.
-  (`bge-m3` would not fit that at ~2.5 h — so requirement 6 and this number decide each other.)
-- Incremental update after one file changes: **< 5 s**.
-- The UI states the rebuild cost *before* starting one.
+Proposed wording, already written into ROADMAP.md and [OQ-17](OPEN_QUESTIONS.md#oq-17) — **confirm or
+correct it**:
+
+- Cold rebuild **≤ 60 min**, background, explicitly initiated, with the cost stated before it starts.
+- Warm rebuild **< 2 min**.
+- Incremental update after one file changes **< 5 s**.
+
+Note this also removes indexing cost as the argument against `bge-m3`: its ~2.5 h is paid once.
 
 If a rebuild has to be faster than that, the levers are in [OQ-17](OPEN_QUESTIONS.md#oq-17) and the
 first one is the real fix: cache embeddings by chunk-text hash, so re-chunking only re-embeds chunks
@@ -55,8 +62,11 @@ Close the four gaps P5-T1 left, in this order — the first one changes the cost
 
 ## Requirements
 
-1. **Embedding cache keyed by chunk-text hash.** A re-chunk must not re-embed text it has already
-   embedded. This is what makes requirement 2 affordable, so it comes first.
+1. ~~**Embedding cache keyed by chunk-text hash.**~~ **DONE 2026-08-22.** A full rebuild from an
+   empty database went from **42.8 min to 37 s**, with zero forward passes and recall unchanged at
+   81%. Kept in its own file so deleting `knowledge.db` — the disposability promise — no longer costs
+   an hour. `warm_from_index` seeds it from an index already built, so the 43 minutes already spent
+   were not thrown away. [Log](../logs/development/2026-08-22-embedding-cache.md).
 2. **tree-sitter code chunking**, replacing the regex approximation in `rag/chunking.py`. The current
    limits are measured, not guessed: `equal` (548 occurrences) and `useEffect` (219) are still
    mistaken for declarations because a call taking a callback is indistinguishable from a definition
@@ -84,8 +94,10 @@ Close the four gaps P5-T1 left, in this order — the first one changes the cost
 
 ## Acceptance criteria
 
-- [ ] The indexing budget in ROADMAP.md is replaced with the measured, agreed numbers.
-- [ ] Re-chunking a file with unchanged text costs **zero** embedding calls. Asserted.
+- [x] The indexing budget in ROADMAP.md is replaced with the measured numbers — **awaiting your
+      confirmation of the wording**.
+- [x] Re-chunking a file with unchanged text costs **zero** embedding calls. Asserted by counting
+      forward passes in `tests/test_rag_cache.py`, and measured end to end at 37 s.
 - [ ] tree-sitter chunks name real symbols: no control-flow keyword and no call expression appears as
       an anchor across the whole corpus. Asserted over the real corpus, not a fixture.
 - [ ] Fixture recall@5 **≥ 80%** on the **full** corpus after re-chunking, and no worse than the

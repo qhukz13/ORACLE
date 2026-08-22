@@ -31,6 +31,7 @@ from pathlib import Path
 import numpy as np
 
 from oracle.logsink import get_logger
+from oracle.rag.cache import EmbeddingCache, text_hash
 from oracle.rag.chunking import Chunk, chunk_document
 from oracle.rag.collections import (
     CollectionRegistry,
@@ -66,12 +67,20 @@ class IndexStats:
     embedded: int = 0
     pruned: int = 0
     failed: int = 0
+    #: Chunks whose vector came from the cache instead of the model. On a re-chunk this
+    #: is most of them, and it is the difference between 43 minutes and a few.
+    cached: int = 0
     seconds: float = 0.0
     walk: WalkStats = field(default_factory=WalkStats)
 
     @property
     def chunks_per_second(self) -> float:
         return self.embedded / self.seconds if self.seconds else 0.0
+
+    @property
+    def cache_hit_rate(self) -> float:
+        total = self.cached + self.embedded
+        return self.cached / total if total else 0.0
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -81,6 +90,7 @@ class IndexStats:
             "embedded": self.embedded,
             "pruned": self.pruned,
             "failed": self.failed,
+            "cached": self.cached,
             "seconds": round(self.seconds, 1),
             "chunks_per_second": round(self.chunks_per_second, 2),
             "walk": self.walk.as_dict(),
@@ -141,6 +151,39 @@ def _read(doc: Document) -> str | None:
         return None
 
 
+def embed_chunked(
+    embedder: Embedder,
+    texts: list[str],
+    cache: EmbeddingCache | None,
+    batch: int,
+) -> tuple[np.ndarray, int, int]:
+    """Vectors for `texts`, reusing whatever the cache already knows.
+
+    Returns `(vectors, cached, embedded)`. Order is preserved, and the cache is consulted
+    per *text* rather than per document: a file that gained one function reuses the
+    vectors for every function it did not.
+    """
+    if cache is None or not texts:
+        # An empty batch defers to the embedder for its empty shape rather than guessing
+        # one: `np.vstack([])` raises, and this function does not know the dimension.
+        return embedder.encode(texts, PASSAGE, batch=batch), 0, len(texts)
+
+    hashes = [text_hash(t) for t in texts]
+    known = cache.get_many(hashes)
+    missing = [i for i, h in enumerate(hashes) if h not in known]
+
+    fresh: dict[int, np.ndarray] = {}
+    if missing:
+        computed = embedder.encode([texts[i] for i in missing], PASSAGE, batch=batch)
+        fresh = dict(zip(missing, computed, strict=True))
+        # Written before the caller can fail. A crash mid-index should not throw away
+        # forward passes that have already been paid for.
+        cache.put_many((hashes[i], v) for i, v in fresh.items())
+
+    vectors = np.vstack([fresh[i] if i in fresh else known[hashes[i]] for i in range(len(texts))])
+    return vectors, len(texts) - len(missing), len(missing)
+
+
 def index(
     registry: CollectionRegistry,
     store: KnowledgeStore,
@@ -149,6 +192,7 @@ def index(
     only: str | None = None,
     full: bool = False,
     batch: int = 16,
+    cache: EmbeddingCache | None = None,
     progress: Callable[[int, int], None] | None = None,
 ) -> IndexStats:
     """Bring the index up to date with what is on disk.
@@ -186,8 +230,11 @@ def index(
 
             vectors = None
             if embedder is not None and doc.semantic:
-                vectors = embedder.encode([c.text for c in chunks], PASSAGE, batch=batch)
-                stats.embedded += len(chunks)
+                vectors, hit, missed = embed_chunked(
+                    embedder, [c.text for c in chunks], cache, batch
+                )
+                stats.cached += hit
+                stats.embedded += missed
 
             store.put(
                 doc,

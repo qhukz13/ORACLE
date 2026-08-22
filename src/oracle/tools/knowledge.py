@@ -30,6 +30,7 @@ from pydantic import Field
 from oracle.config import Settings
 from oracle.logsink import get_logger
 from oracle.policy.model import Capability, Tier
+from oracle.rag.cache import EmbeddingCache, cache_path
 from oracle.rag.collections import load_registry
 from oracle.rag.embedding import E5_BASE, Embedder
 from oracle.rag.indexer import index as run_index
@@ -54,6 +55,17 @@ def _store() -> KnowledgeStore:
     store = KnowledgeStore(settings.data_dir / "knowledge.db", E5_BASE.out_dim)
     store.bind(E5_BASE.name, E5_BASE.out_dim)
     return store
+
+
+@lru_cache(maxsize=1)
+def _cache() -> EmbeddingCache:
+    """Shared with `scripts/index_knowledge.py` — one cache file per model, not per caller."""
+    settings = Settings()
+    return EmbeddingCache(
+        cache_path(settings.data_dir, E5_BASE.name, E5_BASE.out_dim),
+        E5_BASE.name,
+        E5_BASE.out_dim,
+    )
 
 
 @lru_cache(maxsize=1)
@@ -272,6 +284,8 @@ class KnowReindexResult(ToolResult):
     unchanged: int
     chunks: int
     embedded: int
+    #: Vectors reused from the embedding cache rather than recomputed.
+    cached: int
     pruned: int
     failed: int
     seconds: float
@@ -301,13 +315,20 @@ async def know_reindex(*, ctx: ToolContext, args: KnowReindexArgs) -> KnowReinde
     store = _store()
 
     stats = await asyncio.to_thread(
-        run_index, registry, store, embedder, only=args.collection, full=args.full
+        run_index,
+        registry,
+        store,
+        embedder,
+        only=args.collection,
+        full=args.full,
+        cache=_cache() if embedder is not None else None,
     )
     return KnowReindexResult(
         documents=stats.documents,
         unchanged=stats.unchanged,
         chunks=stats.chunks,
         embedded=stats.embedded,
+        cached=stats.cached,
         pruned=stats.pruned,
         failed=stats.failed,
         seconds=round(stats.seconds, 1),

@@ -12,6 +12,7 @@ the turn, and it can never influence the policy gate
 (docs/SECURITY.md#6-prompt-injection-and-taint-tracking).
 """
 
+from oracle.rag.cache import EmbeddingCache, cache_path, text_hash, warm_from_index
 from oracle.rag.chunking import Chunk, chunk_document
 from oracle.rag.collections import (
     Collection,
@@ -37,6 +38,7 @@ __all__ = [
     "ContentKind",
     "Document",
     "Embedder",
+    "EmbeddingCache",
     "Hit",
     "IndexStats",
     "KnowledgeStore",
@@ -44,11 +46,14 @@ __all__ = [
     "Retrieved",
     "SchemaMismatch",
     "WalkStats",
+    "cache_path",
     "chunk_document",
     "index",
     "load_registry",
     "provenance_of",
     "retrieve",
+    "text_hash",
     "to_citation",
     "walk",
+    "warm_from_index",
 ]
