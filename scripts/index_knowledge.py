@@ -5,6 +5,7 @@
     uv run python scripts/index_knowledge.py               # incremental
     uv run python scripts/index_knowledge.py --stats       # what is indexed, no work
     uv run python scripts/index_knowledge.py --measure     # recall + latency on the fixtures
+    uv run python scripts/index_knowledge.py --full --measure --model bge-m3 --db D:/tmp/bge.db
 
 A *measurement* script as much as a build one: the acceptance criteria for this phase are
 numbers about the real corpus (full build time, incremental time, retrieval p95,
@@ -32,10 +33,14 @@ from oracle.config import Settings
 from oracle.logsink import configure
 from oracle.rag.cache import EmbeddingCache, cache_path, warm_from_index
 from oracle.rag.collections import load_registry
-from oracle.rag.embedding import E5_BASE, Embedder
+from oracle.rag.embedding import BGE_M3, E5_BASE, E5_SMALL, Embedder, ModelSpec
 from oracle.rag.indexer import index
 from oracle.rag.retrieval import retrieve
 from oracle.rag.store import KnowledgeStore
+
+#: The candidates OQ-02 compares. Keyed by the name that appears in `meta`, so the flag,
+#: the cache filename and what a rebuilt index reports are all the same string.
+MODELS: dict[str, ModelSpec] = {m.name: m for m in (E5_BASE, E5_SMALL, BGE_M3)}
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "tests/fixtures/retrieval/cases.yaml"
@@ -44,7 +49,7 @@ COLLECTIONS = ROOT / "config/collections.yaml"
 G, R, Y, B, D, X = "\033[32m", "\033[31m", "\033[33m", "\033[34m", "\033[2m", "\033[0m"
 
 #: The fixture file is a document in the corpus like any other — `C:/Projects/ORACLE` is a
-#: declared collection root — and it contains all 21 questions verbatim. So it ranks for its
+#: declared collection root — and it contains every fixture question verbatim. So it ranks for its
 #: own queries: once the phase-5 work was committed (untracked files are not indexed, so
 #: committing is what made it visible) it took a top-5 slot in 12 of 21 cases and pushed
 #: real answers out. That is a leak in the *measurement*, not a fault in retrieval: a file
@@ -113,6 +118,13 @@ def main() -> int:
         help="seed the cache from vectors this index already holds, then exit",
     )
     ap.add_argument("--db", default=None)
+    ap.add_argument(
+        "--model",
+        default=E5_BASE.name,
+        choices=sorted(MODELS),
+        help="which embedding model to build with. A different model needs its own --db "
+        "and gets its own cache file; mixing them in one index is refused by bind().",
+    )
     args = ap.parse_args()
 
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
@@ -120,8 +132,9 @@ def main() -> int:
 
     settings = Settings()
     db_path = Path(args.db) if args.db else settings.data_dir / "knowledge.db"
-    store = KnowledgeStore(db_path, E5_BASE.out_dim)
-    store.bind(E5_BASE.name, E5_BASE.out_dim)
+    spec = MODELS[args.model]
+    store = KnowledgeStore(db_path, spec.out_dim)
+    store.bind(spec.name, spec.out_dim)
 
     if args.stats:
         print(json.dumps(store.stats(), indent=2, ensure_ascii=False))
@@ -130,16 +143,16 @@ def main() -> int:
     embedder = None
     if not args.no_embed:
         try:
-            embedder = Embedder(E5_BASE)
+            embedder = Embedder(spec)
         except FileNotFoundError as exc:
             print(f"{Y}  {exc}{X}\n  continuing with the lexical index only.")
 
     cache = None
     if embedder is not None and not args.no_cache:
         cache = EmbeddingCache(
-            cache_path(settings.data_dir, E5_BASE.name, E5_BASE.out_dim),
-            E5_BASE.name,
-            E5_BASE.out_dim,
+            cache_path(settings.data_dir, spec.name, spec.out_dim),
+            spec.name,
+            spec.out_dim,
         )
 
     if args.warm_cache:
@@ -151,7 +164,10 @@ def main() -> int:
         return 0
 
     registry = load_registry(COLLECTIONS)
-    print(f"{B}indexing{X}  {'full rebuild' if args.full else 'incremental'} -> {db_path}")
+    print(
+        f"{B}indexing{X}  {'full rebuild' if args.full else 'incremental'} -> {db_path}\n"
+        f"{D}  model {spec.name} ({spec.out_dim}d){X}"
+    )
 
     last = [time.perf_counter()]
 
