@@ -15,6 +15,16 @@ dependencies = [
     # Windows ConPTY, for term.*. Justified in docs/TECH_STACK.md#terminal; the 3.12
     # wheel and the ConPTY behaviour were verified in OQ-09 before this was added.
     "pywinpty>=3.0.5",
+    # Phase 5 knowledge index. Ledger with the rejected alternatives:
+    # docs/TECH_STACK.md#phase-5-dependency-ledger. Notably NOT torch: embeddings run
+    # forward-only on the CPU (ADR-0014), so a 2.5 GB CUDA-linked wheel buys nothing.
+    "onnxruntime>=1.20",
+    "tokenizers>=0.21",
+    "numpy>=2.0",
+    "sqlite-vec>=0.1.9",
+    # File watching for incremental indexing. Rust `notify` under the hood: chosen over
+    # `watchdog` for Windows reliability (docs/TECH_STACK.md#4-knowledge).
+    "watchfiles>=0.24",
 ]
 
 [dependency-groups]
@@ -85,6 +95,14 @@ strict = true
 files = ["src/oracle"]
 # aiosqlite/structlog ship types; keep this empty and revisit if it grows.
 warn_unused_ignores = true
+
+# It grew, once, on 2026-08-22. `onnxruntime` ships no py.typed marker and no stubs;
+# `sqlite_vec` is a loader for a C extension. `tokenizers` and `numpy` do ship types and
+# are deliberately absent from this list — the exemption is per-package, not a blanket
+# one, so a package that starts shipping types stops being exempt.
+[[tool.mypy.overrides]]
+module = ["onnxruntime.*", "sqlite_vec.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
