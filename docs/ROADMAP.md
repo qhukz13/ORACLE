@@ -325,8 +325,6 @@ centrepiece before the functional shell is the classic way this kind of project 
       killing the backend mid-session and bringing it back.
 - [x] Colour is never the only carrier of meaning — asserted per component, not just intended.
 - [x] Accessibility: **zero serious or critical axe violations** across all four components.
-- [ ] ★ **A full working day without opening a terminal manually** — the honest one. It cannot
-      be ticked by a test; it is ticked by using it.
 
 **Testing.** 77 TS tests (was 14), including axe over the rendered DOM. **Playwright was not
 added.** It would have meant a browser download and a second harness to run the same journeys
@@ -341,9 +339,15 @@ reported for the pipeline and not as a frame rate.
 **Risks.** UI polish is infinitely expandable → timebox; the acceptance list above is the definition,
 not "it feels good". WebView2 rendering differences → test in WebView2, not only in Chrome.
 
-**Definition of done.** ★ **I use ORACLE for a full working day without opening a terminal manually.**
-That is the real acceptance test for the MVP, and it is the one item above that is deliberately
-left unticked: it is not something a suite can assert.
+**Definition of done.** The acceptance list above, all of it ticked.
+
+> **Retired 2026-08-22:** this used to be *"a full working day without opening a terminal manually"*.
+> It was struck for two reasons. It was **never the goal** — the terminal is deliberately a
+> first-class surface here, with `term.*` tools, a ConPTY dock and OQ-09 spent on getting it right;
+> a criterion that scores opening a terminal as failure contradicts the thing Phase 3 and 4 built.
+> And it was **unfalsifiable in practice**: it survived two task hand-offs unticked, not because
+> anyone tried and failed but because "a full working day" is not an experiment anyone runs. A
+> criterion nobody can fail is not holding the phase to anything.
 
 **What the phase found.** Two real bugs, both from driving the actual app rather than the tests:
 a stale approval replayed from history sat at the head of the queue where nothing could answer
@@ -367,7 +371,9 @@ is the prerequisite for context assembly good enough to delegate well (P6).
 2. **Collection registry** — explicit opt-in per source. Never "index Documents": that folder
    contains game saves and Paradox Interactive data. See [RAG.md](RAG.md#2-what-gets-indexed).
 3. Parsers: tree-sitter (code), heading-aware Markdown with Obsidian wikilinks, `pypdfium2` (PDF).
-4. Chunking strategies per type; embeddings via ONNX on CPU ([OQ-02](OPEN_QUESTIONS.md) first).
+4. Chunking strategies per type; embeddings via ONNX on CPU
+   ([OQ-02](OPEN_QUESTIONS.md#oq-02) — **resolved 2026-08-22**: `multilingual-e5-base` at 768d,
+   not truncated and not quantised).
 5. Hybrid retrieval: dense + BM25 + RRF; metadata pre-filtering by project/collection.
 6. Incremental indexing: content hash + mtime; `watchfiles` with debounce; respect `.gitignore` and `.oracleignore`.
 7. `know.*` tools; citations rendered in the UI.
@@ -376,8 +382,16 @@ is the prerequisite for context assembly good enough to delegate well (P6).
 **Deliverables.** Working project- and note-aware retrieval with source attribution.
 
 **Acceptance criteria.**
-- Full index of all projects + vaults completes in **< 10 min** on this CPU; incremental update of a
-  changed file in **< 5 s**.
+- ~~Full index of all projects + vaults completes in **< 10 min** on this CPU~~ — **struck 2026-08-22.
+  Measured at ~58 min and not achievable at any quality that passes the recall gate**
+  ([OQ-02](OPEN_QUESTIONS.md#oq-02)). The corpus is ~3.7M tokens; ten minutes would need ~6,200
+  tokens/s and `multilingual-e5-base` sustains ~1,100 on 24 Haswell threads. The budget was written
+  before anything was measured. Replaced by:
+  - Full rebuild **≤ 90 min**, background, explicitly initiated, with the cost stated before it starts.
+  - **Incremental update of a changed file in < 5 s** — unchanged, and measured at 4.4 s for a
+    no-change pass over all 1,330 documents.
+  - See [OQ-17](OPEN_QUESTIONS.md#oq-17): this makes the incremental path load-bearing rather than a
+    convenience, which is a different design.
 - Retrieval p95 **< 400 ms** over the full corpus.
 - On a 20-question fixture set, the correct source appears in the top 5 **≥ 80%** of the time.
 - Deleting `knowledge.db` and reindexing reproduces equivalent results — the index is truly disposable.

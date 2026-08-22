@@ -18,6 +18,13 @@ Measured on 2026-08-21, not estimated:
 
 **Total: a few thousand documents → roughly 30k–80k chunks.**
 
+**Corrected 2026-08-22, by building the index for real:
+1,330 documents → 10,287 chunks, of which 9,385 carry an embedding, in an 85 MB file.** The
+30k–80k estimate was three to eight times too high, because it counted documents the per-type policy
+in §2 never sends to the chunker and chunks smaller than the ones §3 actually produces. The
+conclusion it supported gets *stronger*, not weaker: this corpus is small — and measured retrieval
+over it is **149 ms p50, 203 ms p95**, brute force included.
+
 At that scale, brute-force vector scan is tens of milliseconds and an ANN index is pure overhead. This
 is the entire justification for sqlite-vec over Qdrant/pgvector
 ([ADR-0006](DECISIONS.md#adr-0006--sqlite-only-storage-two-files-sqlite-vec--fts5)). It also means
@@ -33,36 +40,55 @@ Interactive saves, League of Legends configs, Arma 3 data and a 32 MB PDF. Any d
 
 **Explicit opt-in per collection. There is no "index everything" mode.**
 
+The live declaration is [`config/collections.yaml`](../config/collections.yaml); it is a file a human
+edits, not something the agent writes. Its shape:
+
 ```yaml
-# config/collections.yaml
+deny:                            # checked first, for every collection, on the PATH —
+  - "**/Passwords/**"            # so a secret is not read in order to learn it is a secret
+  - "**/*.env"
+  - "**/.ssh/**"
+  # …
+
 collections:
   - id: projects
     kind: code
     roots: ["C:/Projects"]
-    include_projects: [Asterim, SCRAPSHIFT, GameRecs, Source2DemViewer, asterim-pipeline]
+    include_projects: [Asterim, AsterimDesign, GameRecs, GrowAMonster, ORACLE,
+                       Source2DemViewer, asterim-pipeline]
     respect_gitignore: true
     exclude:
       - "**/node_modules/**"     # ~1000s of files, zero value
-      - "**/target/**"           # Rust build output: 3,915 files in one project
+      - "**/target/**"           # Rust build output: 3,893 files, in a project with no .git
       - "**/.git/objects/**"
       - "**/dist/**"
-      - "**/build/**"
-      - "**/*.lock"
-      - "**/*.min.js"
-      - "**/coverage/**"
+      # …
     max_file_bytes: 1_000_000
 
   - id: notes
     kind: markdown
     roots:
       - "C:/Users/qhukz/Documents/AI/ML Learning"       # 157 notes
-      - "C:/Users/qhukz/Documents/ObsidianNotes"
+      - "C:/Users/qhukz/Documents/ObsidianNotes"        # see `deny` — this root has a Passwords/ folder
       - "C:/Users/qhukz/Documents/MLAI NOTES/ML/AI"
     obsidian: true
 
   # NOT indexed, deliberately: Documents/ at large, Downloads, AppData,
   # game data, anything outside a declared scope.
 ```
+
+Three corrections that the first real walk of this machine forced, on 2026-08-22:
+
+* **A root is not a promise.** `Documents/ObsidianNotes` — named as a notes root in the original
+  draft of this section — contains a `Passwords/` folder holding `Passwords.md` and
+  `Bank accounts.md`. Hence the top-level `deny` list, which is matched against the path before the
+  file is opened, and which no per-collection `include` can override.
+* **`SCRAPSHIFT` does not exist** on this machine; `AsterimDesign`, `GrowAMonster` and `ORACLE` do,
+  and `MonsterGarden` is an empty directory. The list above is the one that matches the disk.
+* **Exclusion has to happen during traversal, not after it.** `Path.rglob` enumerates
+  `node_modules` in full before any filter can reject it, and on Asterim that walk took longer than
+  embedding the entire corpus. The walker prunes directory names as it descends — the same rule
+  §6 states for the watcher: drop before hashing, not after.
 
 ### Per-type policy
 
@@ -111,11 +137,43 @@ the 4 GB of VRAM stays dedicated to the router model. E5 requires `query:` / `pa
 indexer and the retriever must agree on this, and a test asserts it (getting it wrong silently halves
 quality and is a classic bug).
 
-`EXPERIMENT NEEDED` [OQ-02](OPEN_QUESTIONS.md): compare against `bge-m3` on a mixed RU/EN fixture set;
-evaluate Matryoshka truncation to 384d (halves storage and scan time, usually at minimal cost).
+**Confirmed by measurement, [OQ-02](OPEN_QUESTIONS.md#oq-02), 2026-08-22**
+([log](../logs/development/2026-08-22-oq02-embeddings.md)). The default was right; two of the
+suggested economies were not, and both are now rejected with numbers:
 
-Embedding runs in a **separate process** at low priority so a reindex never stalls the event loop or
-competes with an interactive turn.
+Recall from a 3,000-chunk sample so every candidate saw identical chunks; throughput from a
+dedicated idle-machine run, because the first figures were taken under varying load and
+overstated the winner's margin:
+
+| | dense r@5 | hybrid r@5 | RU→EN r@5 | chunks/s |
+|---|---:|---:|---:|---:|
+| **`e5-base`, 768d** | 81% | **90%** | 75% | **4.71** |
+| truncated to 384d | 71% | 81% | 62% | 4.71 |
+| int8 (`_avx512_vnni` export) | 52% | 76% | 62% | 4.59 |
+| `e5-small`, 384d | 76% | 71% | 38% | 7.95 |
+| `bge-m3`, 1024d | 90% | 95% | **100%** | 1.37 |
+
+**On the full corpus, `e5-base` scores 81% — one point over the gate — and 62% on the
+Russian questions.** The sample overstated it by 9 points overall and 13 on the
+cross-language column. `bge-m3` is the likely fix at 3.4x the indexing cost, and the
+comparison that would settle it has not been run. See
+[OQ-02](OPEN_QUESTIONS.md#oq-02).
+
+* **Do not truncate.** Matryoshka truncation costs 9 points here, not "minimal": `multilingual-e5-base`
+  is *not* Matryoshka-trained, so its first 384 dimensions are half an embedding rather than a
+  smaller one. The saving is 4 MB.
+* **Do not use the published int8 export.** It gains 13% throughput on this CPU — which has AVX2 but
+  no AVX-512 and no VNNI, so the export's own kernels do not apply — and loses 29 points of dense
+  recall, falling below BM25 alone.
+
+Two properties are load-bearing and each is asserted rather than assumed. E5 requires
+`query:` / `passage:` prefixes, and the indexer and retriever must agree — `Embedder.encode` takes the
+role as a required argument for that reason. And **~20% of chunks exceed the 512-token limit and are
+silently truncated** (`TO VERIFY` in `rag/chunking.py`: measure the cost before building a
+token-aware splitter).
+
+Embedding runs off the event loop at low priority so a reindex never stalls an interactive turn.
+A full rebuild is **~1 hour** on this CPU, not minutes — see §6.
 
 ---
 
@@ -144,7 +202,30 @@ query
 
 RRF is chosen because it needs no score normalisation between two incomparable scoring systems and no
 tuned weights — it is robust by construction. Metadata pre-filtering (project, collection, language,
-path prefix) happens **before** the KNN scan, which is what keeps brute force cheap.
+path prefix) happens **before** the KNN scan, which is what keeps brute force cheap — in sqlite-vec
+that means vec0 partition keys, so the predicate is pushed into the scan rather than applied after it.
+
+### Fusion is conditional  `MEASURED 2026-08-22`
+
+Robust by construction is not the same as harmless. Measured on the fixture set during
+[OQ-02](OPEN_QUESTIONS.md#oq-02):
+
+| dense model | dense only | + BM25 via RRF |
+|---|---:|---:|
+| `e5-base` | 81% | **90%** (+9) |
+| `e5-small` | 76% | **71%** (−5) |
+
+A Russian question against an English codebase shares no meaningful term with any document, so BM25
+has nothing to say — **and says it in thirty ranked results anyway**. Unweighted RRF treats that as a
+second opinion of equal standing, and it displaces correct dense hits out of the top 5. Fusion is not
+free when one retriever is systematically blind to a query class.
+
+The fix keeps RRF unweighted and gates its *input* instead: the lexical list is admitted only when
+the query has some lexical purchase on the corpus — at least one term appearing in fewer than 10% of
+chunks (with a floor, so a small index does not gate everything out). Tuning RRF's weights would have
+forfeited the property the algorithm was chosen for; dropping a list that is provably noise does not.
+
+Implemented as `rag.retrieval.has_lexical_purchase`.
 
 **No reranker in v1.** Post-MVP, if the fixture set shows a gap: ONNX `bge-reranker-base` on CPU,
 top-30 → top-8.
@@ -169,6 +250,27 @@ does not invalidate every chunk below it. A full reindex is always available and
 **Windows-specific care:** `watchfiles` (Rust `notify`) is used over `watchdog` for reliability;
 events during a `npm install` arrive in the thousands, so debouncing and exclusion happen *before*
 hashing; files locked by another process are retried with backoff rather than logged as errors.
+
+### The measured cost, and why this path is load-bearing  `MEASURED 2026-08-22`
+
+| | measured |
+|---|---|
+| Full rebuild — 1,330 docs, 10,287 chunks, 9,385 embedded, 85 MB | **42.8 min** |
+| Incremental pass, nothing changed (1,330 documents) | **1.4–4.4 s** |
+| Walk + chunk, no embedding | 25 s |
+| Retrieval, p50 / p95 over the full corpus | **149 / 203 ms** |
+
+The Phase 5 acceptance criteria asked for a full index in **under 10 minutes**. That target was set
+before anything was measured and **is not achievable on this CPU** at any quality that passes the
+recall gate — the corpus is ~3.7M tokens and `e5-base` sustains roughly 1,100 tokens/s here.
+
+This is not a small correction. "A rebuild is cheap, so the incremental path is a convenience" and
+"a rebuild is an hour, so the incremental path is the product" are different designs. It is the
+second one. Disposability still holds — deleting `knowledge.db` is always safe — but it costs an
+hour of background CPU, so the UI says so before starting one.
+
+The 4.4 s figure is dominated by walking and hashing 1,330 files, not by embedding: a single changed
+file costs that plus one document's worth of encode.
 
 ---
 

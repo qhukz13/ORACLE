@@ -3,116 +3,169 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** P4-T1 — Desktop UI v1
-**Status:** `DONE` — ★ **the MVP is complete**, with one criterion that only using it can tick
-**Date:** 2026-08-21
+**Task:** P5-T1 — Project knowledge (RAG)
+**Status:** `IN PROGRESS` — OQ-02 and OQ-08 resolved; the subsystem is built, measured against the
+real corpus, and the gate is green. One acceptance criterion is **measured as unachievable**, and the
+model choice is **less settled than the sample suggested** — both need a human decision.
+**Date:** 2026-08-22
 
 ---
 
-## Where the project is
+## What was asked, and what happened
 
-**Phases 0–4 are done. ORACLE is a working local agent with a working interface.**
+The task had one gate and eight requirements. The gate — [OQ-02](OPEN_QUESTIONS.md#oq-02), the
+embedding-model choice — is **resolved and recorded**, which was the thing blocking everything else.
+[OQ-08](OPEN_QUESTIONS.md#oq-08) (FTS5 and Russian) was resolved alongside it because it was cheap
+and the two answers interact.
 
-Ask it to check a repository and it runs `git.status` and shows you the card. Ask it to push and it
-stops and shows you the nine commits that would leave the machine. Type in the terminal dock and the
-keystrokes reach a real ConPTY inside a Job Object that HALT can kill.
+The subsystem underneath is built: collection registry, walker, chunker, embedder, `knowledge.db`
+with sqlite-vec + FTS5, hybrid retrieval, incremental indexer, watcher, four `know.*` tools with
+policy rules, and the UI for citations and index health.
 
-| | |
-|---|---|
-| Tools | **29** registered, 26 offerable, 11 reachable from a routed turn |
-| Tests | **370 Python** + **77 TypeScript**; the security suite is a merge gate |
-| Router | 93.3% intent accuracy, **100% tool selection** on the eval set, p50 1.16 s |
-| Gate | ruff · mypy `--strict` · pytest · tsc · vitest — green |
+**Two things are not done and one is not possible.** They are listed in "What is left", below, and
+neither is hidden in a footnote.
 
-## Acceptance criteria — measured, not asserted
+## The measurements that mattered
 
-| criterion | result |
-|---|---|
-| Every MVP action without a mouse | ✅ `Ctrl+K` · `Ctrl+B` · `Ctrl+I` · ``Ctrl+` `` · `F1` · Enter · `A`/`D`/`Esc` |
-| Approval readable and decidable in < 5 s | ✅ one screen: the real argv, the rule, a real dry run, a live countdown |
-| T3 delete previews a real file list | ✅ verified in ORACLE's scratch scope; the preview deleted nothing |
-| Terminal handles 10k lines | ✅ **10,000 / 10,000**, 1.03 MB in 6.0 s, loop p50 12.1 ms |
-| Backend down → opens, explains, reconnects | ✅ killed mid-session; resumed at `since_seq=251` when it returned |
-| Colour never the only carrier of meaning | ✅ asserted per component |
-| Zero serious/critical axe violations | ✅ across all four components |
-| ★ A full working day without a terminal | ⬜ **not something a suite can tick.** Left honest. |
+Full write-ups: [OQ-02](../logs/development/2026-08-22-oq02-embeddings.md) ·
+[OQ-08](../logs/development/2026-08-22-oq08-fts5-russian.md).
 
-## The two bugs that came from driving the app, not the tests
+Recall on a 3,000-chunk sample (identical chunks per candidate); throughput from a dedicated
+idle-machine run:
 
-Both were invisible to a green suite, and both were in the surface the phase exists for.
+| candidate | dim | dense r@5 | hybrid r@5 | **RU→EN r@5** | chunks/s |
+|---|---:|---:|---:|---:|---:|
+| BM25 only | — | — | 62% | **0%** | — |
+| e5-small | 384 | 76% | 71% | 38% | 7.95 |
+| **e5-base** ← ships | **768** | 81% | 90% | 75% | **4.71** |
+| e5-base → 384 | 384 | 71% | 81% | 62% | 4.71 |
+| e5-base int8 | 768 | 52% | 76% | 62% | 4.59 |
+| bge-m3 | 1024 | 90% | 95% | 100% | 1.37 |
 
-**1. A stale approval blocked the live one.** History replays from seq 0 after a reload, so a request
-issued by a backend that has since exited arrives looking brand new. It sat at the head of the queue —
-with a live countdown — where nothing could ever answer it, hiding the real approval behind it.
-Expiry now counts from the **server's** timestamp, and an already-expired approval never joins the
-queue. That is the server's own rule, applied on arrival.
+**Full corpus, `e5-base`, shipped code path — the number that counts:**
 
-**2. `git.push` was unroutable, so the Confirmation Center could never fire.** Every routable tool was
-T0 or T1. The most safety-critical surface in the product had no path to appearing in normal use, and
-nothing said so. `git.push` turns out to be buildable honestly from the project alone — `origin` and
-the checked-out branch are what "push my changes" means — and a test now asserts that it being the
-only routable tool above T1 stays a decision rather than an accident.
+```
+1,330 documents · 10,287 chunks · 9,385 embedded · 85 MB · 42.8 min
+recall@5   81%  (gate 80%)     crosslang 62% (5/8) · semantic 90% · lexical 100%
+latency    p50 149 ms · p95 203 ms  (gate 400 ms)
+```
+
+Four results worth carrying forward:
+
+1. **BM25 scores 0% on the Russian questions.** Eight for eight. Lexical search is not weak at
+   cross-language retrieval, it is blind to it — which is the whole justification for the dense half.
+2. **Matryoshka truncation costs 9 points**, not "minimal". E5 is not Matryoshka-trained. Saving: 4 MB.
+3. **The published int8 export loses 29 points** and gains 13% throughput on this CPU, which is
+   Haswell — no AVX-512, no VNNI, so its kernels never apply. It fell below BM25 alone.
+4. **`bge-m3` is better than what ships** (95% vs 90%; 100% vs 75% on Russian) at **3.4x** the
+   indexing time — ~2.5 h against 43 min for a full build. See the next section: the full-corpus
+   run weakened the case for the model I chose.
+
+### The recommendation I made, and what the full corpus did to it
+
+I chose `e5-base` on the 3,000-chunk sample, reasoning that its 5-point deficit to `bge-m3` was one
+fixture and inside the noise. **The full-corpus run makes that reasoning look thin, and it should be
+said rather than left in a table:**
+
+| | sample | full corpus |
+|---|---:|---:|
+| overall recall@5 | 90% | **81%** (gate: 80%) |
+| cross-language (RU→EN) | 75% | **62%** — 3 of 8 missed |
+
+The sample flattered it by 9 points overall and 13 on the cross-language column — and cross-language
+is the case this whole experiment exists for, and the one this user works in daily. The margin over
+the gate is now **one fixture**.
+
+`bge-m3` started 25 points higher on that column. It will also fall on the full corpus, but nobody
+knows by how much, because **the decisive run has not been made** — it is ~2.5 hours of CPU. Until it
+exists, "e5-base is good enough" rests on a sample now shown to overstate. The default stands; the
+confidence behind it should not be overstated in turn.
+
+### The criterion that cannot be met
+
+> *"Full index of all projects + vaults in **< 10 min** on this CPU"*
+
+**Measured end to end: 42.8 minutes** — 4x over, and nothing that passes the recall gate comes close.
+The corpus is ~3.7M tokens; ten minutes would need ~6,200 tokens/s and `e5-base` sustains ~1,900 on
+24 Haswell threads. The budget was written before anything was measured.
+
+The incremental path — the one that runs dozens of times a day — is **1.4–4.4 s** for a no-change
+pass over all 1,330 documents, against a `< 5 s` target.
+
+**This needs a decision, not a workaround.** The honest rewrite is two numbers instead of one: a rare
+background rebuild of ~1 hour, and an incremental update under 5 s. That reframes the incremental
+path from a convenience into the product, which is a different engineering posture. Raised as
+[OQ-17](OPEN_QUESTIONS.md#oq-17).
 
 ## What was built
 
-```
-components/ConfirmationCenter.tsx   the card; the one UI that is part of the security model
-components/ToolCard.tsx             one card per call: tier, verbatim args, Undo where real
-components/CommandPalette.tsx       Ctrl+K into the pre-router; never dead-ends
-components/TerminalDock.tsx         xterm.js over a real ConPTY
-components/Inspector.tsx            what a turn decided, ran, and cost
-core/terminal.py                    the bridge: PTY output onto the event stream
-tools/terminal.py                   + term.input, term.resize (hidden)
-```
+| Piece | Where |
+|---|---|
+| Collection registry, deny list, pruning walker | `src/oracle/rag/collections.py`, `config/collections.yaml` |
+| Chunking — heading-aware Markdown, symbol-aware code, Obsidian links and tags | `src/oracle/rag/chunking.py` |
+| Embeddings — ONNX on CPU, length-sorted batching, required query/passage role | `src/oracle/rag/embedding.py` |
+| `knowledge.db` — sqlite-vec + FTS5, one file, one transaction | `src/oracle/rag/store.py` |
+| Hybrid retrieval — dense + BM25 + **gated** RRF, boosts, diversity, taint | `src/oracle/rag/retrieval.py` |
+| Incremental indexer — content-hash gated | `src/oracle/rag/indexer.py` |
+| Watcher — debounced, filters before hashing | `src/oracle/rag/watcher.py` |
+| `know.search`, `know.search_code`, `know.read_context`, `know.reindex` | `src/oracle/tools/knowledge.py`, `config/policy.yaml` |
+| Citations and index health in the UI | `apps/desktop/src/components/Citations.tsx`, `KnowledgeHealth.tsx` |
+| Benchmark and build scripts | `scripts/eval_embeddings.py`, `scripts/index_knowledge.py`, `scripts/fetch_embedding_models.py` |
 
-### The distinction the terminal is built around
+**The gate is green** — `ruff format · ruff lint · mypy --strict · tsc · pytest · security · vitest`.
+**469 Python + 122 TypeScript tests**, including `tests/security/test_collections.py`,
+`test_injection.py` and `test_know_tools.py`. Tool count **33**, under the cap of 40.
 
-`term.write` is **the agent** typing into a shell: T2, confirmed every single time, one line per call
-so an approval cannot cover a script. `term.input` is **the human** typing: T1, and hidden so the
-model can never reach it.
+### Design changes the measurements forced
 
-Asking someone to approve their own keystrokes is not a security control — it is a way to teach them
-to click Approve. But a tool the agent *could* call would be `term.write` with the confirmation
-removed, which is the exact hole the separation exists to prevent. Hence two tools.
+* **Fusion is now conditional.** Unweighted RRF added 9 points to `e5-base` and *removed 5* from
+  `e5-small`. On a Russian question BM25 has nothing to say and says it in thirty ranked results,
+  which displace correct dense hits. RRF stays unweighted; its *input* is gated on the query having
+  some lexical purchase on the corpus. ([RAG.md §5](RAG.md#5-hybrid-retrieval))
+* **`ObsidianNotes` contains a `Passwords/` folder** holding `Passwords.md` and `Bank accounts.md`,
+  and it was a declared notes root. There is now a top-level `deny` list, matched on the path before
+  a file is opened, that no per-collection include can override.
+* **The corpus is 11,268 chunks, not 30k–80k.** The estimate was 3–8x high.
+* **`unicode61` handles Cyrillic fine** — the claim in DATABASE.md that it does not was wrong. What
+  it cannot do is stem (handled by prefix-expanding Cyrillic query terms) or split camelCase (handled
+  by an `ident` column written at index time).
+* **`know.summarize` was not built.** TOOLS.md specifies five `know.*` tools and the fifth "uses the
+  local model" — which a tool-host handler cannot do without L7 re-entering L3–L6. Four shipped;
+  the fifth needs an ADR, not a quiet violation.
 
-### Why the terminal polls
+## What is left
 
-The PTY lives in the toolhost, because a runaway `npm install` must die with HALT. The parent polls
-each session through the ordinary tool path and republishes the output as `term.output`. A push
-channel would mean the parent's frame reader had to tell a reply from an announcement — a protocol
-seam exactly where correctness matters. Polling costs one ~28 ms round trip per session per 120 ms
-and reuses the gate, the audit log and the timeouts unchanged.
+1. **tree-sitter chunking.** The code chunker is a documented regex approximation. Its limits are
+   measured, not guessed: `equal` and `useEffect` are still mistaken for declarations in test files.
+   Better boundaries lift every model, so the absolute recall numbers move when this lands.
+2. **PDF parsing.** `pypdfium2` is still a deferred dependency; the one 32 MB PDF is classified,
+   counted and skipped rather than silently failing.
+3. **Wiring the watcher into the daemon.** `Watcher` and `debounce` are built and tested; nothing
+   starts them at boot yet.
+4. **`bge-m3` over the full corpus** — ~2.5 h of CPU, and the only thing that settles the model
+   choice. See above.
+5. **More Russian fixtures.** Eight is too few to carry a decision this expensive; ~25 is cheap now
+   that the harness exists.
 
-## Decisions worth knowing
+## A flaky terminal test, pre-existing
 
-- **The Confirmation Center was built first, not fourth.** Everything else in the phase is an
-  interface to something that already worked. The card is the only piece where the UI *is* the
-  security model, and a confirmation the user cannot read is worse than no prompt at all.
-- **"Always for X" was deliberately not built.** A scoped standing approval makes prompts cheaper;
-  the answer to prompt fatigue is *fewer* prompts, which reversibility and T1 already deliver.
-- **Playwright was not added.** It meant a browser download and a second harness for journeys already
-  driven against the real backend — which is where both real bugs were found. 77 vitest tests
-  including axe over the rendered DOM cover the components.
-- **No orbital view.** Phase 9. Building the decorative centrepiece before the functional shell is
-  the classic way this kind of project dies at 80%.
+`tests/security/test_terminal.py::TestNothingIsLostOnTheWayOut::test_a_long_burst_arrives_complete`
+failed twice during this task, losing 165 of 300 lines from a ConPTY burst.
 
-## Known gaps, honestly
+**It is not caused by anything here, and that was checked rather than assumed.** Both failures
+happened while the `bge-m3` benchmark was saturating all 24 threads with a 3 GB model resident. Re-run
+later under lighter load — with every change from this task still in place — it **passes**. Every
+change in this task is additive and none of it touches the terminal.
 
-- **The terminal's rendering was never visually verified.** The browser pane available here does not
-  composite, and xterm measures a character by rendering one — so what was verified is the pipeline
-  (10k lines, no loss) and the terminal *buffer* (`C:\Projects>echo terminal-dock-works`), not the
-  pixels. A guard was added for the genuinely-fixable half (attaching before layout exists); the
-  headless case is documented in the component rather than papered over.
-- **11 of 26 tools are reachable from a routed turn.** The rest need an argv, a command, file content
-  or a remote — none derivable from *(project, one string)* without inventing something.
-- **One terminal session, no sub-tabs, no search.** `Ctrl+F` in the dock is not built.
-- **No task system.** The inspector shows a *turn*; tasks arrive with delegation in Phase 6.
-- **[OQ-13](OPEN_QUESTIONS.md#oq-13) is still an assumption.** T1 covers writes, commits, tests,
-  builds and branches, so daily use should prompt rarely — but nobody has counted yet, and now
-  somebody can.
+So the finding is load-sensitivity, not a regression: a test that reads 300 lines out of a real PTY
+within a fixed deadline fails when the machine is starved. That is a **pre-existing flake worth
+fixing** — a timing-sensitive test that only fails under load will eventually fail in CI and be
+blamed on whatever landed that day. It should wait on a condition rather than a deadline, the same
+lesson [OQ-09](OPEN_QUESTIONS.md#oq-09) already recorded for terminal readiness.
 
-## For whoever picks this up
+Otherwise the suite is green: **469 Python passed, 1 skipped**; **122 TypeScript passed**.
 
-The next phase is **P5 — Project knowledge (RAG)**, and the MVP is behind you. Before starting it,
-consider spending a day *using* ORACLE: the unticked criterion above is the only one that matters,
-and it is the one most likely to produce a list of small things that make it genuinely daily-usable.
+## Where to pick up
+
+Read [OQ-02](../logs/development/2026-08-22-oq02-embeddings.md) §5 first — the indexing budget is the
+open decision, and everything else in this phase is smaller than it.

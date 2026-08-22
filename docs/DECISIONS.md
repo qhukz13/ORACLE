@@ -442,8 +442,15 @@ and the easiest to leave at 80%; they attach to a working product rather than su
 **Trade-offs.** The most motivating features are deferred. Phases 0–2 produce little visible progress.
 
 **Consequences.** The MVP definition in [ROADMAP.md](ROADMAP.md#the-mvp-stated-once) is the
-scope-creep test — anything not required by that paragraph is not in the MVP. Definition of done for
-Phase 4 is behavioural: **a full working day using ORACLE without opening a terminal manually.**
+scope-creep test — anything not required by that paragraph is not in the MVP. ~~Definition of done for
+Phase 4 is behavioural: **a full working day using ORACLE without opening a terminal manually.**~~
+
+> **Amended 2026-08-22.** That behavioural criterion is retired; Phase 4's definition of done is its
+> acceptance list. The record is struck rather than deleted because the reasoning that produced it —
+> "a personal tool that is not used daily never gets finished" — still holds and still drives this
+> ADR. What was wrong was the *measure*, not the motive: the terminal is a first-class surface in
+> this design, so using one was never failure, and "a full working day" is not an experiment anyone
+> actually runs. See the note under Phase 4 in [ROADMAP.md](ROADMAP.md).
 
 
 ---

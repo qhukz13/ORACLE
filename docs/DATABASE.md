@@ -181,7 +181,8 @@ CREATE VIRTUAL TABLE chunk_vectors USING vec0(
 
 -- lexical: BM25 over the same chunks, same file, same transaction
 CREATE VIRTUAL TABLE chunks_fts USING fts5(
-  text, anchor, rel_path UNINDEXED, chunk_id UNINDEXED, tokenize='unicode61 remove_diacritics 2'
+  text, anchor, ident, rel_path UNINDEXED, chunk_id UNINDEXED,
+  tokenize='unicode61 remove_diacritics 2'
 );
 
 CREATE TABLE symbols (            -- code navigation and symbol-aware search
@@ -198,13 +199,27 @@ CREATE TABLE links (              -- Obsidian [[wikilinks]] → one-hop expansio
 );
 ```
 
-`tokenize='unicode61 remove_diacritics 2'` matters for Russian: the default tokenizer handles Cyrillic
-poorly for the mixed RU/EN corpus this indexes. `TO VERIFY` against real Russian queries in the
-Phase 5 retrieval fixture suite — a lexical tokenizer that silently mangles Cyrillic would degrade
-half the hybrid search without any visible error.
+**The tokenizer, corrected 2026-08-22 by measurement** ([OQ-08](OPEN_QUESTIONS.md#oq-08),
+[log](../logs/development/2026-08-22-oq08-fts5-russian.md)). The claim that once stood here — that
+`unicode61` "handles Cyrillic poorly" — is **wrong**: it case-folds Cyrillic correctly in both
+directions, and `remove_diacritics 2` is a Latin concern that neither helps nor harms Russian. The
+two things it genuinely cannot do are why the schema above has an `ident` column:
+
+* **No stemming.** `токен` does not match `токена`, and Russian is inflected. Handled at query time
+  by prefix-expanding Cyrillic terms (`токен*`), not in the schema.
+* **No camelCase splitting**, and no configuration of `unicode61` can add it — `separators` adds
+  separator *characters*, and a case transition is not one. So `ident` holds each identifier exploded
+  into its parts (`entitlementGuard` → `entitlement Guard`), written at index time. An unqualified
+  `MATCH` searches every column, so `entitlement` finds the row without the query knowing why.
 
 **Vector dimension is fixed at index-build time.** Changing the embedding model requires a full
-reindex — which is cheap here (minutes) and is exactly why the index is disposable.
+reindex, and that is exactly why the index is disposable.
+
+**A full reindex takes about three quarters of an hour, not "minutes".** Measured end to end on
+2026-08-22: 1,330 documents, 10,287 chunks, 9,385 of them embedded by `multilingual-e5-base` on 24
+Haswell threads, **42.8 minutes**, producing an 85 MB file. See [OQ-02](OPEN_QUESTIONS.md#oq-02). Disposability is
+still real, but it costs an hour of background CPU, which makes the incremental path load-bearing
+rather than a convenience.
 
 ---
 
@@ -222,7 +237,9 @@ reindex — which is cheap here (minutes) and is exactly why the index is dispos
 
 - `oracle.db` — nightly `VACUUM INTO` snapshot, keep 7. **This is the irreplaceable file.**
 - `logs/audit/` — included in the snapshot; never truncated.
-- `knowledge.db` — **not backed up.** Rebuildable in minutes.
+- `knowledge.db` — **not backed up.** Rebuildable in **~43 minutes** of background CPU, measured, not
+  the "minutes" this line used to claim. Still not worth backing up: an hour of idle CPU is cheaper
+  than a backup that can silently restore a stale or corrupt index.
 - Secrets — exported only by explicit manual action, never automatically.
 
 `VACUUM INTO` is used rather than a file copy because it is safe against a live WAL connection.

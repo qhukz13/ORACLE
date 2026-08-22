@@ -270,6 +270,22 @@ Matryoshka truncation to 384d — halves storage and scan time, usually at littl
 No reranker in v1. Post-MVP: ONNX `bge-reranker-base` on CPU, top-30 → top-8, only if measured
 retrieval quality demands it.
 
+### Phase 5 dependency ledger  `2026-08-22`
+
+Each of these is a maintenance commitment, so each gets a line saying what it buys and what was
+rejected. Added when the code that needs them landed, not in advance.
+
+| Package | Buys | Rejected alternative |
+|---|---|---|
+| `onnxruntime` | CPU inference for the embedding model, with no PyTorch in the tree. A `torch` wheel is ~2.5 GB and pulls a CUDA stack we deliberately do not want on the embedding path (embeddings run on the CPU — see above). | `torch` + `sentence-transformers`: an order of magnitude more install for a model we only ever run forward. `optimum` adds a `transformers` dependency to do what forty lines of pooling code do. |
+| `tokenizers` | The Rust tokenizer that matches the ONNX export byte for byte. Loaded from the model's own `tokenizer.json`, so there is no chance of a mismatch between what was exported and what we feed it. | `transformers.AutoTokenizer` — same tokenizer, plus the whole `transformers` package around it. |
+| `numpy` | Brute-force cosine over the corpus, mean pooling, and the arrays ONNX Runtime already speaks. Measured at 422 GFLOPS of SGEMM on this CPU, which is why a brute-force scan is the right answer at 10k chunks. | Pure Python: an 80× slowdown on the pooling path alone. |
+| `sqlite-vec` | Vector KNN inside `knowledge.db`, one file and one transaction with FTS5 and the metadata. Verified working (v0.1.9) against the bundled SQLite 3.50.4 via `enable_load_extension`. | Everything in [Why sqlite-vec, decisively](#why-sqlite-vec-decisively). |
+
+Still deferred until the code that needs them exists, because an unused dependency is pure cost:
+`tree-sitter` (code chunking — the regex approximation is in place and its limits are measured),
+`pypdfium2` (the one 32 MB PDF), `watchfiles` (the incremental watcher).
+
 ---
 
 ## 5. Desktop shell

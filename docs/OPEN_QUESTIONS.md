@@ -13,13 +13,13 @@ doc, delete the marker.
 | # | Question | Marker | Blocks | Status |
 |---|---|---|---|---|
 | [OQ-01](#oq-01) | Which router model actually fits and performs? | ~~`EXPERIMENT NEEDED`~~ | Phase 1 | **RESOLVED 2026-08-21 — 0.8b, 93.3% accuracy** |
-| [OQ-02](#oq-02) | Which embedding model for mixed RU/EN? | `EXPERIMENT NEEDED` | Phase 5 | open |
+| [OQ-02](#oq-02) | Which embedding model for mixed RU/EN? | ~~`EXPERIMENT NEEDED`~~ | Phase 5 | **RESOLVED 2026-08-22 — e5-base 768d; no truncation, no int8** |
 | [OQ-03](#oq-03) | How long will Pascal keep GPU acceleration? | `UNKNOWN` | risk, not a phase | monitoring |
 | [OQ-04](#oq-04) | Does `realpath` resolve Windows junctions? | ~~`TO VERIFY`~~ | Phase 2 | **RESOLVED 2026-08-21 — yes; but `is_symlink()` lies** |
 | [OQ-05](#oq-05) | Does `agy -p` emit stdout when piped? | ~~`EXPERIMENT NEEDED`~~ | Phase 6 (Antigravity only) | **RESOLVED 2026-08-21 — yes, with `--output-format`** |
 | [OQ-06](#oq-06) | Can a PWA install over a self-signed cert? | `TO VERIFY` | Phase 8 (push only) | open |
 | [OQ-07](#oq-07) | Is the memory subsystem dual- or quad-channel? | `UNKNOWN` | CPU-fallback planning | open |
-| [OQ-08](#oq-08) | Does FTS5 `unicode61` handle Russian acceptably? | `TO VERIFY` | Phase 5 | open |
+| [OQ-08](#oq-08) | Does FTS5 `unicode61` handle Russian acceptably? | ~~`TO VERIFY`~~ | Phase 5 | **RESOLVED 2026-08-22 — yes; no stemmer, no camelCase split** |
 | [OQ-09](#oq-09) | `pywinpty` on Python 3.12 + ConPTY behaviour | ~~`TO VERIFY`~~ | Phase 3 | **RESOLVED 2026-08-21 — works; readiness must be measured, not slept** |
 | [OQ-10](#oq-10) | Is there a text-only Qwen3.5 quant? | `TO VERIFY` | Phase 1 | open |
 | [OQ-11](#oq-11) | Does the Tauri sidecar die with the shell? | ~~`TO VERIFY`~~ | Phase 0 | **RESOLVED 2026-08-21 — yes, via Job Object** |
@@ -28,6 +28,7 @@ doc, delete the marker.
 | [OQ-14](#oq-14) | Does the orbital view earn its place? | `UNKNOWN` | Phase 9 go/no-go | open |
 | [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | `EXPERIMENT NEEDED` | UX quality, not a phase | open |
 | [OQ-16](#oq-16) | Does `connect_read_pipe` work anywhere on Windows? | `UNKNOWN` | none — worked around | monitoring |
+| [OQ-17](#oq-17) | Is a ~1 h full reindex acceptable? | `ASSUMPTION` | Phase 5 tuning | open — raised by OQ-02 |
 
 ---
 
@@ -82,17 +83,82 @@ runtime rather than of the model.
 ---
 
 ### OQ-02
-**Which embedding model for a mixed Russian/English corpus of prose and code?** `EXPERIMENT NEEDED` · blocks **Phase 5**
+**Which embedding model for a mixed Russian/English corpus of prose and code?**
+**RESOLVED 2026-08-22 — `multilingual-e5-base` at 768d. Not truncated, not quantised.**
 
-Candidates: `multilingual-e5-base` (768d, needs `query:`/`passage:` prefixes), `bge-m3` (1024d,
-stronger multilingual, heavier), and Matryoshka truncation to 384d.
+Full write-up: [`logs/development/2026-08-22-oq02-embeddings.md`](../logs/development/2026-08-22-oq02-embeddings.md).
+Harness: `scripts/eval_embeddings.py`. Fixtures: `tests/fixtures/retrieval/cases.yaml`.
 
-**Experiment.** Build the 20-question retrieval fixture set from [RAG.md §8](RAG.md#8-quality-measurement)
-— crucially including Russian questions against English code, the case most likely to regress
-silently. Measure recall@5 and CPU throughput (chunks/sec on 24 threads) for each candidate, and for
-768d vs truncated 384d.
+Measured over the real corpus, 21 fixtures, identical chunks for every candidate:
 
-**Decides.** Embedding model, vector dimension (fixed at index build), index size.
+On a 3,000-chunk sample (comparison), and for the winner on the **whole corpus**:
+
+| candidate | dim | dense r@5 | hybrid r@5 | RU→EN r@5 | chunks/s |
+|---|---:|---:|---:|---:|---:|
+| BM25 only | — | — | 62% | **0%** | — |
+| e5-small | 384 | 76% | 71% | 38% | 7.95 |
+| **e5-base** | **768** | 81% | 90% | 75% | **4.71** |
+| e5-base → 384 | 384 | 71% | 81% | 62% | 4.71 |
+| e5-base int8 | 768 | 52% | 76% | 62% | 4.59 |
+| bge-m3 | 1024 | 90% | 95% | 100% | 1.37 |
+| **e5-base, FULL corpus** | 768 | — | **81%** | **62%** | — |
+
+**What it decided.** Embedding model `multilingual-e5-base`, vector dimension **768**
+(fixed at index build; the store records it and refuses a mismatch), index ~8 MB.
+
+**Three findings worth carrying:**
+
+1. **Matryoshka truncation costs 9 points, not "minimal".** E5 is not Matryoshka-trained,
+   so its first 384 dimensions are half an embedding rather than a small one. Saving: 4 MB.
+2. **The published int8 export loses 29 points of dense recall** and gains only 13%
+   throughput — this CPU is Haswell, with no AVX-512 and no VNNI, so the export's kernels
+   do not apply. It fell *below* BM25 alone.
+3. **BM25 scores 0% on cross-language retrieval.** Eight Russian questions, eight misses.
+   The dense half of the index is not an enhancement; it is the only thing that answers
+   the query class this project cares most about.
+
+**Still open, and less comfortably than the sample suggested.** On the full corpus
+`e5-base` scores **81%** — one point over the gate — and **62% on the Russian questions**,
+missing three of eight. The 3,000-chunk sample overstated it by 9 points overall and 13 on
+the cross-language column.
+
+`bge-m3` beat it on that sample by 5 points overall and **25 on the Russian subset**, at
+**3.4x** the indexing time (1.37 vs 4.71 chunks/s; ~2.5 h against 43 min for a full build)
+and 2x resident memory. e5-base ships as the default; the switch is one `ModelSpec` and a
+rebuild, and `KnowledgeStore.bind` refuses an index built by the other model rather than
+returning nonsense.
+
+**Two measurements would settle it**, neither yet run:
+1. `bge-m3` over the **full** corpus — ~2.5 h of CPU, and the direct comparison.
+2. Expanding the Russian fixtures from 8 to ~25, which is cheap and makes both numbers
+   mean something. n=8 cannot support a decision this expensive.
+
+**And one criterion it invalidated:** the Phase 5 "full index in < 10 min" target is not
+achievable on this CPU — a full build is ~58 min. See [OQ-17](#oq-17).
+
+---
+
+### OQ-17
+**Is a ~1 hour full reindex acceptable, or does indexing need a different strategy?**
+`ASSUMPTION` · Phase 5 tuning
+
+Opened 2026-08-22 by [OQ-02](#oq-02), which replaced a guessed budget with a measured one:
+a full rebuild of 9,385 chunks took **42.8 minutes end to end**, not the "< 10 min" the
+acceptance criteria asked for or the "minutes" DATABASE.md claimed. Switching to `bge-m3`
+would make it ~2.5 h.
+
+The incremental path is measured at **1.4–4.4 s** for a no-change pass over 1,330
+documents (cold vs warm cache), so day-to-day work is unaffected. The assumption being made is that a rare, hour-long,
+background rebuild is tolerable — which holds only while rebuilds stay rare.
+
+**It stops holding if chunking changes often.** Any change to chunk boundaries invalidates
+every embedding, and tree-sitter chunking is still pending. Two or three of those during
+development is a day of CPU.
+
+**Resolve by using it.** If rebuilds turn out to be frequent or disruptive, the levers, in
+order of preference: cache embeddings keyed by chunk hash so a re-chunk only re-embeds
+chunks whose *text* changed; embed only changed collections; accept `e5-small` for a first
+pass and upgrade in the background.
 
 ---
 
@@ -196,14 +262,30 @@ sets realistic expectations for [OQ-03](#oq-03)'s fallback and for the 9B reason
 ---
 
 ### OQ-08
-**Does SQLite FTS5 `unicode61` tokenize Russian acceptably?** `TO VERIFY` · blocks **Phase 5**
+**Does SQLite FTS5 `unicode61` tokenize Russian acceptably?**
+**RESOLVED 2026-08-22 — yes, with two index-time mitigations. No custom tokenizer.**
 
-Half the hybrid search depends on BM25. If the tokenizer mangles Cyrillic, lexical retrieval silently
-degrades for Russian queries **with no error anywhere** — the worst kind of failure.
+Full write-up: [`logs/development/2026-08-22-oq08-fts5-russian.md`](../logs/development/2026-08-22-oq08-fts5-russian.md).
 
-**Check.** Index the 157 Obsidian notes; run Russian queries with inflected forms; compare against
-expected hits. If inadequate, evaluate a custom tokenizer or a stemming preprocessor.
-Covered by the retrieval fixture suite, which is why that suite must include Russian cases.
+Measured on SQLite 3.50.4:
+
+| | |
+|---|---|
+| Cyrillic case folding | **works** — `токен` matches `ТОКЕН`, both directions |
+| Underscore splitting | **works** — `MAX_YAML_DEPTH` is findable as `yaml`, `depth` |
+| Stemming | **absent** — `токен` does not match `токена`, and Russian is inflected |
+| camelCase splitting | **absent**, and unconfigurable — `separators` adds separator *characters*, and a case transition is not one |
+
+Two obligations follow into the Phase 5 schema, and each needs a test because each degrades silently:
+
+1. **An `ident` FTS5 column** holding identifiers exploded into parts, written at index time.
+   An unqualified `MATCH` searches every column, so `entitlement` then finds `entitlementGuard`.
+2. **Cyrillic query terms are prefix-expanded** (`токен` → `токен*`); Latin terms are not.
+   It recovers the inflections and over-matches in a bounded way — `токен*` also hits `токенизация` —
+   which BM25's IDF and RRF fusion absorb.
+
+A custom tokenizer is a C extension and a build step; it is not worth it for a gap the fusion layer
+largely covers. Revisit only if the fixture set shows Russian lexical misses that RRF does not rescue.
 
 ---
 
