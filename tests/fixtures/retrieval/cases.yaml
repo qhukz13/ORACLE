@@ -1,0 +1,181 @@
+# Retrieval fixture set — RAG.md §8.
+#
+# ~20 real questions with known-correct sources. The gate is recall@5 >= 80%:
+# for at least 16 of these, one of `expect_any` must appear in the top 5 chunks.
+#
+# Ground truth was established by reading the files, not by running retrieval and
+# recording what came back — a fixture set derived from the system it measures is
+# a tautology. Paths are relative to the corpus root of the collection named in
+# `collection` (`projects` roots at C:/Projects, `notes` at the vault roots).
+#
+# `lang` is the language of the QUESTION, not of the source. The RU→EN rows are
+# the point of the set: a Russian question against an English codebase is the case
+# that regresses silently, and it is why OQ-02 existed.
+#
+# `kind`:
+#   semantic   — conceptual; a dense model should win
+#   lexical    — an identifier or filename; BM25 should win, dense usually fails
+#   crosslang  — Russian question, English source
+#
+# Used by: scripts/eval_embeddings.py (OQ-02) and the retrieval quality gate.
+
+cases:
+  # ---- Russian question, English codebase: the hard case ------------------
+  - id: ru-token-refresh
+    q: "как работает refresh токена в Asterim"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/TokenService.ts"]
+
+  - id: ru-jwt-secret-storage
+    q: "где хранится секрет для подписи jwt и почему не в обычной таблице настроек"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any:
+      - "Asterim/apps/server/src/services/security/SecretVaultService.ts"
+      - "Asterim/apps/server/src/services/TokenService.ts"
+
+  - id: ru-own-yaml-parser
+    q: "почему для пайплайнов написан свой парсер yaml вместо библиотеки"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/pipeline/SafeYaml.ts"]
+
+  - id: ru-two-users-one-agent
+    q: "что происходит если два человека пишут одному агенту одновременно"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/ai/AgentTurnLock.ts"]
+
+  - id: ru-feature-entitlement
+    q: "как проверяется что у аккаунта есть право на функцию"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any:
+      - "Asterim/apps/server/src/middleware/entitlementGuard.ts"
+      - "Asterim/apps/server/src/services/EntitlementService.ts"
+
+  - id: ru-relay-encryption
+    q: "шифрование трафика между рабочей станцией и телефоном через релей"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any:
+      - "Asterim/apps/server/src/services/RelayClient.ts"
+      - "Asterim/Dockerfile.relay"
+      - "Asterim/decisions.md"
+
+  - id: ru-vector-search
+    q: "приближённый поиск ближайших соседей и векторный поиск"
+    lang: ru
+    kind: crosslang
+    collection: notes
+    expect_any: ["08 - Transformers and LLMs/Vector Search.md"]
+
+  - id: ru-finetuning
+    q: "что такое дообучение предобученной модели на своих данных"
+    lang: ru
+    kind: crosslang
+    collection: notes
+    expect_any: ["08 - Transformers and LLMs/Fine-Tuning.md"]
+
+  # ---- English, conceptual ------------------------------------------------
+  - id: en-relay-dockerfile
+    q: "where do we configure the relay Dockerfile"
+    lang: en
+    kind: semantic
+    collection: projects
+    expect_any: ["Asterim/Dockerfile.relay"]
+
+  - id: en-symbol-extraction
+    q: "how are class and function symbols extracted from a source file for the index"
+    lang: en
+    kind: semantic
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/SymbolIndexer.ts"]
+
+  - id: en-yaml-billion-laughs
+    q: "what stops a pipeline definition from expanding into gigabytes of memory"
+    lang: en
+    kind: semantic
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/pipeline/SafeYaml.ts"]
+
+  - id: en-access-token-lifetime
+    q: "how long is an access token valid before it expires"
+    lang: en
+    kind: semantic
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/TokenService.ts"]
+
+  - id: en-secrets-at-rest
+    q: "how are credentials encrypted at rest and where does the key come from"
+    lang: en
+    kind: semantic
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/security/SecretVaultService.ts"]
+
+  - id: en-pipeline-tables
+    q: "which migration creates the pipeline run and step tables"
+    lang: en
+    kind: semantic
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/migrations/004_pipelines.ts"]
+
+  - id: en-relay-secret-rotation
+    q: "what happens if the relay secret is not set on the relay server"
+    lang: en
+    kind: semantic
+    collection: projects
+    expect_any: ["Asterim/docs/operations-runbook.md"]
+
+  # ---- English, exact identifier / filename: BM25 territory ---------------
+  - id: lex-entitlement-guard
+    q: "entitlementGuard"
+    lang: en
+    kind: lexical
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/middleware/entitlementGuard.ts"]
+
+  - id: lex-turn-lock-enqueue
+    q: "AgentTurnLock enqueue"
+    lang: en
+    kind: lexical
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/ai/AgentTurnLock.ts"]
+
+  - id: lex-max-yaml-depth
+    q: "MAX_YAML_DEPTH"
+    lang: en
+    kind: lexical
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/pipeline/SafeYaml.ts"]
+
+  # ---- Notes vault, English ----------------------------------------------
+  - id: en-hnsw-vs-ivf
+    q: "difference between HNSW and IVF for approximate nearest neighbour search"
+    lang: en
+    kind: semantic
+    collection: notes
+    expect_any: ["08 - Transformers and LLMs/Vector Search.md"]
+
+  - id: en-attention-scaling
+    q: "why is the dot product in attention divided by the square root of the key dimension"
+    lang: en
+    kind: semantic
+    collection: notes
+    expect_any:
+      - "08 - Transformers and LLMs/Self-Attention.md"
+      - "08 - Transformers and LLMs/Attention.md"
+
+  - id: en-reading-papers
+    q: "a method for reading a research paper without reading every line"
+    lang: en
+    kind: semantic
+    collection: notes
+    expect_any: ["14 - Research/How to Read Research Papers.md"]

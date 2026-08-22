@@ -1,0 +1,82 @@
+# What ORACLE is allowed to index. RAG.md §2.
+#
+# Explicit opt-in per collection. There is no "index everything" mode, and adding a
+# root here is a deliberate act by a human — this file is not written by the agent.
+#
+# Two things on this machine make that a hard rule rather than a preference:
+#
+#   * C:/Users/qhukz/Documents holds Paradox saves, League configs, Arma 3 data and a
+#     32 MB PDF. "Index my Documents" is not a feature here.
+#   * C:/Users/qhukz/Documents/ObsidianNotes — named as a notes root in RAG.md §2 —
+#     contains a `Passwords/` folder with `Passwords.md` and `Bank accounts.md` in it.
+#     A root is not a promise that everything under it is indexable. See `deny` below,
+#     which is checked before anything else and cannot be overridden by an include.
+#
+# The index is disposable (ADR-0006): deleting knowledge.db and reindexing must
+# reproduce equivalent results, so nothing here is state — it is a declaration.
+
+version: 1
+
+# Applied to every collection, before any per-collection rule. A path matching a deny
+# pattern is never opened, never hashed, never embedded — the check happens on the
+# path, so a secret is not read in order to discover that it should not have been.
+deny:
+  - "**/Passwords/**"
+  - "**/*.env"
+  - "**/.env.*"
+  - "**/id_rsa*"
+  - "**/*.pem"
+  - "**/*.key"
+  - "**/.ssh/**"
+  - "**/AppData/**"
+
+collections:
+  - id: projects
+    kind: code
+    enabled: true
+    roots: ["C:/Projects"]
+    # Named explicitly, not discovered. MonsterGarden is empty; SCRAPSHIFT (named in an
+    # earlier draft of RAG.md) does not exist on this machine.
+    include_projects:
+      - Asterim              # 798 git-tracked files — the bulk of this collection
+      - AsterimDesign        # not a git repo; exclusions do the work
+      - GameRecs
+      - GrowAMonster         # not a git repo
+      - ORACLE
+      - Source2DemViewer     # 22 real files + 3,893 under target/
+      - asterim-pipeline
+    respect_gitignore: true
+    exclude:
+      - "**/node_modules/**"
+      - "**/target/**"       # Source2DemViewer: 3,893 files, and no .git to gitignore them
+      - "**/.git/objects/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/.venv/**"
+      - "**/__pycache__/**"
+      - "**/coverage/**"
+      - "**/graphify-out/**"
+      - "**/*.lock"
+      - "**/*.min.js"
+      - "**/*.map"
+      - "**/*.7z"
+      - "**/*.db"
+    max_file_bytes: 1000000
+
+  - id: notes
+    kind: markdown
+    enabled: true
+    obsidian: true
+    roots:
+      - "C:/Users/qhukz/Documents/AI/ML Learning"      # 157 notes, the AI-ML-Vault
+      - "C:/Users/qhukz/Documents/ObsidianNotes"       # see the `deny` block above
+      - "C:/Users/qhukz/Documents/MLAI NOTES/ML/AI"    # 1 note + a 32 MB PDF
+    exclude:
+      - "**/.obsidian/**"
+    max_file_bytes: 50000000                            # the 32 MB PDF is in scope
+
+# Deliberately absent, and each absence is a decision:
+#   Documents/ at large  — game data, saves, configs
+#   Downloads/           — untrusted by definition
+#   AppData/             — application state, tokens, browser profiles
+#   anything outside a declared root, including the home directory itself
