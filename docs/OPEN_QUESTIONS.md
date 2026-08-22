@@ -159,8 +159,14 @@ That is no longer the case. Embeddings are cached by `sha256(text)` in a file se
 | | cost | how often |
 |---|---|---|
 | Cold — first build, or a change of embedding model | **~43 min** | once per model |
-| Warm — chunking changed, or the index was deleted | **~37 s** | every other time |
+| Warm — the index was deleted, chunking unchanged | **~37 s** | every other time |
+| Warm — chunking changed | **2.5–20 min** | when this repo edits `chunking.py` |
 | Incremental, nothing changed | 1.4–4.4 s | dozens of times a day |
+
+The third row was measured after this entry was first written, and it corrects it: a chunking change
+moves chunk *text*, which is the cache key, so the first tree-sitter build hit only 45% of the cache
+and cost 19.9 minutes. Later builds hit 71%, 95% and 97% as successive changes moved less text. It is
+a developer cost, not a user one — but "warm rebuild = 37 s" was the best case quoted as the rule.
 
 **What remains an assumption** is only the first row: that a one-off 43 minutes, on a
 model change, is tolerable. Everything else is now fast enough not to be a design concern.

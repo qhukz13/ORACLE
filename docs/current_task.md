@@ -31,7 +31,27 @@
 - **Four `know.*` tools ship, not five.** `know.summarize` "uses the local model", and a tool-host
   handler cannot call the LLM layer without L7 re-entering L3–L6. It needs an ADR.
 
-## The one decision this task must open with
+## The decision this task hands back
+
+**Does tree-sitter ship?** It is built, tested, and one constant from being on. The measurement, four
+builds, same corpus, same fixtures, same `measure()`:
+
+| | recall@5 | crosslang | semantic | anchors |
+|---|---|---|---|---|
+| line matcher (**shipping**) | **81%** | 62% (5/8) | 90% | `equal` 548, `useEffect` 219 — both *calls* |
+| tree-sitter | 71-76% | 50-62% | 80% | no keyword, no call; real ancestry |
+
+Exactly **two fixtures** separate them, and in both the line matcher wins by accident: it packs
+neighbouring text, so a file's header prose lands beside the code it describes and a conceptual
+question matches the paragraph. tree-sitter separates those on purpose — right for citing a symbol,
+wrong for that question.
+
+Twenty-one cases at 4.8 points each cannot settle a two-case difference in *either* direction. My
+recommendation is to leave it off and let requirement 6's expanded fixture set decide, which costs
+nothing extra because that work is already scheduled. Say so if you would rather ship the better
+anchors now and accept the measured recall — it is one line.
+
+## The one decision this task opened with
 
 **Mostly answered by requirement 1, which is done.** The `< 10 min` criterion was one number for two
 very different operations, and separating them is the answer:
@@ -39,14 +59,23 @@ very different operations, and separating them is the answer:
 | | measured | how often |
 |---|---|---|
 | Cold rebuild — first build, or a change of embedding model | **42.8 min** | once per model |
-| Warm rebuild — chunking changed, or the index was deleted | **37 s** | every other time |
+| Warm rebuild, index deleted, chunking unchanged | **37 s** (100% cache hit) | every other time |
+| Warm rebuild after a chunking change | **2.5 min – 20 min** | when the chunker changes |
 | Incremental, nothing changed | 1.4–4.4 s | dozens of times a day |
+
+**The middle row is new and it corrects the proposal below.** Requirement 2 produced four rebuilds,
+and a chunking change moves chunk *text*, which is what the cache is keyed on — so the hit rate fell
+to 45% on the first tree-sitter build and the rebuild took **19.9 min**, not 37 s. Later builds hit
+71%, 95%, 97% as successive changes moved less text. The 37 s figure was real but it was the
+best case, and quoting it as "warm rebuild" would have made a budget out of a lucky number.
 
 Proposed wording, already written into ROADMAP.md and [OQ-17](OPEN_QUESTIONS.md#oq-17) — **confirm or
 correct it**:
 
 - Cold rebuild **≤ 60 min**, background, explicitly initiated, with the cost stated before it starts.
-- Warm rebuild **< 2 min**.
+- Warm rebuild, chunking unchanged **< 2 min**.
+- Warm rebuild after a chunking change **≤ 25 min** — a developer-facing number, not a user-facing
+  one: it happens when this repo changes `chunking.py`, never on the user's machine.
 - Incremental update after one file changes **< 5 s**.
 
 Note this also removes indexing cost as the argument against `bge-m3`: its ~2.5 h is paid once.
@@ -67,15 +96,23 @@ Close the four gaps P5-T1 left, in this order — the first one changes the cost
    81%. Kept in its own file so deleting `knowledge.db` — the disposability promise — no longer costs
    an hour. `warm_from_index` seeds it from an index already built, so the 43 minutes already spent
    were not thrown away. [Log](../logs/development/2026-08-22-embedding-cache.md).
-2. **tree-sitter code chunking**, replacing the regex approximation in `rag/chunking.py`. The current
-   limits are measured, not guessed: `equal` (548 occurrences) and `useEffect` (219) are still
-   mistaken for declarations because a call taking a callback is indistinguishable from a definition
-   to a line matcher. Justify `tree-sitter` in TECH_STACK.md before adding it.
-3. **Re-run the fixture set after chunking changes.** Better boundaries lift every model, so the
-   OQ-02 comparison may no longer hold. Re-run `scripts/eval_embeddings.py`; if `bge-m3`'s margin
-   survives better chunking, revisit the model choice.
-4. **Wire the watcher into the daemon.** `Watcher` and `debounce` are built and tested; nothing
-   starts them. Needs a lifecycle owner, a HALT path, and an event so the UI can show indexing state.
+2. ~~**tree-sitter code chunking**~~ **BUILT 2026-08-22, AND OFF.** `chunking.SYNTAX_AWARE = False`.
+   It wins the anchor criterion outright — no control-flow keyword and no call expression is an
+   anchor anywhere in the corpus, against `equal` (548) and `useEffect` (219) for the line matcher —
+   and it *loses* recall@5 by two fixture cases, consistently, across four builds. **This needs your
+   call; see "The decision this task hands back".**
+   [Log](../logs/development/2026-08-22-treesitter-chunking.md).
+3. ~~**Re-run the fixture set after chunking changes.**~~ **DONE 2026-08-22**, and it changed the
+   answer to requirement 2. It also found a leak: `cases.yaml` had become indexable when the phase-5
+   work was committed, and a file containing all 21 questions verbatim held a top-5 slot in 12 of
+   them. `measure()` now discards it before ranking. The `bge-m3` comparison is untouched, because
+   the chunker did not change.
+4. ~~**Wire the watcher into the daemon.**~~ **DONE 2026-08-22.** `rag/service.py`, spawned through
+   `AppState.spawn` so HALT already reaches it and `resume` restarts it; `knowledge.state` events
+   drive a status line in the shell. Measuring it found a real defect: the filter ran at 0.27 ms per
+   event *on the event loop*, because `fnmatch` normcases both arguments and on Windows that is a
+   `LCMapStringEx` syscall. Compiling the patterns once: **3.1x**, and the corpus walker shares it.
+   [Log](../logs/development/2026-08-22-watcher-daemon.md).
 5. **PDF parsing** via `pypdfium2` — text layer only, no OCR. One 32 MB PDF is currently classified,
    counted and skipped.
 6. **Settle `bge-m3` vs `e5-base`.** On the full corpus `e5-base` scores **81%** — one point over the
@@ -98,12 +135,14 @@ Close the four gaps P5-T1 left, in this order — the first one changes the cost
       confirmation of the wording**.
 - [x] Re-chunking a file with unchanged text costs **zero** embedding calls. Asserted by counting
       forward passes in `tests/test_rag_cache.py`, and measured end to end at 37 s.
-- [ ] tree-sitter chunks name real symbols: no control-flow keyword and no call expression appears as
-      an anchor across the whole corpus. Asserted over the real corpus, not a fixture.
+- [x] tree-sitter chunks name real symbols: no control-flow keyword and no call expression appears as
+      an anchor across the whole corpus. Asserted over the real corpus, not a fixture. **Met.**
 - [ ] Fixture recall@5 **≥ 80%** on the **full** corpus after re-chunking, and no worse than the
-      pre-tree-sitter number.
-- [ ] The watcher runs under the daemon: a file saved in an indexed project is retrievable within
-      10 s, and an `npm install` does not stall the event loop. Measured, not asserted by inspection.
+      pre-tree-sitter number. **Not met — 71-76% against 81%, so the line matcher still ships and the
+      shipped path is unchanged at 81%.** Four builds, same corpus, same measurement code.
+- [x] The watcher runs under the daemon: a file saved in an indexed project is retrievable within
+      10 s, and an `npm install` does not stall the event loop. Measured in
+      `tests/test_rag_service.py`, not asserted by inspection.
 - [ ] ~25 Russian fixtures, and a recorded decision on `bge-m3` vs `e5-base` based on them.
 - [ ] The gate green including the security suite.
 

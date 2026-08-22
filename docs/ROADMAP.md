@@ -390,9 +390,14 @@ is the prerequisite for context assembly good enough to delegate well (P6).
   it was the forward passes. Replaced by:
   - Full rebuild on a **cold** embedding cache — a first build, or a change of model — **≤ 60 min**,
     background, explicitly initiated, with the cost stated before it starts. Measured: 42.8 min.
-  - Full rebuild on a **warm** cache — a chunking change, or the delete-and-rebuild the disposability
+  - Full rebuild on a **warm** cache, chunking unchanged — the delete-and-rebuild the disposability
     promise rests on — **< 2 min**. Measured: **37 s**, with zero forward passes
     ([log](../logs/development/2026-08-22-embedding-cache.md)).
+  - Full rebuild after a **chunking change** — **≤ 25 min**. The cache is keyed on chunk *text*, so
+    moving boundaries misses it: the first tree-sitter build hit only 45% and took **19.9 min**,
+    against 2.5 min once later changes moved less text. A developer-facing number — it happens when
+    this repo edits `chunking.py`, not on a user's machine
+    ([log](../logs/development/2026-08-22-treesitter-chunking.md)).
   - **Incremental update of a changed file in < 5 s** — unchanged, and measured at 4.4 s for a
     no-change pass over all 1,330 documents.
   - See [OQ-17](OPEN_QUESTIONS.md#oq-17): this makes the incremental path load-bearing rather than a

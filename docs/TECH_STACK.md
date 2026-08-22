@@ -229,7 +229,7 @@ per model and break the "provider is replaceable" property.
 | **Lexical** | SQLite **FTS5** (BM25) | same file, same transaction, no second engine |
 | **Fusion** | Reciprocal Rank Fusion | no tuning knobs, robust; beats dense-only on code and on exact identifiers |
 | **Embeddings** | multilingual-e5-base (768d) via **ONNX Runtime on CPU** | Russian + English; CPU keeps VRAM free |
-| **Code structure** | tree-sitter | function/class-level chunks with real symbol names |
+| **Code structure** | tree-sitter (**built, off by default**) | function/class-level chunks with real symbol names — but measurably worse recall on the current fixture set; see the ledger row |
 | **Watching** | `watchfiles` (Rust notify) | far better Windows behaviour than `watchdog` |
 | **PDF** | `pypdfium2` | Apache/BSD licensing; `PyMuPDF` is AGPL and we avoid that entanglement |
 
@@ -281,10 +281,11 @@ rejected. Added when the code that needs them landed, not in advance.
 | `tokenizers` | The Rust tokenizer that matches the ONNX export byte for byte. Loaded from the model's own `tokenizer.json`, so there is no chance of a mismatch between what was exported and what we feed it. | `transformers.AutoTokenizer` — same tokenizer, plus the whole `transformers` package around it. |
 | `numpy` | Brute-force cosine over the corpus, mean pooling, and the arrays ONNX Runtime already speaks. Measured at 422 GFLOPS of SGEMM on this CPU, which is why a brute-force scan is the right answer at 10k chunks. | Pure Python: an 80× slowdown on the pooling path alone. |
 | `sqlite-vec` | Vector KNN inside `knowledge.db`, one file and one transaction with FTS5 and the metadata. Verified working (v0.1.9) against the bundled SQLite 3.50.4 via `enable_load_extension`. | Everything in [Why sqlite-vec, decisively](#why-sqlite-vec-decisively). |
+| `watchfiles` | Incremental indexing off real filesystem events. Rust `notify` underneath. | `watchdog` — worse Windows behaviour, which is the only platform that matters here. |
+| `tree-sitter-language-pack` | Code chunking on a real syntax tree. **One abi3 wheel** (1.14.3, `cp310-abi3-win_amd64`) covering all 18 grammars this corpus needs — verified loading every one of them on this machine before any code was written against it, the same rule OQ-09 established for `pywinpty`. Replaces a regex whose most common "symbol" across the corpus was `equal` (548) — a call, not a declaration. **Kept behind `chunking.SYNTAX_AWARE`, currently `False`:** it wins the anchor-quality criterion outright and loses recall@5 by two fixture cases (81% -> 71-76%) across four builds, so it ships dormant until the expanded fixture set can settle it ([log](../logs/development/2026-08-22-treesitter-chunking.md)). | Individual `tree-sitter-<lang>` packages: 18 dependencies and 18 build surfaces instead of one. `tree-sitter-languages` (the older sibling) — no maintained abi3 wheel, so a Python upgrade becomes a compile. Hand-written parsers — the thing the regex already proved does not work. |
 
-Still deferred until the code that needs them exists, because an unused dependency is pure cost:
-`tree-sitter` (code chunking — the regex approximation is in place and its limits are measured),
-`pypdfium2` (the one 32 MB PDF), `watchfiles` (the incremental watcher).
+Still deferred until the code that needs it exists, because an unused dependency is pure cost:
+`pypdfium2` (the one 32 MB PDF).
 
 ---
 

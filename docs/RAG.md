@@ -124,6 +124,31 @@ Every chunk carries its ancestry. A function chunk knows it is
 `Asterim / apps/server/auth/token.ts / class TokenService / refresh()`. That ancestry goes into the
 chunk text *and* the metadata, because it improves both dense matching and human-readable citation.
 
+**The code row is aspirational, and `chunking.SYNTAX_AWARE` is `False`.** The tree-sitter chunker is
+built and tested; a line matcher is what runs. It names symbols worse — measurably so — and on the
+full corpus it *retrieves better*, by two fixture cases out of 21, consistently across four builds
+(81% against 71–76%). The line matcher wins by accident: it packs neighbouring text together, so a
+file's header prose lands beside the code it describes and a conceptual question matches the
+paragraph. Twenty-one cases cannot settle a two-case difference, so the decision waits on the
+expanded fixture set, and the flag is one line.
+[Log](../logs/development/2026-08-22-treesitter-chunking.md).
+
+**Three rules the syntax tree does not give you for free**, kept for when it is switched on. Each was
+found by measuring, not by reading the tree:
+
+1. **A declaration starts at the trivia that introduces it.** The grammar reports a node starting at
+   `type Foo`, not at the `export` in front of it or the `/** … */` above it. Cutting at the node's
+   own start severs a doc comment from what it documents.
+2. **…but only if they are adjacent.** A blank line between a comment and the next declaration is the
+   author saying the comment is not about it. A file's leading `/** … */` describes the *file*, and
+   gluing it to whichever constant happens to come first buries the prose that explains the module.
+3. **Punctuation is not a chunk.** A grammar's field node stops before its `;`, so a class of ten
+   fields leaves ten one-character spans. Each would otherwise get its own anchor line in the chunk
+   text and crowd the code out.
+
+Under all three: **chunking may merge text or re-anchor it, and may never discard it.** Asserted
+per-file, byte for byte, in `tests/test_rag_treesitter.py`.
+
 **Obsidian specifics:** front-matter becomes metadata (tags, aliases); `[[wikilinks]]` are extracted
 into a link table so retrieval can expand one hop to directly linked notes; `#tags` become filters.
 
