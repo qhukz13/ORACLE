@@ -21,6 +21,7 @@ from oracle.rag.retrieval import (
     MAX_PER_FILE,
     Retrieved,
     _diversify,
+    discriminating_terms,
     fts_query,
     has_lexical_purchase,
     retrieve,
@@ -245,3 +246,66 @@ class TestAttribution:
         assert isinstance(result, Retrieved)
         assert result.hits == ()
         assert result.tainted is False
+
+
+class TestTheDenominatorIsPerScript:
+    """Document frequency measures rarity in the corpus, not uninformativeness.
+
+    Those are the same thing only when the corpus and the query share a language. `the`
+    is in most of an English corpus and is correctly dropped; `как` — the same kind of
+    word — was in 0.8% of this corpus and read as *highly discriminating*, because the
+    corpus is mostly English. Every Russian question then pulled in whichever Russian
+    documents existed, matching on `как`, `внутри` and `она`, and RRF pushed the correct
+    dense hits down. Measured in `logs/development/2026-08-22-fusion-denominator.md`.
+    """
+
+    def index(self, tmp_path: Path) -> KnowledgeStore:
+        """A corpus that is mostly English with a Russian minority — the real shape."""
+        store = KnowledgeStore(tmp_path / "denominator.db", DIM)
+        store.bind("fake", DIM)
+        for i in range(190):
+            _put(
+                store,
+                f"en{i}.md",
+                [f"the service validates the token for request {i}"],
+                [[1.0, 0, 0, 0]],
+            )
+        # `как` is in every Russian chunk and no English one, so it is 5% of the corpus
+        # and 100% of the Russian in it. `миграциями` is in exactly one.
+        for i in range(10):
+            extra = " миграциями" if i == 0 else ""
+            _put(
+                store, f"ru{i}.md", [f"как это работает внутри номер {i}{extra}"], [[0, 1.0, 0, 0]]
+            )
+        store.record_script_census()
+        return store
+
+    def test_a_russian_stopword_is_recognised_as_ubiquitous(self, tmp_path: Path) -> None:
+        store = self.index(tmp_path)
+        # `как` is in every Russian chunk and no English one: 10 of 100 by the corpus,
+        # which looks discriminating, and 10 of 10 by the Russian sub-corpus, which is
+        # what it actually is.
+        assert "как" not in discriminating_terms("как работает токен", store)
+
+    def test_an_english_stopword_is_still_recognised(self, tmp_path: Path) -> None:
+        """The change must not alter the majority-language path at all."""
+        assert "the" not in discriminating_terms("the token service", self.index(tmp_path))
+
+    def test_a_rare_russian_word_still_counts(self, tmp_path: Path) -> None:
+        """The fix must not be "ignore Cyrillic".
+
+        A term in one Russian document out of ten is exactly the evidence the lexical half
+        exists to supply — the same property that makes `MAX_YAML_DEPTH` worth a query.
+        Only the words that are rare *because the corpus is not in that language* had to
+        go.
+        """
+        store = self.index(tmp_path)
+        assert "миграциями" in discriminating_terms("как работать с миграциями", store)
+
+    def test_an_index_without_a_census_keeps_the_old_behaviour(self, tmp_path: Path) -> None:
+        """An index built before the census is not a broken index."""
+        store = self.index(tmp_path)
+        store.db.execute("DELETE FROM meta WHERE key='cyrillic_chunks'")
+        store.db.commit()
+        assert store.script_census() is None
+        assert "как" in discriminating_terms("как работает токен", store)

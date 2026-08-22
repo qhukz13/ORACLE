@@ -184,6 +184,38 @@ class KnowledgeStore:
         )
         self.db.commit()
 
+    def record_script_census(self) -> int:
+        """Count chunks containing Cyrillic, and store it. Returns the count.
+
+        The fusion gate needs to know how much of the corpus a query's script actually
+        covers, and the answer costs a full scan (~1.3 s over 11k chunks) — far too much
+        per query, and it only changes when the index does. So it is computed once, here,
+        at the end of a build.
+        """
+        count = int(
+            self.db.execute(
+                # RUF001 flags Cyrillic as "ambiguous"; a Cyrillic character class is
+                # precisely what this predicate is for, hence the suppression below.
+                "SELECT COUNT(*) AS n FROM chunks WHERE text GLOB '*[а-яА-ЯёЁ]*'"  # noqa: RUF001
+            ).fetchone()["n"]
+        )
+        self.db.execute(
+            "INSERT INTO meta(key, value) VALUES ('cyrillic_chunks', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(count),),
+        )
+        self.db.commit()
+        return count
+
+    def script_census(self) -> int | None:
+        """Chunks containing Cyrillic, or None if this index predates the census.
+
+        None means "unknown", and the caller falls back to its previous behaviour rather
+        than guessing a number — an index built by an older version is not a broken one.
+        """
+        row = self.db.execute("SELECT value FROM meta WHERE key = 'cyrillic_chunks'").fetchone()
+        return int(row["value"]) if row else None
+
     # ----------------------------------------------------------- incremental
 
     def known_hashes(self, collection: str) -> dict[str, str]:

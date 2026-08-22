@@ -101,13 +101,26 @@ def discriminating_terms(
     A term in *every* document discriminates nothing; a term in *no* document is not
     evidence either. `max_df_ratio` has a floor (`MIN_DF_CEILING`) so a small index does
     not classify every term as ubiquitous and gate itself out entirely.
+
+    **The denominator is per script, and that was a bug.** Document frequency measures
+    rarity *in the corpus*, which is only the same thing as uninformativeness when the
+    corpus and the query share a language. `the` appears in most of an English corpus and
+    is correctly dropped; `как` — the same kind of word — appeared in 0.8% of this corpus
+    and read as highly discriminating, because the corpus is mostly English. A Russian
+    question then retrieved GrowAMonster's Russian documentation for every query, matching
+    on `как`, `внутри`, `она` and `имеет`, and RRF pushed the correct dense hits down.
+    Measured against the Cyrillic sub-corpus instead, `как` is 10% and drops out.
     """
     total = store.db.execute("SELECT COUNT(*) AS n FROM chunks").fetchone()["n"]
     if not total:
         return []
-    ceiling = max(MIN_DF_CEILING, total * max_df_ratio)
+    # None on an index built before the census existed; falling back to the whole corpus
+    # is exactly the old behaviour, which is the right thing for an older index.
+    cyrillic = store.script_census()
     kept: list[str] = []
     for term in dict.fromkeys(t for t in _TERM.findall(question) if len(t) > 2):
+        scoped = cyrillic if (cyrillic and _CYRILLIC.search(term)) else total
+        ceiling = max(MIN_DF_CEILING, scoped * max_df_ratio)
         row = store.db.execute(
             "SELECT COUNT(*) AS n FROM chunks_fts WHERE chunks_fts MATCH ?",
             (_fts_term(term),),
