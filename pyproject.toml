@@ -29,6 +29,9 @@ dependencies = [
     # needs; every one verified to load here before code was written against it.
     "tree-sitter>=0.25",
     "tree-sitter-language-pack>=1.14",
+    # PDF text layer, no OCR. Apache/BSD; PyMuPDF is AGPL and not worth that entanglement
+    # for a text extractor (docs/TECH_STACK.md#4-knowledge).
+    "pypdfium2>=5.13.0",
 ]
 
 [dependency-groups]
@@ -100,12 +103,13 @@ files = ["src/oracle"]
 # aiosqlite/structlog ship types; keep this empty and revisit if it grows.
 warn_unused_ignores = true
 
-# It grew, once, on 2026-08-22. `onnxruntime` ships no py.typed marker and no stubs;
-# `sqlite_vec` is a loader for a C extension. `tokenizers` and `numpy` do ship types and
-# are deliberately absent from this list — the exemption is per-package, not a blanket
-# one, so a package that starts shipping types stops being exempt.
+# It grew, twice, on 2026-08-22. `onnxruntime` ships no py.typed marker and no stubs;
+# `sqlite_vec` is a loader for a C extension; `pypdfium2` is a ctypes binding to pdfium.
+# `tokenizers`, `numpy` and `tree_sitter` do ship types and are deliberately absent from
+# this list — the exemption is per-package, not a blanket one, so a package that starts
+# shipping types stops being exempt.
 [[tool.mypy.overrides]]
-module = ["onnxruntime.*", "sqlite_vec.*"]
+module = ["onnxruntime.*", "sqlite_vec.*", "pypdfium2.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

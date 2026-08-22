@@ -43,6 +43,7 @@ from oracle.rag.collections import (
 from oracle.rag.collections import _matches as matches_glob
 from oracle.rag.embedding import Embedder
 from oracle.rag.indexer import content_hash, embed_chunked, identifiers, provenance_of
+from oracle.rag.pdf import extract as extract_pdf
 from oracle.rag.store import KnowledgeStore
 
 if TYPE_CHECKING:
@@ -217,6 +218,11 @@ def _read_with_retry(path: Path) -> str | None:
     A save in flight raises `PermissionError` on Windows, and that is the normal case for
     a watcher — not an error worth logging as one. Backoff and retry; give up quietly.
     """
+    # A PDF is not UTF-8, and reading one as text fails with a decode error that looks
+    # like a corrupt file. Same extractor the batch indexer uses, so a PDF dropped into a
+    # watched vault is indexed the same way whether the daemon or a rebuild finds it.
+    if path.suffix.lower() == ".pdf":
+        return extract_pdf(path)
     for attempt in range(RETRIES):
         try:
             return path.read_text(encoding="utf-8")

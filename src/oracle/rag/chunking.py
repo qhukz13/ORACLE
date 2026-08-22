@@ -27,6 +27,7 @@ from typing import Any
 import yaml
 
 from oracle.rag.collections import ContentKind, Document
+from oracle.rag.pdf import PAGE_BREAK
 from oracle.rag.treesitter import blocks_for
 
 #: ~500 tokens of English prose. Deliberately below the 512-token limit of the E5
@@ -351,6 +352,22 @@ def chunk_code(doc: Document, text: str, *, syntax_aware: bool = SYNTAX_AWARE) -
     return _pack([(n, "\n".join(b)) for n, b in blocks], doc, f"{doc.project} / {doc.path}\n\n")
 
 
+def chunk_pdf(doc: Document, text: str) -> list[Chunk]:
+    """Page-aware chunks, anchored on the page number.
+
+    `text` arrives from `rag.pdf.extract` with pages separated by `PAGE_BREAK`. Pages are
+    packed like any other blocks, so a chunk usually spans two or three of them — a page
+    is a printing artefact, not a unit of meaning, and 510 one-page chunks would be 510
+    embeddings of running text cut mid-sentence.
+
+    The anchor is `p. 12` because it is the only citation a PDF can offer that a reader can
+    act on: there is no heading path to recover and no symbol to name.
+    """
+    header = f"{doc.project} / {doc.path}\n\n"
+    pages = [(f"p. {n}", body) for n, body in enumerate(text.split(PAGE_BREAK), start=1)]
+    return _pack([(a, b) for a, b in pages if b.strip()], doc, header)
+
+
 def chunk_document(
     doc: Document, text: str, *, obsidian: bool = False, syntax_aware: bool = SYNTAX_AWARE
 ) -> list[Chunk]:
@@ -359,6 +376,8 @@ def chunk_document(
         return chunk_markdown(doc, text, obsidian=obsidian)
     if doc.kind is ContentKind.CODE:
         return chunk_code(doc, text, syntax_aware=syntax_aware)
+    if doc.kind is ContentKind.PDF:
+        return chunk_pdf(doc, text)
     # Text and config both fall through to a recursive window. Config is chunked at all
     # only so it is searchable by exact string; `Document.semantic` is False for it, so
     # none of these chunks is ever embedded.

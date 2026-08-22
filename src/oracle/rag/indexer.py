@@ -41,6 +41,7 @@ from oracle.rag.collections import (
     walk,
 )
 from oracle.rag.embedding import PASSAGE, Embedder
+from oracle.rag.pdf import extract as extract_pdf
 from oracle.rag.store import KnowledgeStore
 
 log = get_logger(__name__)
@@ -109,6 +110,13 @@ def provenance_of(doc: Document) -> str:
     imperative instructions aimed squarely at an agent. Marking it foreign is what makes
     the gate escalate rather than obey.
     """
+    if doc.kind is ContentKind.PDF:
+        # Nobody writes a PDF in Obsidian. Every one in this corpus is something the user
+        # acquired — a textbook, a paper, a datasheet — so it is text by someone else, and
+        # that is exactly what `local_foreign` means. The rule is a generalisation, and it
+        # is the one that fails safe: being wrong here escalates the policy tier of a plan
+        # built on it and never relaxes it (SECURITY.md §6).
+        return "local_foreign"
     lowered = doc.path.lower()
     if Path(lowered).name in _AGENT_DOCS and doc.project != "ORACLE":
         return "local_foreign"
@@ -134,16 +142,9 @@ def identifiers(text: str) -> str:
 
 
 def _read(doc: Document) -> str | None:
-    """The document's text, or None if it has none we can get at.
-
-    PDFs are classified and counted but not yet parsed: `pypdfium2` is a deferred
-    dependency (TECH_STACK §4 ledger), and reading a PDF's bytes as UTF-8 produces a
-    decode error that looks like a corrupt file rather than a missing feature. Saying so
-    once, at debug level, beats a warning per rebuild about a known gap.
-    """
+    """The document's text, or None if it has none we can get at."""
     if doc.kind is ContentKind.PDF:
-        log.debug("rag.pdf_skipped", path=doc.path)
-        return None
+        return extract_pdf(doc.abs_path)
     try:
         return doc.abs_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -252,6 +253,10 @@ def index(
                 progress(stats.documents, stats.chunks)
 
         stats.pruned += store.prune(collection.id, seen)
+
+    # Once per build, because the fusion gate needs it per query and it costs a full scan
+    # (see `KnowledgeStore.record_script_census`).
+    store.record_script_census()
 
     stats.seconds = time.perf_counter() - started
     log.info("rag.indexed", **stats.as_dict())
