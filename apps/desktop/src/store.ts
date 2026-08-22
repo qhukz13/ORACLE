@@ -51,6 +51,12 @@ interface State {
    * never something that blocks the composer.
    */
   degraded: { component: string; reason: string; remedy: string } | null;
+  /**
+   * Set by `knowledge.state`. Indexing is background work the user did not ask for at
+   * the moment it happens, and the machine getting busy without explanation is the
+   * thing this exists to prevent — it is a status line, never a modal.
+   */
+  indexing: { state: string; pending: number; indexed: number } | null;
   lastSeq: number;
   /** The attached PTY, if any. One at a time in v1 — sub-tabs are later. */
   terminal: { ptyId: string | null; cwd: string };
@@ -117,6 +123,7 @@ export const useStore = create<State>((set) => ({
   decided: [],
   gapWarning: null,
   degraded: null,
+  indexing: null,
   lastSeq: 0,
   terminal: { ptyId: null, cwd: "" },
   termChunks: [],
@@ -136,6 +143,7 @@ export const useStore = create<State>((set) => ({
       terminal: { ptyId: null, cwd: "" },
       gapWarning: null,
       degraded: null,
+      indexing: null,
       lastSeq: 0,
     }),
 
@@ -170,6 +178,22 @@ export const useStore = create<State>((set) => ({
         case "agent.state":
           next.agentState = str(ev.payload["state"], "idle") as AgentState;
           break;
+
+        case "knowledge.state": {
+          const state = str(ev.payload["state"], "watching");
+          // "watching" is the resting state and says nothing worth a line of UI. Only a
+          // run that is happening, or one that needs the user (a stale index, a failure),
+          // is worth showing.
+          next.indexing =
+            state === "watching" && !ev.payload["indexed"]
+              ? null
+              : {
+                  state,
+                  pending: num(ev.payload["pending"], 0),
+                  indexed: num(ev.payload["indexed"], 0),
+                };
+          break;
+        }
 
         case "turn.started": {
           if (!ev.turn_id) break;

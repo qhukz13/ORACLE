@@ -224,6 +224,19 @@ export default function App() {
           command palette still work.
         </div>
       )}
+      {s.indexing && (
+        // Quieter than the banners above it, and deliberately: nothing is wrong. This is
+        // the machine doing background work the user did not ask for at this moment, and
+        // an unexplained busy CPU is what it exists to prevent. `stale` is the exception —
+        // an index built by a different model answers every question badly until rebuilt.
+        <div className={s.indexing.state === "stale" ? "banner warn" : "banner info"} role="status">
+          {s.indexing.state === "stale"
+            ? "⚠ The knowledge index was built by a different embedding model. Rebuild it to make search work again."
+            : s.indexing.state === "indexing"
+              ? `Indexing ${s.indexing.pending} changed file${s.indexing.pending === 1 ? "" : "s"}…`
+              : `Indexed ${s.indexing.indexed} changed file${s.indexing.indexed === 1 ? "" : "s"}.`}
+        </div>
+      )}
 
       <div className="body">
         {sidebar && (

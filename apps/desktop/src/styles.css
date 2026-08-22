@@ -60,6 +60,9 @@ button.ghost { background: transparent; }
 .banner { padding: 7px 14px; font-size: 12px; flex: none; border-bottom: 1px solid var(--line); }
 .banner.err { background: #2a1214; color: #fecaca; }
 .banner.warn { background: #2a2312; color: #fde68a; }
+/* Background work, not a problem: dimmer than warn on purpose, so the indexer
+   telling you it is busy never reads as something being wrong. */
+.banner.info { background: var(--bg-3); color: var(--fg-1); }
 
 .stage { flex: 1; overflow-y: auto; padding: 16px; }
 .empty { color: var(--fg-1); text-align: center; margin-top: 15vh; }

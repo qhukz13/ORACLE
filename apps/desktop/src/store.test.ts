@@ -296,3 +296,33 @@ describe("degradation", () => {
     expect(d?.remedy).toBe("start ollama");
   });
 });
+
+describe("knowledge.state", () => {
+  beforeEach(() => {
+    useStore.getState().reset();
+  });
+
+  it("shows a run that is happening", () => {
+    useStore.getState().apply(ev(1, "knowledge.state", { state: "indexing", pending: 4 }));
+    expect(useStore.getState().indexing).toEqual({ state: "indexing", pending: 4, indexed: 0 });
+  });
+
+  it("keeps the result of a run that changed something", () => {
+    const { apply } = useStore.getState();
+    apply(ev(1, "knowledge.state", { state: "indexing", pending: 2 }));
+    apply(ev(2, "knowledge.state", { state: "watching", indexed: 2, seen: 2, ms: 900 }));
+    expect(useStore.getState().indexing?.indexed).toBe(2);
+  });
+
+  it("says nothing while it is merely watching", () => {
+    // The resting state is most of the daemon's life. Rendering "watching" forever is
+    // a permanent line of UI that carries no information.
+    useStore.getState().apply(ev(1, "knowledge.state", { state: "watching", roots: 3 }));
+    expect(useStore.getState().indexing).toBeNull();
+  });
+
+  it("surfaces an index built by a different model", () => {
+    useStore.getState().apply(ev(1, "knowledge.state", { state: "stale", error: "model mismatch" }));
+    expect(useStore.getState().indexing?.state).toBe("stale");
+  });
+});
