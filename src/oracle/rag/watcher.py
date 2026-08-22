@@ -30,6 +30,7 @@ from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from oracle.logsink import get_logger
 from oracle.rag.chunking import chunk_document
@@ -40,9 +41,12 @@ from oracle.rag.collections import (
     prunable_dirs,
 )
 from oracle.rag.collections import _matches as matches_glob
-from oracle.rag.embedding import PASSAGE, Embedder
-from oracle.rag.indexer import content_hash, identifiers, provenance_of
+from oracle.rag.embedding import Embedder
+from oracle.rag.indexer import content_hash, embed_chunked, identifiers, provenance_of
 from oracle.rag.store import KnowledgeStore
+
+if TYPE_CHECKING:
+    from oracle.rag.cache import EmbeddingCache
 
 log = get_logger(__name__)
 
@@ -86,9 +90,19 @@ class Watcher:
     def __init__(self, registry: CollectionRegistry) -> None:
         self.registry = registry
         self._roots: list[tuple[Collection, Path, str]] = []
+        # The directory names implied by the patterns, extracted once. `classify_event`
+        # used to derive these per *event* and then reach straight for `fnmatch`: 5000
+        # paths from an `npm install` cost 2.6 s, and `_batches` runs on the event loop,
+        # so that was 2.6 s of the daemon answering nothing. A set lookup over path
+        # components settles almost every one of those events instead; the globs are still
+        # there, they are just no longer the first thing tried. Measured in
+        # `tests/test_rag_service.py`, which is why it is a test and not a comment.
+        self._deny_dirs = frozenset(prunable_dirs(registry.deny))
+        self._exclude_dirs: dict[str, frozenset[str]] = {}
         for collection in registry.collections:
             if not collection.enabled:
                 continue
+            self._exclude_dirs[collection.id] = frozenset(prunable_dirs(collection.exclude))
             for root in collection.roots:
                 if not collection.include_projects:
                     self._roots.append((collection, root, root.name))
@@ -110,16 +124,22 @@ class Watcher:
                 continue
 
             absolute = path.as_posix()
-            if matches_glob(rel, absolute, self.registry.deny):
+            parents = rel.split("/")[:-1]
+            # Deny stays ahead of exclude, and both stay ahead of the file-type check, so
+            # a denied path is never opened and the deny list is what reports it. Splitting
+            # each into "is it under a named directory" and "does it match a pattern" is a
+            # speed change, not a policy one: the same patterns decide the same paths.
+            if any(part in self._deny_dirs for part in parents) or matches_glob(
+                rel, absolute, self.registry.deny
+            ):
                 # Not logged with the path at info level: a denied path is one we are
                 # deliberately not looking at, and echoing it into the log undoes some of
                 # the point of denying it.
                 log.debug("rag.watch_denied", collection=collection.id)
                 return None
-            if matches_glob(rel, absolute, collection.exclude):
-                return None
-            prune = prunable_dirs(self.registry.deny) | prunable_dirs(collection.exclude)
-            if any(part in prune for part in rel.split("/")[:-1]):
+            if any(part in self._exclude_dirs[collection.id] for part in parents) or matches_glob(
+                rel, absolute, collection.exclude
+            ):
                 return None
             if classify(path) is None:
                 return None
@@ -127,7 +147,11 @@ class Watcher:
         return None
 
     def reindex(
-        self, candidate: Candidate, store: KnowledgeStore, embedder: Embedder | None
+        self,
+        candidate: Candidate,
+        store: KnowledgeStore,
+        embedder: Embedder | None,
+        cache: EmbeddingCache | None = None,
     ) -> bool:
         """Re-index one document, or drop it if it is gone. True if anything changed."""
         if not candidate.abs_path.exists():
@@ -168,7 +192,10 @@ class Watcher:
 
         vectors = None
         if embedder is not None and doc.semantic:
-            vectors = embedder.encode([c.text for c in chunks], PASSAGE)
+            # Through the cache, like the batch indexer. An edit that adds one function to
+            # a file leaves every other chunk's text identical, so the common save costs
+            # one forward pass rather than one per chunk in the file.
+            vectors, _, _ = embed_chunked(embedder, [c.text for c in chunks], cache, batch=16)
 
         store.put(
             doc,

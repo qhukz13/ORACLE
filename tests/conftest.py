@@ -29,6 +29,7 @@ def settings(tmp_path: Path) -> Settings:
         port=0,
         llm_enabled=False,
         prewarm_toolhost=False,
+        watch_knowledge=False,
         projects_root=tmp_path / "projects",
     )
 

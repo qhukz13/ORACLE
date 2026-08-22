@@ -42,9 +42,17 @@ class Settings(BaseSettings):
     #: code, and must be edited by a human (docs/SECURITY.md#2).
     policy_path: Path = Path("config/policy.yaml")
 
+    #: What may be indexed. Beside policy.yaml and for the same reason: a human decides
+    #: which directories ORACLE is allowed to read, and that decision is versioned.
+    collections_path: Path = Path("config/collections.yaml")
+
     #: Start the tool host at boot so the first tool call does not pay ~1.2 s of
     #: process startup. Tests disable it to stay hermetic and fast.
     prewarm_toolhost: bool = True
+
+    #: Keep `knowledge.db` current while the daemon runs (RAG.md §6). Off in tests: it
+    #: would put real filesystem watches on the developer's projects during a unit run.
+    watch_knowledge: bool = True
 
     @property
     def db_path(self) -> Path:

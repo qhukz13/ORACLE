@@ -21,6 +21,8 @@ from oracle.rag.collections import (
     CollectionRegistry,
     ContentKind,
     WalkStats,
+    _compiled,
+    _matches,
     classify,
     load_registry,
     prunable_dirs,
@@ -183,3 +185,38 @@ class TestClassification:
         """An embedding of a tsconfig.json is close to everything and means nothing."""
         assert not ContentKind.CONFIG.semantic
         assert ContentKind.CODE.semantic and ContentKind.MARKDOWN.semantic
+
+
+class TestPatternCompilation:
+    """The matcher is compiled once per pattern tuple instead of calling `fnmatch`.
+
+    That was a speed change — `fnmatch` normcases both arguments on every call, and on
+    Windows `normcase` is a trip through the OS locale mapper, which cost 1.3 s per 5000
+    watcher events (`logs/development/2026-08-22-watcher-daemon.md`). It is pinned here
+    rather than in a chunking test because what it touches is the deny list: `normcase` was
+    silently providing case-insensitivity *and* separator folding, and a deny rule that
+    quietly stops matching is the one failure this whole module exists to prevent.
+    """
+
+    @pytest.mark.parametrize(
+        ("rel", "pattern"),
+        [
+            ("Passwords/Bank.md", "**/Passwords/**"),
+            ("passwords/bank.md", "**/Passwords/**"),  # case folding, as normcase gave
+            ("PASSWORDS/Bank.md", "**/passwords/**"),
+            ("Passwords/Bank.md", r"**\Passwords\**"),  # separators, as normcase gave
+            ("secrets/deploy.pem", "**/*.pem"),
+            ("a/b/id_rsa", "**/id_rsa*"),
+        ],
+    )
+    def test_a_deny_pattern_still_matches_what_it_used_to(self, rel: str, pattern: str) -> None:
+        assert _matches(rel, f"C:/Projects/x/{rel}", (pattern,))
+
+    def test_it_does_not_match_what_it_should_not(self) -> None:
+        assert not _matches("src/passwordless.ts", "C:/x/src/passwordless.ts", ("**/Passwords/**",))
+        assert not _matches("src/keys.ts", "C:/x/src/keys.ts", ("**/*.key",))
+
+    def test_the_compiled_form_is_reused(self) -> None:
+        """Per distinct tuple, not per call — the point of the change."""
+        patterns = ("**/Passwords/**", "**/*.pem")
+        assert _compiled(patterns) is _compiled(patterns)

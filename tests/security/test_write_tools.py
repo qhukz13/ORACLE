@@ -57,6 +57,7 @@ def workspace(tmp_path: Path) -> Path:
             port=0,
             llm_enabled=False,
             prewarm_toolhost=False,
+            watch_knowledge=False,
         )
     )
     return root

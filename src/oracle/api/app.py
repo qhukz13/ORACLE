@@ -58,6 +58,7 @@ class AppState:
     terminals: TerminalBridge
     schema_version: int = 0
     projects: list[str] = field(default_factory=list)
+    indexer: Any = None
     tasks: set[asyncio.Task[None]] = field(default_factory=set)
 
     def spawn(self, coro: Any) -> None:
@@ -166,6 +167,34 @@ async def _prewarm(st: AppState) -> None:
         log.warning("toolhost.prewarm_failed", error=str(exc))
 
 
+def _start_indexing(st: AppState) -> None:
+    """Own the knowledge watcher for the daemon's lifetime (RAG.md §6).
+
+    Spawned through `AppState.spawn`, which is the point: HALT cancels every tracked task,
+    so the emergency stop already reaches the indexer without a second mechanism to keep in
+    step with the first. `resume` calls this again.
+
+    Never fatal. A missing or malformed `collections.yaml` means "index nothing", and the
+    rest of the daemon is unaffected — chat, tools and the terminal do not depend on it.
+    """
+    if not st.settings.watch_knowledge:
+        return
+    try:
+        from oracle.rag.collections import load_registry
+        from oracle.rag.service import IndexService
+
+        registry = load_registry(st.settings.collections_path)
+    except Exception as exc:
+        log.warning("rag.watch_unconfigured", error=str(exc))
+        return
+
+    async def publish(event_type: str, payload: dict[str, Any]) -> None:
+        await st.eventlog.append(Event(type=event_type, trace_id=bind_trace(), payload=payload))
+
+    st.indexer = IndexService(registry, st.settings.data_dir, publish=publish)
+    st.spawn(st.indexer.run())
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure(settings.log_dir, settings.log_level)
@@ -176,6 +205,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.oracle = st
         if settings.prewarm_toolhost:
             st.spawn(_prewarm(st))
+        _start_indexing(st)
         log.info(
             "oracled.started",
             port=settings.port,
@@ -477,6 +507,10 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
         # Never automatic. A human decides when a halt is over.
         st.policy.resume()
         st.agent.halted = False
+        # HALT cancelled the knowledge watcher along with everything else. Resuming is a
+        # human decision, and this is the point at which the machine is allowed to work
+        # on the user's behalf again.
+        _start_indexing(st)
         st.audit.append(actor="user", tool="oracle.resume", decision="resume")
         await st.eventlog.append(
             Event(type="agent.state", trace_id=bind_trace(), payload={"state": "idle"})

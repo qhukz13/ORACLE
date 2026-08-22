@@ -29,6 +29,7 @@ import subprocess
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import StrEnum
+from functools import cache
 from pathlib import Path
 from typing import Literal
 
@@ -200,6 +201,26 @@ def load_registry(path: Path) -> CollectionRegistry:
     return CollectionRegistry.model_validate(raw)
 
 
+@cache
+def _compiled(patterns: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
+    """`patterns` as regexes, compiled once per distinct tuple.
+
+    `fnmatch.fnmatch` normcases both arguments on every call, and on Windows that is a
+    `LCMapStringEx` call into the OS. At eight deny patterns matched against two forms of
+    each path, filtering 5000 `npm install` events spent 1.3 s in the locale mapper alone —
+    on the event loop, because the watcher filters there. Compiling keeps the semantics
+    (`IGNORECASE` is what normcase was providing on this platform) and removes the syscall.
+
+    Backslashes in a pattern are folded to `/` because paths arrive here as `as_posix()`
+    and `normcase` used to reconcile the two. Dropping that would silently stop a deny rule
+    written `**\\Passwords\\**` from matching anything, which is the one failure mode this
+    family of functions must not have.
+    """
+    return tuple(
+        re.compile(fnmatch.translate(p.replace("\\", "/")), re.IGNORECASE) for p in patterns
+    )
+
+
 def _matches(rel: str, absolute: str, patterns: tuple[str, ...]) -> bool:
     """Glob match against both the corpus-relative and absolute forms.
 
@@ -207,7 +228,7 @@ def _matches(rel: str, absolute: str, patterns: tuple[str, ...]) -> bool:
     relative in spirit and `C:/Users/**/Passwords/**` is not — and a deny rule that
     silently fails to match is the one failure mode this function must not have.
     """
-    return any(fnmatch.fnmatch(rel, p) or fnmatch.fnmatch(absolute, p) for p in patterns)
+    return any(p.match(rel) or p.match(absolute) for p in _compiled(patterns))
 
 
 _DIR_PATTERN = re.compile(r"^\*\*/([^*/?\[\]]+)/\*\*$")
