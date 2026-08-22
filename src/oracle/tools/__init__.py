@@ -32,12 +32,20 @@ def build_registry(*, writes: bool = True) -> ToolRegistry:
     from oracle.tools.dev import DEV_TOOLS
     from oracle.tools.filesystem import WRITE_TOOLS
     from oracle.tools.git import GIT_TOOLS
+    from oracle.tools.knowledge import KNOW_TOOLS
     from oracle.tools.readonly import READ_ONLY_TOOLS, SPAWNING_READ_TOOLS
     from oracle.tools.terminal import TERM_TOOLS
 
     registry = ToolRegistry()
     for contract in READ_ONLY_TOOLS:
         registry.register(contract)
+    # `know.*` reads an index the user opted into and takes no path argument, so it
+    # belongs in the read-only set: a read-only deployment should still be able to
+    # answer questions about the projects. `know.reindex` is the exception — it writes
+    # knowledge.db — and is registered with the write tools below.
+    for contract in KNOW_TOOLS:
+        if contract.id != "know.reindex":
+            registry.register(contract)
     if writes:
         # Spawning tools are excluded from the read-only set even when they only read:
         # the gate denies `proc.spawn` in lockdown, so a read-only build that listed
@@ -49,6 +57,7 @@ def build_registry(*, writes: bool = True) -> ToolRegistry:
             *DEV_TOOLS,
             *APP_TOOLS,
             *TERM_TOOLS,
+            *(c for c in KNOW_TOOLS if c.id == "know.reindex"),
         ):
             registry.register(contract)
     return registry

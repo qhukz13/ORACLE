@@ -182,6 +182,25 @@ tools:
   app.launch: { tier: T1, scopes: [projects, notes, scratch] }
   app.close:  { tier: T2 }
 
+  # ------------------------------------------------------------------------- knowledge
+  # No `scopes:`, and that is deliberate rather than an omission. These tools take no
+  # path argument — they can only reach what a human already opted into in
+  # config/collections.yaml, which is the scope. Adding `scopes: [projects, notes]`
+  # here would suggest a path is being checked when none is passed.
+  #
+  # T0 because reading an index you asked to be built is not a side effect. What comes
+  # back is another matter: every result carries `provenance`, and a result set holding
+  # `local_foreign` content taints the turn and escalates any plan built on it
+  # (docs/SECURITY.md#6). The tier of the *read* and the trust of the *content* are
+  # separate questions, and this file only answers the first.
+  know.search:       { tier: T0 }
+  know.search_code:  { tier: T0 }
+  know.read_context: { tier: T0 }
+  # T1: it writes, but only to knowledge.db, which is disposable by design (ADR-0006).
+  # A full rebuild costs about an hour of CPU, which is a reason to make it explicit in
+  # the argument — not a reason to make it a confirmation.
+  know.reindex:      { tier: T1 }
+
   ai.build_packet: { tier: T0 }                  # local only, no egress
   ai.delegate:     { tier: T2 }                  # egress; preview is mandatory
   ai.collect:      { tier: T1 }
