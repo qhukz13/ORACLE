@@ -256,6 +256,34 @@ def _register_routes(app: FastAPI) -> None:
             "terminals": st.terminals.snapshot(),
         }
 
+    @app.get("/api/v1/knowledge")
+    async def knowledge() -> dict[str, Any]:
+        """The index health view — what is indexed, when, how big, what failed (RAG.md §9).
+
+        Opened per request rather than held on app state. `knowledge.db` is disposable:
+        a reindex or a `SchemaMismatch` can replace the file underneath a long-lived
+        handle, and a health view that reports a stale handle's contents is worse than
+        one that costs a few milliseconds to open.
+        """
+        from oracle.rag.embedding import E5_BASE
+        from oracle.rag.store import KnowledgeStore, SchemaMismatch
+
+        st = state_of(app)
+        path = st.settings.data_dir / "knowledge.db"
+        if not path.exists():
+            return {"built": False, "path": str(path), "model": E5_BASE.name}
+        try:
+            store = KnowledgeStore(path, E5_BASE.out_dim)
+            try:
+                store.bind(E5_BASE.name, E5_BASE.out_dim)
+                return {"built": True, "model": E5_BASE.name, **store.stats()}
+            finally:
+                store.close()
+        except SchemaMismatch as exc:
+            # A real state the user has to see and can fix in one click: the index was
+            # built by a different model, so it is not stale, it is wrong.
+            return {"built": False, "path": str(path), "stale": True, "error": str(exc)}
+
     @app.get("/api/v1/sessions")
     async def list_sessions() -> dict[str, Any]:
         st = state_of(app)

@@ -199,3 +199,76 @@ def test_since_seq_ahead_of_server_resyncs_instead_of_hanging(client: TestClient
                 break
         else:  # pragma: no cover
             raise AssertionError("stream went silent after a forward since_seq")
+
+
+class TestKnowledgeHealth:
+    """RAG.md §9: what is indexed, when, how big, what failed."""
+
+    def test_an_unbuilt_index_says_so_rather_than_erroring(self, client: TestClient) -> None:
+        """First run is the common case, and "not built yet" is a state, not a failure.
+
+        The settings fixture points at a temporary data dir, so this is genuinely the
+        no-index path rather than a mock of it.
+        """
+        body = client.get("/api/v1/knowledge").json()
+        assert body["built"] is False
+        assert body["model"]
+        assert "path" in body
+
+    def test_a_built_index_reports_its_contents(
+        self, client: TestClient, settings: Settings
+    ) -> None:
+        import numpy as np
+
+        from oracle.rag.chunking import Chunk
+        from oracle.rag.collections import ContentKind, Document
+        from oracle.rag.embedding import E5_BASE
+        from oracle.rag.store import KnowledgeStore
+
+        store = KnowledgeStore(settings.data_dir / "knowledge.db", E5_BASE.out_dim)
+        store.bind(E5_BASE.name, E5_BASE.out_dim)
+        doc = Document(
+            collection="projects",
+            project="Asterim",
+            path="a.ts",
+            abs_path=settings.data_dir / "a.ts",
+            kind=ContentKind.CODE,
+            size=10,
+            mtime_ns=1,
+        )
+        chunk = Chunk(doc=doc, ordinal=0, anchor="TokenService", text="body text here")
+        store.put(
+            doc,
+            [chunk],
+            np.zeros((1, E5_BASE.out_dim), dtype=np.float32),
+            content_hash="h",
+            provenance="local_owned",
+            indexed_at="2026-08-22T00:00:00Z",
+            idents=["Token Service"],
+            token_counts=[3],
+        )
+        store.close()
+
+        body = client.get("/api/v1/knowledge").json()
+        assert body["built"] is True
+        assert body["chunks"] == 1
+        assert body["vectors"] == 1
+        assert body["collections"][0]["collection_id"] == "projects"
+        assert body["file_bytes"] > 0
+
+    def test_an_index_built_by_another_model_is_reported_stale(
+        self, client: TestClient, settings: Settings
+    ) -> None:
+        """Not stale — wrong. Querying it returns confident nonsense, so the health view
+        has to say so rather than reporting a healthy row count."""
+        from oracle.rag.embedding import E5_BASE
+        from oracle.rag.store import KnowledgeStore
+
+        store = KnowledgeStore(settings.data_dir / "knowledge.db", E5_BASE.out_dim)
+        store.bind("some-other-model", E5_BASE.out_dim)
+        store.close()
+
+        body = client.get("/api/v1/knowledge").json()
+        assert body["built"] is False
+        assert body["stale"] is True
+        assert "reindex" in body["error"]

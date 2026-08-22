@@ -432,6 +432,7 @@ class TurnPipeline:
                 "summary": summary,
                 "error": outcome.error.message if outcome.error else None,
                 "error_kind": outcome.error.kind if outcome.error else None,
+                **_citations_of(tool_id, outcome),
             },
         )
         await self._emit("agent.state", session_id, turn_id, trace, {"state": "idle"})
@@ -565,6 +566,32 @@ class TurnPipeline:
             trace,
         )
         await self._emit("turn.finished", session_id, turn_id, trace, {"outcome": "degraded"})
+
+
+def _citations_of(tool_id: str, outcome: ToolOutcome) -> dict[str, Any]:
+    """Attribution for a `know.*` result, for the UI to render (RAG.md §7).
+
+    Metadata only — the chunk text is stripped. Two reasons, and the second is the
+    binding one: the payload is persisted in the event log forever, and a search
+    returning eight full chunks would write ~10 KB of prose into it per call. The text
+    is already in `knowledge.db`, and the citation is a pointer to it.
+
+    Emitted for `know.*` alone rather than for every tool, because a citation is only
+    meaningful where the result *is* someone else's words.
+    """
+    if not tool_id.startswith("know.") or outcome.result is None:
+        return {}
+    payload = outcome.result.model_dump()
+    rows = payload.get("results") or payload.get("citations") or []
+    if not isinstance(rows, list):
+        return {}
+    return {
+        "citations": [
+            {k: v for k, v in row.items() if k != "text"} for row in rows if isinstance(row, dict)
+        ],
+        "tainted": bool(payload.get("tainted")),
+        "degraded": bool(payload.get("degraded")),
+    }
 
 
 def _render(tool_id: str, outcome: ToolOutcome) -> str:
