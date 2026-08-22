@@ -13,7 +13,7 @@ doc, delete the marker.
 | # | Question | Marker | Blocks | Status |
 |---|---|---|---|---|
 | [OQ-01](#oq-01) | Which router model actually fits and performs? | ~~`EXPERIMENT NEEDED`~~ | Phase 1 | **RESOLVED 2026-08-21 — 0.8b, 93.3% accuracy** |
-| [OQ-02](#oq-02) | Which embedding model for mixed RU/EN? | ~~`EXPERIMENT NEEDED`~~ | Phase 5 | **RESOLVED 2026-08-22 — e5-base 768d; no truncation, no int8** |
+| [OQ-02](#oq-02) | Which embedding model for mixed RU/EN? | `EXPERIMENT NEEDED` | Phase 5 | **REOPENED 2026-08-22 — 25 Russian fixtures put e5-base at 36%, not 62%; `bge-m3` run pending** |
 | [OQ-03](#oq-03) | How long will Pascal keep GPU acceleration? | `UNKNOWN` | risk, not a phase | monitoring |
 | [OQ-04](#oq-04) | Does `realpath` resolve Windows junctions? | ~~`TO VERIFY`~~ | Phase 2 | **RESOLVED 2026-08-21 — yes; but `is_symlink()` lies** |
 | [OQ-05](#oq-05) | Does `agy -p` emit stdout when piped? | ~~`EXPERIMENT NEEDED`~~ | Phase 6 (Antigravity only) | **RESOLVED 2026-08-21 — yes, with `--output-format`** |
@@ -84,7 +84,26 @@ runtime rather than of the model.
 
 ### OQ-02
 **Which embedding model for a mixed Russian/English corpus of prose and code?**
-**RESOLVED 2026-08-22 — `multilingual-e5-base` at 768d. Not truncated, not quantised.**
+**REOPENED 2026-08-22, the same day it was resolved.**
+
+The answer below — `multilingual-e5-base` at 768d — was chosen on a Russian sample of **eight**
+questions. Expanding that set to 25 (P5-T2 requirement 6, ground truth read from the files rather
+than retrieved) puts `e5-base` at **36% on Russian, not 62%**: the small set had overstated it by 26
+points. The English and lexical halves are unaffected and still measure as recorded here.
+
+Nothing below is retracted — it was all measured — but the *decision* it supports rested on the one
+number that has since moved most. `bge-m3` scored 100% on the same eight where `e5-base` scored 75%;
+both are inflated, and the run that would settle it is ~2.5 h over the full corpus.
+
+Two alternative explanations were eliminated first, so this is not a retrieval bug wearing a model's
+clothes. The fusion gate did have a real denominator bug — fixed, and recall did not move. And the
+failures are not near-misses: of 25 Russian cases, 9 land in the top 5, **zero** in ranks 6-10, and
+**12 never enter the candidate set at all**.
+[Log](../logs/development/2026-08-22-fusion-denominator.md).
+
+---
+
+**Resolved 2026-08-22 (superseded by the above) — `multilingual-e5-base` at 768d. Not truncated, not quantised.**
 
 Full write-up: [`logs/development/2026-08-22-oq02-embeddings.md`](../logs/development/2026-08-22-oq02-embeddings.md).
 Harness: `scripts/eval_embeddings.py`. Fixtures: `tests/fixtures/retrieval/cases.yaml`.
@@ -173,7 +192,8 @@ model change, is tolerable. Everything else is now fast enough not to be a desig
 
 It also removes indexing cost as an argument against `bge-m3` — its ~2.5 h is paid once,
 after which its rebuilds are as cheap as e5-base's. The recall question in
-[OQ-02](#oq-02) is untouched and still needs more Russian fixtures.
+[OQ-02](#oq-02) has since been reopened: the expanded Russian fixtures put `e5-base` far lower
+than the eight-question sample did.
 
 **Resolve by using it.** If a cold rebuild ever becomes frequent, the remaining levers are
 to embed only changed collections, or to accept `e5-small` for a first pass and upgrade in

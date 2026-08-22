@@ -283,9 +283,9 @@ rejected. Added when the code that needs them landed, not in advance.
 | `sqlite-vec` | Vector KNN inside `knowledge.db`, one file and one transaction with FTS5 and the metadata. Verified working (v0.1.9) against the bundled SQLite 3.50.4 via `enable_load_extension`. | Everything in [Why sqlite-vec, decisively](#why-sqlite-vec-decisively). |
 | `watchfiles` | Incremental indexing off real filesystem events. Rust `notify` underneath. | `watchdog` — worse Windows behaviour, which is the only platform that matters here. |
 | `tree-sitter-language-pack` | Code chunking on a real syntax tree. **One abi3 wheel** (1.14.3, `cp310-abi3-win_amd64`) covering all 18 grammars this corpus needs — verified loading every one of them on this machine before any code was written against it, the same rule OQ-09 established for `pywinpty`. Replaces a regex whose most common "symbol" across the corpus was `equal` (548) — a call, not a declaration. **Kept behind `chunking.SYNTAX_AWARE`, currently `False`:** it wins the anchor-quality criterion outright and loses recall@5 by two fixture cases (81% -> 71-76%) across four builds, so it ships dormant until the expanded fixture set can settle it ([log](../logs/development/2026-08-22-treesitter-chunking.md)). | Individual `tree-sitter-<lang>` packages: 18 dependencies and 18 build surfaces instead of one. `tree-sitter-languages` (the older sibling) — no maintained abi3 wheel, so a Python upgrade becomes a compile. Hand-written parsers — the thing the regex already proved does not work. |
+| `pypdfium2` | The PDF text layer, no OCR. Verified on the real files before code was written against it — the OQ-09 rule: 510 pages and 956k characters out of the 33 MB textbook in 1.3 s, and the 0.7 MB cheat sheet. | `PyMuPDF` — same quality, **AGPL**, and a text extractor is not worth that entanglement. `pdfminer.six` — pure Python and roughly two orders of magnitude slower on a 510-page book. OCR (`tesseract`) — a second model and a second failure mode for content this corpus does not have; a scan is reported as having no text layer instead. |
 
-Still deferred until the code that needs it exists, because an unused dependency is pure cost:
-`pypdfium2` (the one 32 MB PDF).
+Nothing in this ledger is deferred any longer.
 
 ---
 

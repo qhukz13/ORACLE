@@ -370,7 +370,9 @@ is the prerequisite for context assembly good enough to delegate well (P6).
 1. `knowledge.db`: sqlite-vec + FTS5 schema ([DATABASE.md](DATABASE.md)).
 2. **Collection registry** — explicit opt-in per source. Never "index Documents": that folder
    contains game saves and Paradox Interactive data. See [RAG.md](RAG.md#2-what-gets-indexed).
-3. Parsers: tree-sitter (code), heading-aware Markdown with Obsidian wikilinks, `pypdfium2` (PDF).
+3. Parsers: heading-aware Markdown with Obsidian wikilinks, `pypdfium2` (PDF, text layer only).
+   tree-sitter is built and **off** — better symbol names, measurably worse recall
+   ([log](../logs/development/2026-08-22-treesitter-chunking.md)).
 4. Chunking strategies per type; embeddings via ONNX on CPU
    ([OQ-02](OPEN_QUESTIONS.md#oq-02) — **resolved 2026-08-22**: `multilingual-e5-base` at 768d,
    not truncated and not quantised).

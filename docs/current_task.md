@@ -113,12 +113,34 @@ Close the four gaps P5-T1 left, in this order — the first one changes the cost
    event *on the event loop*, because `fnmatch` normcases both arguments and on Windows that is a
    `LCMapStringEx` syscall. Compiling the patterns once: **3.1x**, and the corpus walker shares it.
    [Log](../logs/development/2026-08-22-watcher-daemon.md).
-5. **PDF parsing** via `pypdfium2` — text layer only, no OCR. One 32 MB PDF is currently classified,
-   counted and skipped.
-6. **Settle `bge-m3` vs `e5-base`.** On the full corpus `e5-base` scores **81%** — one point over the
-   gate — and **62% on the Russian questions**, missing three of eight. The sample overstated it by
-   9 points overall and 13 on cross-language. Two steps, cheapest first: expand the Russian fixtures
-   from 8 to ~25 (n=8 cannot carry this decision), then run `bge-m3` over the full corpus (~2.5 h).
+5. ~~**PDF parsing** via `pypdfium2`~~ **DONE 2026-08-22.** Text layer, no OCR, page anchors
+   (`p. 12`), every PDF marked `local_foreign`. Verified on the real files first: 510 pages and 956k
+   characters out of the 33 MB textbook in **1.3 s**. Measured against an otherwise identical index:
+   adding it changes recall by **nothing at all** — same 55%, same misses — so a 510-page textbook
+   does not crowd out the user's own notes. [Log](../logs/development/2026-08-22-pdf.md).
+6. **Settle `bge-m3` vs `e5-base`.** **Half done, and the half that is done changed the question.**
+
+   The Russian fixtures are expanded, 8 -> **25** (38 total), ground truth read from the files rather
+   than retrieved. On that set `e5-base` scores **36% crosslang, 55% overall** — the eight original
+   Russian fixtures had overstated it by **26 points**. The 81% this task opened with was a number
+   about a fixture set, not about the corpus.
+
+   Two things were ruled out before blaming the model, both measured:
+
+   - **Fusion is not the lever.** A denominator bug meant Russian stopwords read as discriminating
+     (`как` is 0.8% of the corpus and 10% of the Russian in it), so every Russian query pulled in
+     GrowAMonster's Russian docs. Fixed — ranks improved, retrieval got faster, and **recall did not
+     move**. Turning the lexical half off entirely for Russian would put the *same nine* cases in the
+     top 5. [Log](../logs/development/2026-08-22-fusion-denominator.md).
+   - **It is not a ranking problem.** Of 25 Russian cases: 9 in the top 5, **0 in ranks 6-10**, 4 in
+     11-30, and **12 never enter the candidate set at all**. The empty 6-10 bucket is the shape of the
+     result — a nearly-right model misses by a little, and this one either finds the document or does
+     not come close.
+
+   **What remains is the `bge-m3` full-corpus run (~2.5 h), and it needs your go-ahead.** It is no
+   longer the marginal call it was when this task was written: the only remaining lever is the
+   embedding, and `bge-m3` beat `e5-base` on Russian by 25 points on the sample where `e5-base` was
+   flattered by 26.
 
 ## Constraints
 
@@ -139,11 +161,17 @@ Close the four gaps P5-T1 left, in this order — the first one changes the cost
       an anchor across the whole corpus. Asserted over the real corpus, not a fixture. **Met.**
 - [ ] Fixture recall@5 **≥ 80%** on the **full** corpus after re-chunking, and no worse than the
       pre-tree-sitter number. **Not met — 71-76% against 81%, so the line matcher still ships and the
-      shipped path is unchanged at 81%.** Four builds, same corpus, same measurement code.
+      shipped path is unchanged.** Four builds, same corpus, same measurement code. Those figures are
+      all on the **21-case** set; the chunker comparison predates the expansion and is internally
+      consistent. On the 38-case set the same shipped path scores 55%, for the reasons in
+      requirement 6 — that is the fixture set changing, not a regression.
 - [x] The watcher runs under the daemon: a file saved in an indexed project is retrievable within
       10 s, and an `npm install` does not stall the event loop. Measured in
       `tests/test_rag_service.py`, not asserted by inspection.
-- [ ] ~25 Russian fixtures, and a recorded decision on `bge-m3` vs `e5-base` based on them.
+- [x] ~25 Russian fixtures — **25, ground truth read from the files, not retrieved.**
+- [ ] A recorded decision on `bge-m3` vs `e5-base` based on them. **Blocked on the ~2.5 h run, which
+      is yours to authorise.** What the fixtures now say: `e5-base` is at **36% on Russian**, not the
+      62% the old set reported.
 - [ ] The gate green including the security suite.
 
 ## Relevant files

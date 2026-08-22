@@ -94,11 +94,11 @@ Three corrections that the first real walk of this machine forced, on 2026-08-22
 
 | Type | Semantic index | Lexical index | Notes |
 |---|---|---|---|
-| Source code | yes, symbol-level | yes | tree-sitter chunks |
+| Source code | yes, symbol-level | yes | line-matched blocks; tree-sitter is built but off (see §3) |
 | Markdown / docs | yes | yes | heading-aware; the highest-value content here |
 | Config (`json`,`yaml`,`toml`) | **no** | yes | embeddings of config are noise; exact search is what I want |
 | Logs | **no** | yes, last 7 days only | huge, low-value, time-sensitive |
-| PDFs | yes | yes | text layer only; **no OCR in v1** |
+| PDFs | yes | yes | text layer only, **no OCR**; page-anchored; always `local_foreign` (§below) |
 | Notebooks | yes (source cells) | yes | outputs stripped — they contain data, not knowledge |
 | Lockfiles, minified, generated | no | no | excluded entirely |
 | Binaries, media, archives | no | no | metadata only |
@@ -106,6 +106,12 @@ Three corrections that the first real walk of this machine forced, on 2026-08-22
 
 The recurring principle: **embeddings are for prose and semantics; exact search is for identifiers and
 config.** Embedding a `tsconfig.json` produces a vector that matches everything and means nothing.
+
+**Every PDF is `local_foreign`**, unconditionally. Nobody writes a PDF in Obsidian: every one in this
+corpus is something acquired — a textbook, a paper, a datasheet — so it is text by someone else, which
+is exactly what the provenance flag means ([SECURITY.md §6](SECURITY.md#6-prompt-injection-and-taint-tracking)). The
+rule is a generalisation and it is the one that fails safe: being wrong escalates the policy tier of a
+plan built on the content, and never relaxes it.
 
 ---
 
@@ -117,7 +123,7 @@ Chunk boundaries determine retrieval quality more than the embedding model does.
 |---|---|---|
 | **Code** | tree-sitter → one chunk per function/class/method, with the enclosing signature path retained; oversized bodies split at statement boundaries with an overlap of the signature | 200–800 tok |
 | **Markdown** | split at headings, keeping the heading path (`# Setup > ## Auth > ### Tokens`) in every chunk | 200–600 tok |
-| **PDF** | page-aware, merged into paragraph blocks | 300–700 tok |
+| **PDF** | page-aware, packed across pages, anchored `p. 12` | 300–700 tok |
 | **Plain text** | recursive character split with 15% overlap | 300–600 tok |
 
 Every chunk carries its ancestry. A function chunk knows it is
@@ -125,9 +131,9 @@ Every chunk carries its ancestry. A function chunk knows it is
 chunk text *and* the metadata, because it improves both dense matching and human-readable citation.
 
 **The code row is aspirational, and `chunking.SYNTAX_AWARE` is `False`.** The tree-sitter chunker is
-built and tested; a line matcher is what runs. It names symbols worse — measurably so — and on the
-full corpus it *retrieves better*, by two fixture cases out of 21, consistently across four builds
-(81% against 71–76%). The line matcher wins by accident: it packs neighbouring text together, so a
+built and tested; a line matcher is what runs. **The line matcher names symbols far worse and
+retrieves better** — by two fixture cases out of 21, consistently across four builds (81% against
+71-76%). It wins by accident: it packs neighbouring text together, so a
 file's header prose lands beside the code it describes and a conceptual question matches the
 paragraph. Twenty-one cases cannot settle a two-case difference, so the decision waits on the
 expanded fixture set, and the flag is one line.
@@ -181,8 +187,19 @@ overstated the winner's margin:
 **On the full corpus, `e5-base` scores 81% — one point over the gate — and 62% on the
 Russian questions.** The sample overstated it by 9 points overall and 13 on the
 cross-language column. `bge-m3` is the likely fix at 3.4x the indexing cost, and the
-comparison that would settle it has not been run. See
-[OQ-02](OPEN_QUESTIONS.md#oq-02).
+comparison that would settle it has not been run.
+
+**Corrected again, 2026-08-22, and this one matters more.** Every Russian figure on this
+page comes from a set of **eight** questions. Expanding it to 25 puts `e5-base` at
+**36% on Russian and 55% overall** — the small set overstated it by 26 points, on top of
+the 13 the sample had already overstated. The English and lexical columns are unaffected.
+
+Two explanations were eliminated before blaming the model: the fusion gate had a genuine
+denominator bug (Russian stopwords read as discriminating because they are rare in a mostly
+English corpus) which is fixed and **moved recall not at all**, and the failures are not
+near-misses — of 25 Russian cases, 9 land in the top 5, **zero in ranks 6-10**, and 12 never
+enter the candidate set. See [OQ-02](OPEN_QUESTIONS.md#oq-02), now reopened, and the
+[log](../logs/development/2026-08-22-fusion-denominator.md).
 
 * **Do not truncate.** Matryoshka truncation costs 9 points here, not "minimal": `multilingual-e5-base`
   is *not* Matryoshka-trained, so its first 384 dimensions are half an embedding rather than a
@@ -321,8 +338,10 @@ Two reasons this is mandatory, not a nicety:
 
 ## 8. Quality measurement
 
-Retrieval is measured, not vibed. A fixture set of ~20 real questions with known-correct sources
-lives in `tests/fixtures/retrieval/`:
+Retrieval is measured, not vibed. A fixture set of real questions with known-correct sources lives in
+`tests/fixtures/retrieval/`. **38 as of 2026-08-22, of which 25 are Russian** — it began at 21 with
+8 Russian, and that was too few to carry a decision: at n=8 one case is 12.5 points, and the model
+choice in [OQ-02](OPEN_QUESTIONS.md#oq-02) turned on a margin smaller than that.
 
 ```yaml
 - q: "как работает refresh токена в Asterim"     # Russian query, English codebase — the hard case
@@ -336,6 +355,15 @@ lives in `tests/fixtures/retrieval/`:
 Gate: **recall@5 ≥ 80%**. The suite runs on any change to chunking, embeddings, or fusion. Without it,
 "improvements" to retrieval are guesswork — and cross-language retrieval (Russian question, English
 code) is precisely the case that silently regresses.
+
+Two rules the set has had to learn about itself:
+
+* **Ground truth is read, not retrieved.** A fixture set derived from the system it measures agrees
+  with whatever that system already does.
+* **The benchmark must not be in the corpus.** `C:/Projects` contains ORACLE, so committing this file
+  made it indexable — and a document containing all 38 questions verbatim promptly took a top-5 slot
+  in 12 of them. `measure()` discards it before ranking. It stays a legitimate corpus document; it
+  just cannot answer itself.
 
 ---
 
