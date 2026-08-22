@@ -27,6 +27,7 @@ from typing import Any
 import yaml
 
 from oracle.rag.collections import ContentKind, Document
+from oracle.rag.treesitter import blocks_for
 
 #: ~500 tokens of English prose. Deliberately below the 512-token limit of the E5
 #: family, though not reliably so: identifier-dense code tokenizes at closer to one
@@ -73,12 +74,11 @@ _WIKILINK = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
 _HASHTAG = re.compile(r"(?:^|\s)#([A-Za-z][\w/-]*)")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*)")
 
-#: A declaration that starts a new logical block in a C-family or Python-ish language.
-#: This is a regex approximation of the tree-sitter chunker docs/RAG.md#3 specifies, and
-#: it is honest about being one: it finds the boundaries that matter (top-level symbols
-#: and methods) and will mis-handle a declaration inside a string literal. The benchmark
-#: that chose the embedding model ran against these boundaries, so the absolute recall
-#: numbers move when tree-sitter lands — better boundaries lift every model.
+#: A declaration that starts a new logical block, for languages `tree_sitter` has no
+#: grammar for (PowerShell is the only one in this corpus). It is a rough approximation
+#: and its limits are measured rather than assumed — see `_NOT_A_METHOD` and
+#: `_OPENS_BLOCK` below, both of which exist because of things it got wrong on real files.
+#: Anything the language pack covers goes through `treesitter.blocks_for` instead.
 _SYMBOL = re.compile(
     r"^(?:export\s+)?(?:default\s+)?(?:async\s+)?"
     r"(?:(?:abstract\s+)?class|interface|type|enum|function|const|let|var|def|fn|impl"
@@ -296,8 +296,38 @@ def chunk_markdown(doc: Document, text: str, *, obsidian: bool = False) -> list[
     ]
 
 
-def chunk_code(doc: Document, text: str) -> list[Chunk]:
-    """Symbol-boundary chunks, each prefixed with `project / path / symbol`."""
+#: Use the syntax tree rather than the line matcher. **Off, on measured evidence.**
+#:
+#: tree-sitter unambiguously names symbols better — no control-flow keyword and no call
+#: expression appears as an anchor anywhere in the corpus, against `equal` (548) and
+#: `useEffect` (219) for the line matcher. But on the same corpus, with the same fixtures
+#: and the same measurement code, it retrieves *worse*: recall@5 71-76% against 81%, across
+#: four builds. Two fixtures separate them, and in both the line matcher wins by accident —
+#: it packs neighbouring text together, so the file-header prose that answers a conceptual
+#: question lands in the same chunk as the code.
+#:
+#: Better anchors are worth having and this is not the evidence to switch on: a 21-case set
+#: where one case is 4.8 points cannot adjudicate a two-case difference in either
+#: direction. The decision waits on the expanded fixture set (P5-T2 requirement 6), which is
+#: why this is a flag and not a deletion.
+#: [Log](../../../logs/development/2026-08-22-treesitter-chunking.md).
+SYNTAX_AWARE = False
+
+
+def chunk_code(doc: Document, text: str, *, syntax_aware: bool = SYNTAX_AWARE) -> list[Chunk]:
+    """Symbol-boundary chunks, each prefixed with `project / path / symbol`.
+
+    A real syntax tree where there is a grammar for the language and `syntax_aware` is on,
+    and a line matcher otherwise. The difference is not cosmetic: the regex path cannot tell
+    a call that takes a callback from a declaration, so `equal(...)` and `useEffect(...)`
+    became the two most common "symbols" in the corpus. It is nonetheless the default —
+    see `SYNTAX_AWARE`.
+    """
+    parsed = blocks_for(text, doc.abs_path) if syntax_aware else None
+    if parsed is not None:
+        header = f"{doc.project} / {doc.path}\n\n"
+        return _pack([(b.anchor, b.text) for b in parsed], doc, header)
+
     blocks: list[tuple[str, list[str]]] = []
     name = "(file)"
     current: list[str] = []
@@ -321,12 +351,14 @@ def chunk_code(doc: Document, text: str) -> list[Chunk]:
     return _pack([(n, "\n".join(b)) for n, b in blocks], doc, f"{doc.project} / {doc.path}\n\n")
 
 
-def chunk_document(doc: Document, text: str, *, obsidian: bool = False) -> list[Chunk]:
+def chunk_document(
+    doc: Document, text: str, *, obsidian: bool = False, syntax_aware: bool = SYNTAX_AWARE
+) -> list[Chunk]:
     """Dispatch on content kind. The only entry point callers should need."""
     if doc.kind is ContentKind.MARKDOWN:
         return chunk_markdown(doc, text, obsidian=obsidian)
     if doc.kind is ContentKind.CODE:
-        return chunk_code(doc, text)
+        return chunk_code(doc, text, syntax_aware=syntax_aware)
     # Text and config both fall through to a recursive window. Config is chunked at all
     # only so it is searchable by exact string; `Document.semantic` is False for it, so
     # none of these chunks is ever embedded.

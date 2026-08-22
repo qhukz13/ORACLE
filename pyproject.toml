@@ -25,6 +25,10 @@ dependencies = [
     # File watching for incremental indexing. Rust `notify` under the hood: chosen over
     # `watchdog` for Windows reliability (docs/TECH_STACK.md#4-knowledge).
     "watchfiles>=0.24",
+    # Code chunking on a real syntax tree. One abi3 wheel for all 18 grammars this corpus
+    # needs; every one verified to load here before code was written against it.
+    "tree-sitter>=0.25",
+    "tree-sitter-language-pack>=1.14",
 ]
 
 [dependency-groups]
