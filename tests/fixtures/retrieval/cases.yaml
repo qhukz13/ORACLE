@@ -179,3 +179,139 @@ cases:
     kind: semantic
     collection: notes
     expect_any: ["14 - Research/How to Read Research Papers.md"]
+
+  # ---- Russian, expanded 2026-08-22 (P5-T2 requirement 6) -----------------
+  #
+  # The original eight RU rows could not carry a model decision: at n=8 a single
+  # case is 12.5 points, and `bge-m3` beat `e5-base` by an amount smaller than
+  # that. These seventeen take the Russian set to 25.
+  #
+  # Ground truth was read, not retrieved: each source file was opened and its
+  # leading comment or implementation checked against the question. Deriving
+  # fixtures from the system they measure produces a set that agrees with
+  # whatever the system already does.
+  #
+  # Chosen for *spread*, not difficulty. Every one names a subsystem no other
+  # fixture touches, so a model cannot score by being good at one corner of the
+  # corpus, and the questions are phrased the way the question would actually
+  # be asked rather than as keyword bait.
+
+  - id: ru-pairing-bruteforce
+    q: "что мешает подобрать код сопряжения устройства перебором"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/PairingService.ts"]
+
+  - id: ru-air-gap
+    q: "как полностью запретить приложению самому ходить в интернет"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/SovereignMode.ts"]
+
+  - id: ru-event-retention
+    q: "сколько времени хранятся события и что происходит когда их слишком много"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/PruningService.ts"]
+
+  - id: ru-shutdown-order
+    q: "в каком порядке всё закрывается при остановке сервера"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/GracefulShutdown.ts"]
+
+  - id: ru-kill-process-tree
+    q: "как убить не только сам процесс но и всех его потомков"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/ProcessTreeManager.ts"]
+
+  - id: ru-local-discovery
+    q: "как другой процесс на этой же машине узнаёт адрес и токен сервера"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/ServerRegistry.ts"]
+
+  - id: ru-migrations
+    q: "как база понимает какую версию схемы она сейчас имеет"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/MigrationEngine.ts"]
+
+  - id: ru-command-approval
+    q: "кто решает что опасную команду надо показать человеку перед запуском"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/ApprovalManager.ts"]
+
+  - id: ru-terminal-reattach
+    q: "почему после переоткрытия терминала виден предыдущий вывод"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/TerminalService.ts"]
+
+  - id: ru-workspace-permissions
+    q: "как проверяются права пользователя внутри рабочего пространства"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/middleware/rbacGuard.ts"]
+
+  - id: ru-audit-trail
+    q: "где записывается кто и что сделал для последующего разбора"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/AuditService.ts"]
+
+  - id: ru-symbol-extraction
+    q: "как из исходников вытаскиваются имена классов и функций"
+    lang: ru
+    kind: crosslang
+    collection: projects
+    expect_any: ["Asterim/apps/server/src/services/SymbolIndexer.ts"]
+
+  # ---- Russian question, English notes vault ------------------------------
+  - id: ru-bias-variance
+    q: "почему слишком простая модель ошибается так же как слишком сложная"
+    lang: ru
+    kind: crosslang
+    collection: notes
+    expect_any: ["02 - Mathematics/Bias-Variance Tradeoff.md"]
+
+  - id: ru-cross-validation
+    q: "как оценить качество модели когда данных совсем мало"
+    lang: ru
+    kind: crosslang
+    collection: notes
+    expect_any: ["04 - Classical Machine Learning/Cross-Validation.md"]
+
+  - id: ru-learning-rate
+    q: "что будет если шаг обучения выбрать слишком большим"
+    lang: ru
+    kind: crosslang
+    collection: notes
+    expect_any: ["05 - Optimization/Learning Rate.md"]
+
+  - id: ru-nonlinearity
+    q: "зачем между слоями сети нужна нелинейность"
+    lang: ru
+    kind: crosslang
+    collection: notes
+    expect_any: ["06 - Neural Networks/Activation Functions.md"]
+
+  - id: ru-model-degrades
+    q: "модель работала хорошо а через полгода стала хуже, почему"
+    lang: ru
+    kind: crosslang
+    collection: notes
+    expect_any: ["11 - MLOps/Data Drift and Concept Drift.md"]
