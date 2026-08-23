@@ -84,15 +84,24 @@ class HandoffPacket(BaseModel):
     allowed_tools: tuple[str, ...] = ("Read",)
     #: JSON Schema for the structured result. Never parse structure out of prose.
     result_schema: dict[str, Any] | None = None
+    #: Where the rendered six-file packet lives, once written. Set by the delivery
+    #: layer; the prompt then points the delegate at the files instead of inlining
+    #: them — piped stdin is capped at 10 MB and the prompt is worse.
+    context_dir: str | None = None
 
     def render_prompt(self) -> str:
-        """The `-p` argument. Large context never rides here — piped stdin is capped at
-        10 MB and the prompt is worse; context goes into the worktree as files."""
+        """The `-p` argument. Large context never rides here — it goes to disk as the
+        rendered packet, and the prompt carries directions to it."""
         parts = [self.task]
         if self.acceptance:
             parts.append("Acceptance criteria:\n" + "\n".join(f"- {a}" for a in self.acceptance))
         if self.constraints:
             parts.append("Constraints:\n" + "\n".join(f"- {c}" for c in self.constraints))
+        if self.context_dir:
+            parts.append(
+                "Before starting, read the task brief and curated context in "
+                f"{self.context_dir}: TASK.md, CONTEXT.md, FILES.md, STATE.md, ATTEMPTS.md."
+            )
         return "\n\n".join(parts)
 
 

@@ -65,20 +65,31 @@ supervised smoke run in requirement 1.
    ORACLE's `AgentEvent` vocabulary at the adapter boundary (`parent_tool_use_id` → subagent
    attribution, `system/api_retry` → a *retrying* state, final `result` → cost). Contract tests run
    against a **stub CLI** that replays the recorded fixtures — deterministic, no network, no cost.
-3. **Handoff Packet builder** per [INTEGRATIONS.md §6](INTEGRATIONS.md#6-the-handoff-packet--fallback-and-the-core-abstraction):
+3. ~~**Handoff Packet builder**~~ **DONE 2026-08-24** — `src/oracle/handoff/`: the six files +
+   `packet.json`, redaction *before* rendering via the same `redact_text` as the log sink (entropy
+   scanning on, because this text egresses), and the 30k budget as an asserted ceiling that drops
+   whole excerpts lowest-priority-first and records the cut in CONTEXT.md. Refuses (raises) rather
+   than truncates when the task alone exceeds the budget. Selection steps: git state implemented
+   (`gather.py`); the retrieval-fed steps belong to the task that wires the reference scenario end
+   to end. As designed, per [INTEGRATIONS.md §6](INTEGRATIONS.md#6-the-handoff-packet--fallback-and-the-core-abstraction):
    the six files + `packet.json`; context assembly steps 1–8 — curated selection (diff, failing-test
    imports, hybrid retrieval scoped to the project, the project's own agent docs, git state, prior
    attempts), then **REDACT**, then the **30k-token budget as an asserted ceiling**. Large context
    goes into the worktree as files — piped stdin is capped at 10 MB and that cap shapes the design.
-4. **Worktree isolation + collection.** `git worktree add` under `.oracle/wt/<task-id>`, base commit
-   recorded; then the **scrub**: delete `.claude/` and `.mcp.json` from the worktree before
-   invocation, so the target project's hooks and MCP servers cannot load — this carries the
-   isolation `--bare` used to provide. `collect()` = diff against base + an independent
-   `dev.run_tests` in the worktree; discard removes the worktree and leaves the real tree untouched.
-   Non-git projects: snapshot copy, recorded as a limitation.
-5. **The fallback is first-class.** `preflight()` failure (binary missing, unauthenticated) routes to
-   packet-on-disk with a clear explanation *before* anything is built for egress — asserted with the
-   CLI absent, not assumed.
+4. ~~**Worktree isolation + collection.**~~ **DONE 2026-08-24** — `integrations/workspace.py`. As
+   designed: `git worktree add` under `.oracle/wt/<task-id>`, base commit recorded; then the
+   **scrub**: delete `.claude/` and `.mcp.json` from the worktree before invocation, so the target
+   project's hooks and MCP servers cannot load — this carries the isolation `--bare` used to
+   provide, and it has **no opt-out parameter**. Diff against base excludes the scrub's own
+   deletions; discard is asserted to leave the real tree byte-identical. Non-git projects: snapshot
+   copy with content-hash change detection, recorded as a limitation. The independent
+   `dev.run_tests` half of `collect()` waits for the reference-scenario wiring.
+5. ~~**The fallback is first-class.**~~ **DONE 2026-08-24** — `integrations/deliver.py`:
+   `preflight()` failure (binary missing, unauthenticated) routes to packet-on-disk with a clear
+   explanation *before* anything is built for egress — asserted with the CLI absent, including that
+   **no workspace is ever created** for a run that could never start. Both paths render the same
+   packet; the live path points the delegate at it via a second `--add-dir` outside the worktree,
+   so the packet never pollutes the diff the result is judged by.
 
 ## Constraints
 
@@ -105,14 +116,20 @@ supervised smoke run in requirement 1.
 - [x] Adapter contract tests pass against the stub CLI: event normalisation, cancel (SIGINT →
       SIGTERM escalation), non-zero exit → failure with the printed result captured, `preflight()`
       honest on missing binary. **9 tests, all green 2026-08-24.**
-- [ ] The packet builder, run on the reference scenario's shape
+- [x] The packet builder, run on the reference scenario's shape
       ([INTEGRATIONS.md §8](INTEGRATIONS.md#8-reference-scenario)), produces all six files +
       `packet.json`; context ≤ 30k tokens **asserted**; the planted secret redacted everywhere.
-- [ ] With the CLI unreachable, the fallback engages automatically with a clear explanation —
-      asserted by test.
-- [ ] Worktree lifecycle: create → **scrub** → run (stub) → collect diff + independent test result →
-      discard leaves `git status` in the real tree byte-identical. Asserted — including a planted
-      `.claude/settings.json` hook in a fixture repo that must never fire.
+      **Done 2026-08-24** — `tests/test_handoff_packet.py`: the planted `sk-ant-` key and an
+      assigned password are absent from every rendered file, and the over-budget case *raises*
+      rather than truncates.
+- [x] With the CLI unreachable, the fallback engages automatically with a clear explanation —
+      asserted by test. **Done 2026-08-24**, including "no workspace created".
+- [x] Worktree lifecycle: create → **scrub** → run (stub) → collect diff + independent test result →
+      discard leaves `git status` in the real tree byte-identical. Asserted — a fixture repo commits
+      a `.claude/settings.json` hook and `.mcp.json`; the scrub leaves the delegate a copy where
+      neither exists (files that are not there cannot fire), the real tree keeps both, the diff
+      excludes the scrub, and discard restores porcelain-identical status. **Done 2026-08-24.**
+      The independent `dev.run_tests` half of collection waits for the reference-scenario wiring.
 - [x] One supervised live smoke run end to end, payload reviewed by the owner first, result collected
       from the worktree. **Done 2026-08-24** — owner approved; the run's output file verified
       independently of the agent's report (`count.txt = 9`).

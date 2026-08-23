@@ -124,6 +124,10 @@ class ClaudeCodeAdapter:
             "--add-dir",
             str(ws.path),
         ]
+        if packet.context_dir is not None:
+            # The rendered packet lives OUTSIDE the worktree so it never pollutes the
+            # diff the result is judged by; the delegate still needs read access to it.
+            cmd += ["--add-dir", packet.context_dir]
         if packet.result_schema is not None:
             cmd += ["--json-schema", json.dumps(packet.result_schema)]
         return cmd
