@@ -589,6 +589,43 @@ serves the stated purpose.
 
 ---
 
+## Idea backlog — three-tier local model stack  *(recorded 2026-08-23, unscheduled)*
+
+> Owner's ideas, captured verbatim so they are not lost. **Not yet a phase.** Each item needs the
+> same treatment every model decision in this repo has had: measured, not assumed, and written into
+> an ADR before code depends on it.
+
+The hardware picture has changed since P1 pinned `qwen3.5:0.8b` on a 3.5 GB card: **LM Studio** now
+runs three local models, and the roadmap should grow toward a tiered stack rather than a single
+router:
+
+| Tier | Model | Role |
+|---|---|---|
+| Light | **Qwen 2.5 3B** | The simplest tasks: routing, classification, short deterministic transforms — anything where a wrong answer is cheap and latency matters. |
+| Default | **Qwen3 14B** | ORACLE's main model: drives the turn pipeline, calls tools, and writes the prompts/handoff packets given to other agents. |
+| Heavy | **Qwen3 27B** | Hard work: writing code, complex multi-step tool use, and browser search — ideally through the DeepSeek-style agent harness, if it can be adapted to a local model. |
+
+What adopting this implies, in order:
+
+1. **An `LMStudioProvider`** beside `OllamaProvider` behind the existing `LLMProvider` protocol —
+   LM Studio speaks the OpenAI-compatible API, so this is a provider, not a rearchitecture.
+2. **Escalation routing**: the router picks the tier per task (light → default → heavy), instead of
+   one resident model doing everything. Revisits [OQ-01](OPEN_QUESTIONS.md#oq-01)'s accuracy fixtures
+   per tier, and the residency/eviction question — three models will not sit in VRAM together.
+3. **Prompt discipline as a requirement, not a style.** Every prompt sent to a local model must be
+   maximally explicit and detailed — exact task, exact output format, exact stop condition — so a
+   small model never has to guess and never spends half an hour on a trivial step. The intent/tool
+   fixture suites are the enforcement: a prompt change that drops accuracy is a regression.
+4. **DeepSeek harness for browser search** on the heavy tier — *if possible*. Needs its own
+   feasibility spike before it appears in any phase; it also touches the P2 policy gate, because
+   browsing is currently on the "explicitly not planned" list and would need a design pass to move
+   off it.
+
+Natural homes when scheduled: item 1–2 amend **Phase 1** (provider + routing), item 3 cuts across
+every phase that writes a prompt, item 4 is a **Phase 6/7**-adjacent spike.
+
+---
+
 ## Sequencing rules
 
 1. **No phase starts before its predecessor's Definition of Done.** Skipping the DoD is how P4 arrives
