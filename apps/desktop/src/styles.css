@@ -335,3 +335,44 @@ kbd {
 .kh-failures { margin-top: 6px; color: var(--fg-1); font-size: 12px; }
 .kh-failures code { color: var(--fg-0); }
 .kh-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+/* ── Egress preview ────────────────────────────────────────────────────────
+   docs/INTEGRATIONS.md#6. The one card where the UI is part of the security
+   model: what is rendered here is what leaves the machine, byte for byte. */
+.egress { margin: 8px 0; padding: 10px 12px; background: var(--bg-2);
+  border: 1px solid var(--st-ext); border-radius: 3px; font-size: 12px; }
+.egress-dest { margin: 0 0 4px; color: var(--st-ext); font-weight: 700; }
+.egress-size { margin: 0 0 6px; color: var(--fg-1); }
+.egress-files { margin: 0 0 6px; padding-left: 18px; max-height: 120px; overflow-y: auto; }
+.egress-files code { color: var(--fg-0); }
+.egress-redactions { margin: 0; color: var(--fg-1); }
+.egress-redactions-list { margin: 2px 0 6px; padding-left: 18px; color: var(--st-wait); }
+.egress-dropped { margin: 0 0 4px; color: var(--st-wait); }
+.egress-taint { margin: 4px 0; color: var(--st-wait); }
+.egress-note { margin: 6px 0 0; font-size: 11px; }
+.egress-note code { color: var(--fg-1); }
+
+/* ── Delegations ───────────────────────────────────────────────────────────
+   docs/INTEGRATIONS.md#7: diff + test results + summary + cost. The verdict is
+   ORACLE's evidence (gate-run tests), never the delegate's own claim. */
+.delegations { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.dg { background: var(--bg-1); border: 1px solid var(--line); border-radius: 3px;
+  padding: 8px 12px; font-size: 12px; }
+.dg-head { display: flex; align-items: baseline; gap: 10px; }
+.dg-adapter { color: var(--st-ext); font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; font-size: 11px; }
+.dg-task { color: var(--fg-0); }
+.dg-state { color: var(--fg-1); font-size: 11px; letter-spacing: .06em; }
+.dg-success .dg-state { color: var(--st-ok); }
+.dg-failed .dg-state, .dg-halted .dg-state { color: var(--st-err); }
+.dg-awaiting_egress .dg-state, .dg-refused .dg-state, .dg-expired .dg-state,
+.dg-fallback .dg-state { color: var(--st-wait); }
+.dg-feed { margin: 6px 0 0; padding-left: 14px; color: var(--fg-1); list-style: none; }
+.dg-feed .sub { padding-left: 14px; color: var(--fg-2); }
+.dg-fallback { margin: 6px 0 0; color: var(--st-wait); }
+.dg-result { display: flex; align-items: center; gap: 14px; margin-top: 8px;
+  padding-top: 6px; border-top: 1px solid var(--line); color: var(--fg-1); flex-wrap: wrap; }
+.dg-tests.ok { color: var(--st-ok); }
+.dg-tests.bad { color: var(--st-err); }
+.dg-tests.warn { color: var(--st-wait); }
+.dg-ws { color: var(--fg-2); font-size: 11px; }

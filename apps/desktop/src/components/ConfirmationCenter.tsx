@@ -27,6 +27,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Approval } from "../protocol";
+import { EgressPreview } from "./EgressPreview";
 
 /** Blocks an Enter keystroke carried over from whatever the user was doing before. */
 const GUARD_MS = 500;
@@ -172,12 +173,18 @@ export function ConfirmationCenter({ approvals, decided, onRespond }: Confirmati
         {formatArgs(current.args)}
       </pre>
 
-      {(effect.summary || effect.detail) && (
-        <div className="ap-effect">
-          <span className="ap-effect-label">EFFECT</span>
-          {effect.summary && <p className="ap-effect-summary">{effect.summary}</p>}
-          {effect.detail && <pre className="ap-effect-detail">{effect.detail}</pre>}
-        </div>
+      {current.tool === "ai.delegate" ? (
+        // Egress gets its own preview: the §6 box, built from what was actually
+        // rendered. The generic EFFECT block would bury the one number that matters.
+        <EgressPreview preview={current.preview} />
+      ) : (
+        (effect.summary || effect.detail) && (
+          <div className="ap-effect">
+            <span className="ap-effect-label">EFFECT</span>
+            {effect.summary && <p className="ap-effect-summary">{effect.summary}</p>}
+            {effect.detail && <pre className="ap-effect-detail">{effect.detail}</pre>}
+          </div>
+        )
       )}
 
       <p className="ap-rule">

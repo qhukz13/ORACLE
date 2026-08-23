@@ -19,6 +19,8 @@ export interface OracleEvent {
   type: string;
   session_id: string | null;
   turn_id: string | null;
+  /** Present on `task.*` and `delegate.event` — groups a delegation's stream. */
+  task_id?: string | null;
   trace_id: string;
   payload: Record<string, unknown>;
 }
@@ -99,6 +101,32 @@ export interface ToolCall {
   tainted?: boolean;
   /** True when the embedding model was unavailable and only BM25 ran. */
   degraded?: boolean;
+}
+
+/** One normalised event from a delegated agent's stream (`delegate.event`). */
+export interface DelegateEvent {
+  kind: string;
+  text: string;
+  tool: string | null;
+  fromSubagent: boolean;
+}
+
+/**
+ * One delegation, folded from `task.created` / `task.updated` / `delegate.event` /
+ * `task.finished`. Like everything else in the store, it is a projection of events —
+ * the UI never knows more about a delegation than the server has said.
+ */
+export interface Delegation {
+  taskId: string;
+  task: string;
+  adapter: string;
+  /** rendering | awaiting_egress | running | verifying — then "finished". */
+  state: string;
+  /** success | failed | fallback | refused | expired | halted. Set at the end. */
+  outcome?: string;
+  feed: DelegateEvent[];
+  /** The `task.finished` payload: cost, diff stat, test verdict, workspace path. */
+  result?: Record<string, unknown>;
 }
 
 export function asRecord(value: unknown): Record<string, unknown> {

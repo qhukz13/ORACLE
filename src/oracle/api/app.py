@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import aiosqlite
@@ -19,10 +20,14 @@ from oracle import __version__
 from oracle.config import Settings, get_settings
 from oracle.core.approvals import ApprovalStore
 from oracle.core.eventlog import EventLog
-from oracle.core.events import PROTOCOL_VERSION, ClientCommand, Event
+from oracle.core.events import PROTOCOL_VERSION, ClientCommand, Event, new_id
 from oracle.core.projects import discover_projects
 from oracle.core.sessions import SessionStore
 from oracle.core.terminal import TerminalBridge
+from oracle.delegation.service import DelegationService, PacketInputs
+from oracle.handoff.gather import gather_git_state
+from oracle.integrations.claude import ClaudeCodeAdapter
+from oracle.integrations.types import HandoffPacket
 from oracle.llm.ollama import OllamaProvider
 from oracle.llm.structured import StructuredStats
 from oracle.llm.types import ProviderUnavailable
@@ -56,6 +61,7 @@ class AppState:
     undo: UndoJournal
     approvals: ApprovalStore
     terminals: TerminalBridge
+    delegations: DelegationService
     schema_version: int = 0
     projects: list[str] = field(default_factory=list)
     indexer: Any = None
@@ -70,6 +76,55 @@ class AppState:
 
 def state_of(app: FastAPI) -> AppState:
     return app.state.oracle  # type: ignore[no-any-return]
+
+
+def _curate(st: AppState, repo: Path, project: str, task_text: str) -> PacketInputs:
+    """§6 curation for a delegation: orientation docs, retrieval scoped to the project,
+    git state. Runs off the event loop (`to_thread`) — the embedder alone is seconds.
+
+    Degradable on purpose: no knowledge index or no embedding model means a thinner
+    packet (docs + git state), never a failed delegation. The taint from retrieval
+    provenance rides into `PacketInputs`, so the egress approval escalates when the
+    packet carries `local_foreign` text (SECURITY.md §6)."""
+    from oracle.handoff.gather import gather_project_docs, gather_retrieval
+
+    excerpts = list(gather_project_docs(repo))
+    tainted: tuple[str, ...] = ()
+    try:
+        from oracle.rag.embedding import DEFAULT, Embedder
+        from oracle.rag.store import KnowledgeStore
+
+        store = KnowledgeStore(st.settings.data_dir / "knowledge.db", DEFAULT.out_dim)
+        try:
+            store.bind(DEFAULT.name, DEFAULT.out_dim)
+            hits, tainted = gather_retrieval(task_text, store, Embedder(DEFAULT), project=project)
+            excerpts.extend(hits)
+        finally:
+            store.close()
+    except Exception as exc:
+        log.info("delegate.curation_degraded", reason=str(exc))
+    return PacketInputs(
+        excerpts=tuple(excerpts),
+        state=gather_git_state(repo),
+        tainted_sources=tainted,
+    )
+
+
+def _worktree_verifier(
+    executor: ToolExecutor,
+) -> Callable[[Path], Awaitable[dict[str, Any] | None]]:
+    """The independent half of result collection: `dev.run_tests` in the delegate's
+    worktree, through the gate like any other tool call — ORACLE's evidence, not the
+    agent's claim (INTEGRATIONS.md §7)."""
+
+    async def verify(path: Path) -> dict[str, Any] | None:
+        outcome = await executor.execute("dev.run_tests", {"path": str(path)})
+        if not outcome.ok:
+            reason = str(outcome.error) if outcome.error else "run failed"
+            return {"ran": False, "reason": reason}
+        return {"ran": True, **(outcome.result.model_dump() if outcome.result else {})}
+
+    return verify
 
 
 async def _build_state(settings: Settings) -> AppState:
@@ -106,6 +161,16 @@ async def _build_state(settings: Settings) -> AppState:
     undo.set_git_runner(git_undo_runner(executor))
     approvals = ApprovalStore(eventlog, executor)
     terminals = TerminalBridge(eventlog, executor)
+    # Delegation lives in the daemon, not the toolhost: it is minutes-long and owns a
+    # child process. The egress preview rides the same ApprovalStore as every other
+    # T2 action, and verification goes back through the gate as `dev.run_tests`.
+    delegations = DelegationService(
+        eventlog,
+        approvals,
+        engine,
+        ClaudeCodeAdapter(),
+        run_tests=_worktree_verifier(executor),
+    )
     log.info("tools.registered", count=len(registry), tools=[c.id for c in registry.all()])
 
     provider: OllamaProvider | None = None
@@ -152,6 +217,7 @@ async def _build_state(settings: Settings) -> AppState:
         undo=undo,
         approvals=approvals,
         terminals=terminals,
+        delegations=delegations,
         schema_version=version,
         projects=projects,
     )
@@ -475,6 +541,40 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
 
     elif cmd.type == "term.close":
         await st.terminals.close(str(cmd.payload.get("pty_id") or ""), session_id=session_of(cmd))
+
+    elif cmd.type == "delegate":
+        # The human starting a delegation. The service asks its own question — the
+        # egress preview — before anything leaves the machine, so this command only
+        # has to name the work. Model-initiated delegation (the router's
+        # complexity signal) is the phase capstone, not this seam.
+        task_text = str(cmd.payload.get("task") or "").strip()
+        project = str(cmd.payload.get("project") or "").strip()
+        repo = (st.settings.projects_root / project).resolve() if project else None
+        if (
+            not task_text
+            or repo is None
+            or not repo.is_dir()
+            or not repo.is_relative_to(st.settings.projects_root.resolve())
+        ):
+            # `..` in a project name must not walk out of the projects root.
+            log.warning("delegate.bad_request", project=project, has_task=bool(task_text))
+            return
+        raw_tools = cmd.payload.get("allowed_tools")
+        allowed = (
+            tuple(str(t) for t in raw_tools)
+            if isinstance(raw_tools, list) and raw_tools
+            else ("Read", "Edit", "Write")
+        )
+        pkt = HandoffPacket(task_id=new_id("dlg"), task=task_text, allowed_tools=allowed)
+        inputs = await asyncio.to_thread(_curate, st, repo, project, task_text)
+        st.spawn(
+            st.delegations.run(pkt, repo, inputs, session_id=session_of(cmd), trace_id=bind_trace())
+        )
+
+    elif cmd.type == "delegate.discard":
+        task_id = str(cmd.payload.get("task_id") or "")
+        if task_id:
+            await st.delegations.discard(task_id)
 
     elif cmd.type == "halt":
         # Real now, not a stub. Order matters: flip policy to deny-all FIRST, so a

@@ -77,8 +77,16 @@ never produces duplicates or holes. If `since_seq` is older than retention, the 
 | `undo` | `{undo_id?}` | reverses one journalled mutation; omit the id for the most recent |
 | `term.input` | `{pty_id, data}` | human input only; agent PTY writes go through the tool path |
 | `term.resize` | `{pty_id, cols, rows}` | |
+| `delegate` | `{task, project, allowed_tools?}` | starts a delegation (P6-T2). The service asks its own question — the egress preview rides `approval.requested` — before anything leaves the machine |
+| `delegate.discard` | `{task_id}` | throw away a finished delegation's worktree; the packet stays on disk as the record of what was sent |
 | `halt` | `{reason}` | must work in every state, never touches the LLM |
 | `subscribe` | `{topics[]}` | mobile subscribes narrowly to save battery |
+
+**Delegation events.** A delegation streams over the reserved `task.*` types (`created` →
+`updated` with `rendering`/`awaiting_egress`/`running`/`verifying` → `finished` with diff stat,
+gate-run test verdict and cost) plus a coalescable `delegate.event` feed (the delegate's normalised
+started/thinking/tool_use/text stream). All carry `task_id` on the wire — added to the envelope with
+this feature; clients ignore unknown fields by contract.
 
 **On `nonce` and `scope`.** Both were in the original sketch and neither is implemented, on purpose.
 A `nonce` guards against a replayed approval; approvals are already single-use and keyed by an

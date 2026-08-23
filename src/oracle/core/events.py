@@ -60,6 +60,9 @@ KNOWN_TYPES: Final[frozenset[str]] = CRITICAL_TYPES | frozenset(
         "term.output",
         "term.opened",
         "term.closed",
+        # A delegated agent's live feed. Coalescable on purpose: a dropped `thinking`
+        # line is cosmetic, and every decision lives on the critical `task.*` types.
+        "delegate.event",
         "log.entry",
         "system.metrics",
     }
@@ -99,6 +102,9 @@ class Event(BaseModel):
             "type": self.type,
             "session_id": self.session_id,
             "turn_id": self.turn_id,
+            # Added with `delegate.event`/`task.*` (P6-T2): the UI groups a delegation's
+            # feed by this. Older clients ignore unknown fields by contract.
+            "task_id": self.task_id,
             "trace_id": self.trace_id,
             "payload": self.payload,
         }

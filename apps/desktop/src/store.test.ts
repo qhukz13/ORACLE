@@ -326,3 +326,58 @@ describe("knowledge.state", () => {
     expect(useStore.getState().indexing?.state).toBe("stale");
   });
 });
+
+describe("store.apply — delegations", () => {
+  beforeEach(() => {
+    useStore.getState().reset();
+  });
+
+  function devent(
+    seq: number,
+    type: string,
+    payload: Record<string, unknown> = {},
+    taskId = "dlg_1",
+  ): OracleEvent {
+    return { ...ev(seq, type, payload, "t_1"), task_id: taskId };
+  }
+
+  it("folds a full delegation from created through finished", () => {
+    const { apply } = useStore.getState();
+    apply(devent(1, "task.created", { tool: "ai.delegate", task: "fix auth", adapter: "claude-code" }));
+    apply(devent(2, "task.updated", { state: "awaiting_egress" }));
+    apply(devent(3, "task.updated", { state: "running" }));
+    apply(devent(4, "delegate.event", { kind: "tool_use", tool: "Read", text: "" }));
+    apply(devent(5, "task.finished", { outcome: "success", diff_lines: 3 }));
+
+    const d = useStore.getState().delegations[0];
+    expect(d?.task).toBe("fix auth");
+    expect(d?.state).toBe("finished");
+    expect(d?.outcome).toBe("success");
+    expect(d?.feed).toHaveLength(1);
+    expect(d?.result?.["diff_lines"]).toBe(3);
+  });
+
+  it("ignores task events that are not delegations", () => {
+    useStore.getState().apply(devent(1, "task.created", { tool: "pipe.run", task: "x" }));
+    expect(useStore.getState().delegations).toHaveLength(0);
+  });
+
+  it("bounds the feed to the tail — decisions live on task.*, not here", () => {
+    const { apply } = useStore.getState();
+    apply(devent(1, "task.created", { tool: "ai.delegate", task: "t", adapter: "a" }));
+    for (let i = 0; i < 150; i++) {
+      apply(devent(2 + i, "delegate.event", { kind: "thinking", text: `line ${i}` }));
+    }
+    const feed = useStore.getState().delegations[0]?.feed ?? [];
+    expect(feed).toHaveLength(100);
+    expect(feed.at(-1)?.text).toBe("line 149");
+  });
+
+  it("replaying the same task.created twice does not duplicate the card", () => {
+    const { apply } = useStore.getState();
+    const created = devent(1, "task.created", { tool: "ai.delegate", task: "t", adapter: "a" });
+    apply(created);
+    apply({ ...created, seq: 2 });
+    expect(useStore.getState().delegations).toHaveLength(1);
+  });
+});

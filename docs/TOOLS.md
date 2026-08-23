@@ -222,8 +222,8 @@ and simply absent from the catalogue. If I want that, I use Explorer.
 
 | Tool | Tier | Phase | Notes |
 |---|---|---|---|
-| `ai.build_packet` | T0 | 6 | assemble a Handoff Packet — **no egress**, purely local |
-| `ai.delegate` | **T2** | 6 | send to Claude/Antigravity. Egress preview mandatory |
+| `ai.build_packet` | T0 | 6 | assemble a Handoff Packet — **no egress**, purely local. Subsumed for now by the delegation service, which always renders the packet before asking |
+| `ai.delegate` | **T2** | 6 | **built (P6-T2) — as a policy entry, not a toolhost tool.** The delegation runs in the daemon (`DelegationService`): it is minutes-long and owns a child process, neither of which fits a toolhost invocation. The gate still prices it under this id, the egress preview rides the ordinary `ApprovalStore`, and the digest binds the rendered packet bytes. Taint escalates it to T3. Does **not** count against the 40-tool cap (33 remain) |
 | `ai.monitor` | T0 | 6 | poll a running delegation |
 | `ai.collect` | T1 | 6 | diff the worktree, run tests, summarise |
 | `ai.cancel` | T1 | 6 | |

@@ -69,6 +69,9 @@ ignore = ["S101"]
 # The security suite must build REAL junctions with mklink; a mocked reparse point
 # would encode the very assumption the suite exists to disprove.
 "tests/security/*" = ["S105", "S106", "RUF001", "S603", "S607", "ASYNC221", "ASYNC240"]
+# Delegation tests assert on workspace paths after awaiting the service; the Path
+# calls are on tmp dirs and the suite is not trio/anyio.
+"tests/test_delegation_service.py" = ["ASYNC240"]
 # Few-shot examples are literal prompt content, not code. Wrapping them would change
 # what the model sees, and RUF001 flags Cyrillic as "ambiguous" in what is deliberately
 # a bilingual prompt.

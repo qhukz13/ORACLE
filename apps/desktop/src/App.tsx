@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OracleClient } from "./client";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmationCenter } from "./components/ConfirmationCenter";
+import { DelegationPanel } from "./components/DelegationPanel";
 import { Inspector } from "./components/Inspector";
 import { TerminalDock } from "./components/TerminalDock";
 import { ToolCard } from "./components/ToolCard";
@@ -107,6 +108,13 @@ export default function App() {
 
   const undo = useCallback((undoId: string) => {
     clientRef.current?.send({ type: "undo", payload: { undo_id: undoId } });
+  }, []);
+
+  const discard = useCallback((taskId: string) => {
+    // Not optimistic: the card keeps its workspace line until the server's events say
+    // the worktree is gone. Discarding is safe by construction — the real tree was
+    // never touched (docs/INTEGRATIONS.md §7).
+    clientRef.current?.send({ type: "delegate.discard", payload: { task_id: taskId } });
   }, []);
 
   // Stable callbacks: xterm.js subscribes once on mount and holds these in a closure.
@@ -270,6 +278,7 @@ export default function App() {
 
         <main className="stage">
           <ConfirmationCenter approvals={s.approvals} decided={s.decided} onRespond={respond} />
+          <DelegationPanel delegations={s.delegations} onDiscard={discard} />
 
           {stage === "events" ? (
             <table className="events">

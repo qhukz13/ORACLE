@@ -128,3 +128,63 @@ def test_gather_git_state_reads_the_repo_and_never_raises(tmp_path: Path) -> Non
     assert "a.py" in state.status
     assert len(state.recent_commits) == 1 and "seed" in state.recent_commits[0]
     assert state.failing_tests == "1 failed"
+
+
+def test_gather_project_docs_orients_before_code(tmp_path: Path) -> None:
+    from oracle.handoff.gather import DOC_CAP_CHARS, gather_project_docs
+
+    (tmp_path / "AGENTS.md").write_text("agent rules\n" * 1000, encoding="utf-8")
+    (tmp_path / "README.md").write_text("readme\n", encoding="utf-8")
+    docs = gather_project_docs(tmp_path)
+    assert [d.source for d in docs] == ["AGENTS.md", "README.md"]
+    assert all(len(d.text) <= DOC_CAP_CHARS for d in docs)
+    # Orientation docs outrank retrieval hits, so the budget evicts code first.
+    assert min(d.priority for d in docs) > 3
+    assert gather_project_docs(tmp_path / "empty") == ()
+
+
+def test_gather_retrieval_returns_text_and_taint_together(tmp_path: Path) -> None:
+    """Step 3 of §6: hits become attributed excerpts, and untrusted provenance comes
+    back in the same return value — forgetting the taint is a type error, not a slip."""
+    import hashlib
+
+    import numpy as np
+
+    from oracle.handoff.gather import gather_retrieval
+    from oracle.rag.collections import ContentKind
+    from oracle.rag.indexer import Chunk, Document
+    from oracle.rag.store import KnowledgeStore
+
+    class FakeEmbedder:
+        def encode(self, texts: list[str], role: str, *, batch: int = 16) -> np.ndarray:
+            return np.array([[1.0, 0.0, 0.0, 0.0] for _ in texts], dtype=np.float32)
+
+    store = KnowledgeStore(tmp_path / "knowledge.db", 4)
+    store.bind("fake", 4)
+    for rel, provenance in (("Asterim/auth.ts", "local_owned"), ("vendor/lib.ts", "local_foreign")):
+        doc = Document(
+            collection="projects",
+            project="Asterim",
+            path=rel,
+            abs_path=tmp_path / rel,
+            kind=ContentKind.CODE,
+            size=10,
+            mtime_ns=1,
+        )
+        chunks = [Chunk(doc=doc, ordinal=0, anchor="refresh", text=f"token code in {rel}")]
+        store.put(
+            doc,
+            chunks,
+            np.array([[1.0, 0.0, 0.0, 0.0]], dtype=np.float32),
+            content_hash=hashlib.sha256(rel.encode()).hexdigest(),
+            provenance=provenance,
+            indexed_at="2026-08-24T00:00:00Z",
+            idents=[rel],
+            token_counts=[4],
+        )
+
+    excerpts, tainted = gather_retrieval("auth token refresh", store, FakeEmbedder())
+    assert {e.source.split(" · ")[0] for e in excerpts} == {"Asterim/auth.ts", "vendor/lib.ts"}
+    assert all("token code" in e.text for e in excerpts)
+    assert tainted == ("vendor/lib.ts",)
+    store.close()

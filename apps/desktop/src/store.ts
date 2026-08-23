@@ -12,7 +12,15 @@
  */
 
 import { create } from "zustand";
-import type { AgentState, Approval, ConnectionState, OracleEvent, Tier, ToolCall } from "./protocol";
+import type {
+  AgentState,
+  Approval,
+  ConnectionState,
+  Delegation,
+  OracleEvent,
+  Tier,
+  ToolCall,
+} from "./protocol";
 import { asRecord, num, str } from "./protocol";
 
 export interface TermChunk {
@@ -57,6 +65,11 @@ interface State {
    * thing this exists to prevent — it is a status line, never a modal.
    */
   indexing: { state: string; pending: number; indexed: number } | null;
+  /**
+   * Delegations, oldest first, folded from `task.*` and `delegate.event`. Kept after
+   * they finish: the result card (diff, tests, cost, discard) IS the point.
+   */
+  delegations: Delegation[];
   lastSeq: number;
   /** The attached PTY, if any. One at a time in v1 — sub-tabs are later. */
   terminal: { ptyId: string | null; cwd: string };
@@ -71,6 +84,10 @@ interface State {
 
 const MAX_EVENTS = 500;
 const MAX_DECIDED = 10;
+/** Feed lines kept per delegation. `delegate.event` is coalescable by contract, so the
+ *  tail is what matters; decisions live on `task.*` and are never truncated. */
+const MAX_FEED = 100;
+const MAX_DELEGATIONS = 10;
 /** Only what xterm.js has not consumed needs to live here — it keeps 5000 lines of its
  *  own scrollback, and duplicating that in the store would be pure waste. */
 const MAX_TERM_CHUNKS = 200;
@@ -124,6 +141,7 @@ export const useStore = create<State>((set) => ({
   gapWarning: null,
   degraded: null,
   indexing: null,
+  delegations: [],
   lastSeq: 0,
   terminal: { ptyId: null, cwd: "" },
   termChunks: [],
@@ -144,6 +162,7 @@ export const useStore = create<State>((set) => ({
       gapWarning: null,
       degraded: null,
       indexing: null,
+      delegations: [],
       lastSeq: 0,
     }),
 
@@ -293,6 +312,63 @@ export const useStore = create<State>((set) => ({
           next.termChunks = [...s.termChunks, chunk].slice(-MAX_TERM_CHUNKS);
           break;
         }
+
+        case "task.created": {
+          // Only delegations for now. Guarding on the tool keeps a future task type
+          // from being folded into a panel that does not understand it.
+          const taskId = str(ev.task_id);
+          if (!taskId || str(ev.payload["tool"]) !== "ai.delegate") break;
+          if (s.delegations.some((d) => d.taskId === taskId)) break;
+          next.delegations = [
+            ...s.delegations,
+            {
+              taskId,
+              task: str(ev.payload["task"]),
+              adapter: str(ev.payload["adapter"]),
+              state: "created",
+              feed: [],
+            },
+          ].slice(-MAX_DELEGATIONS);
+          break;
+        }
+
+        case "task.updated":
+          next.delegations = s.delegations.map((d) =>
+            d.taskId === str(ev.task_id) ? { ...d, state: str(ev.payload["state"], d.state) } : d,
+          );
+          break;
+
+        case "delegate.event":
+          next.delegations = s.delegations.map((d) =>
+            d.taskId === str(ev.task_id)
+              ? {
+                  ...d,
+                  feed: [
+                    ...d.feed,
+                    {
+                      kind: str(ev.payload["kind"]),
+                      text: str(ev.payload["text"]),
+                      tool: ev.payload["tool"] == null ? null : str(ev.payload["tool"]),
+                      fromSubagent: ev.payload["from_subagent"] === true,
+                    },
+                  ].slice(-MAX_FEED),
+                }
+              : d,
+          );
+          break;
+
+        case "task.finished":
+          next.delegations = s.delegations.map((d) =>
+            d.taskId === str(ev.task_id)
+              ? {
+                  ...d,
+                  state: "finished",
+                  outcome: str(ev.payload["outcome"], "finished"),
+                  result: ev.payload,
+                }
+              : d,
+          );
+          break;
 
         case "approval.resolved": {
           const id = str(ev.payload["approval_id"]);
