@@ -32,6 +32,8 @@ from oracle.llm.ollama import OllamaProvider
 from oracle.llm.structured import StructuredStats
 from oracle.llm.types import ProviderUnavailable
 from oracle.logsink import bind_trace, configure, get_logger
+from oracle.mcp.calls import McpCallHandler
+from oracle.mcp.tokens import TokenStore
 from oracle.policy.audit import AuditLog
 from oracle.policy.engine import PolicyEngine, load_policy
 from oracle.router.intent import IntentClassifier
@@ -62,6 +64,9 @@ class AppState:
     approvals: ApprovalStore
     terminals: TerminalBridge
     delegations: DelegationService
+    #: Delegation capabilities and the inbound MCP call path (INTEGRATIONS.md §4).
+    tokens: TokenStore
+    mcp: McpCallHandler
     schema_version: int = 0
     projects: list[str] = field(default_factory=list)
     indexer: Any = None
@@ -164,12 +169,18 @@ async def _build_state(settings: Settings) -> AppState:
     # Delegation lives in the daemon, not the toolhost: it is minutes-long and owns a
     # child process. The egress preview rides the same ApprovalStore as every other
     # T2 action, and verification goes back through the gate as `dev.run_tests`.
+    tokens = TokenStore()
+    mcp = McpCallHandler(tokens, executor, eventlog)
     delegations = DelegationService(
         eventlog,
         approvals,
         engine,
         ClaudeCodeAdapter(),
         run_tests=_worktree_verifier(executor),
+        # The delegate calls back through the same executor this line already built —
+        # one gate, one audit log (INTEGRATIONS.md §4).
+        tokens=tokens,
+        mcp_url=f"http://127.0.0.1:{settings.port}",
     )
     log.info("tools.registered", count=len(registry), tools=[c.id for c in registry.all()])
 
@@ -218,6 +229,8 @@ async def _build_state(settings: Settings) -> AppState:
         approvals=approvals,
         terminals=terminals,
         delegations=delegations,
+        tokens=tokens,
+        mcp=mcp,
         schema_version=version,
         projects=projects,
     )
@@ -379,6 +392,51 @@ def _register_routes(app: FastAPI) -> None:
             # A real state the user has to see and can fix in one click: the index was
             # built by a different model, so it is not stale, it is wrong.
             return {"built": False, "path": str(path), "stale": True, "error": str(exc)}
+
+    # ---------------------------------------------------------------- MCP inbound
+    #
+    # A delegated agent calling back into ORACLE (INTEGRATIONS.md §4). Loopback only,
+    # like the rest of the API, and authorised by a delegation capability rather than
+    # by being on the box: the token names its own tools, its own worktree and its own
+    # expiry, and the daemon re-derives all three on every call.
+    #
+    # Deliberately NOT behind the WS protocol: the bridge is a short-lived child of the
+    # delegate's CLI, not a UI client, and giving it the event-stream socket would hand
+    # a delegated agent the whole command surface.
+
+    @app.post("/api/v1/mcp/tools")
+    async def mcp_tools(body: dict[str, Any]) -> dict[str, Any]:
+        from oracle.mcp.catalogue import describe
+        from oracle.mcp.tokens import TokenError
+
+        st = state_of(app)
+        try:
+            cap = st.tokens.verify(str(body.get("token", "")))
+        except TokenError as exc:
+            log.warning("mcp.tools_rejected", reason=str(exc))
+            # An empty list, not a 401: the client renders a server error either way,
+            # and a bridge that cannot list tools must not look like a working one.
+            return {"tools": []}
+        return {"tools": describe(st.registry, cap)}
+
+    @app.post("/api/v1/mcp/call")
+    async def mcp_call(body: dict[str, Any]) -> dict[str, Any]:
+        from oracle.mcp.catalogue import resolve
+        from oracle.mcp.tokens import TokenError
+
+        st = state_of(app)
+        token = str(body.get("token", ""))
+        try:
+            cap = st.tokens.verify(token)
+        except TokenError as exc:
+            log.warning("mcp.call_rejected", reason=str(exc))
+            return {"ok": False, "payload": {"error": "not permitted"}}
+
+        tool = resolve(str(body.get("tool", "")), cap)
+        if tool is None:
+            return {"ok": False, "payload": {"error": "no such tool in this delegation"}}
+        result = await st.mcp.call(token, tool, dict(body.get("arguments") or {}))
+        return {"ok": result.ok, "payload": result.payload}
 
     @app.get("/api/v1/sessions")
     async def list_sessions() -> dict[str, Any]:

@@ -162,6 +162,39 @@ rest of the design depends on.
 `system/init` is checked so a silently unloaded server fails the run instead of degrading into raw
 shell use.
 
+### As built (P6-T3, 2026-08-24)
+
+**A bridge, not a second runtime.** `python -m oracle.mcp` is spawned by the delegate's CLI over
+stdio and forwards every call to the daemon on loopback. It holds no registry, no scopes and no
+engine: tools execute through the *same* `ToolExecutor` as everything else, so one gate, one audit
+log, one event stream. A bridge that evaluated policy would be the second permission system this
+section exists to delete.
+
+**Transport: the wire format, not the SDK.** `mcp==2.0.0` installs and runs here, but brings 24
+packages — `cryptography`, `pywin32`, `opentelemetry-api`, `jsonschema` among them — into the
+daemon's trusted base for a protocol that is four methods of newline-delimited JSON-RPC 2.0
+(`initialize`, `notifications/initialized`, `tools/list`, `tools/call`). ORACLE implements those
+four and pins them with tests that drive raw frames, the same way P6-T1 pinned the vendor stream by
+recording it. Protocol version `2025-06-18`. **If a future client rejects this, take the SDK** — the
+measurement above is the justification, and it is why there is no ledger line for `mcp` today.
+
+**Delegation capability, not a bearer token.** `TokenStore` mints an HMAC-signed capability per
+delegation naming its tool allowlist, its worktree, and its expiry; the key is process-lifetime and
+never written to disk. The daemon re-derives every limit on each call. It is revoked on **every**
+exit path — success, refusal, crash, HALT — along with the `--mcp-config` file that carried it.
+
+**The lent surface**, deliberately small: `fs.read`, `fs.list`, `git.status`, `git.diff`,
+`know.search`, `dev.run_tests`. Read and verify. The delegate edits with its own tools inside its
+own disposable worktree — ORACLE does not need to mediate an edit it is going to diff anyway.
+
+**T2+ is refused, never prompted.** An unattended delegate that could raise confirmation dialogs at
+the owner would be prompt fatigue as a service ([SECURITY.md §2](SECURITY.md#2-design-principles)).
+The refusal tells the delegate to ask in its result instead, where a human decides.
+
+Every delegated call emits `tool.started` / `tool.finished` with the `task_id` and `actor:
+"delegate"`, so the UI shows them under the delegation and "who did this" stays answerable once a
+second agent exists.
+
 ---
 
 ## 5. Antigravity — **Supported** (unblocked 2026-08-21)

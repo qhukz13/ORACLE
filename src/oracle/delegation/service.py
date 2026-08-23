@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from hashlib import sha256
@@ -51,6 +53,7 @@ from oracle.integrations.adapter import ExternalAgentAdapter
 from oracle.integrations.types import AgentEventKind, AgentHandle, HandoffPacket
 from oracle.integrations.workspace import Worktree, create_worktree
 from oracle.logsink import get_logger
+from oracle.mcp.tokens import TokenStore
 from oracle.policy.engine import PolicyEngine
 from oracle.policy.model import Capability, Decision, Provenance, Tier
 
@@ -63,6 +66,8 @@ TOOL_ID = "ai.delegate"
 DESTINATION = "api.anthropic.com"
 #: Event-feed hygiene: a delegate's thinking can be pages; the feed carries the head.
 EVENT_TEXT_CAP = 500
+#: The MCP server name the delegate sees. Its tools arrive prefixed `mcp__oracle__*`.
+MCP_SERVER_NAME = "oracle"
 
 
 class DelegationState:
@@ -116,6 +121,9 @@ class ActiveDelegation:
     written: WrittenPacket | None = None
     outcome: str | None = None
     result: dict[str, Any] = field(default_factory=dict)
+    #: The `--mcp-config` file, which contains the delegation's token. Deleted on every
+    #: exit path — a token on disk after the run is a key left in the door.
+    mcp_config: Path | None = None
 
 
 class DelegationService:
@@ -131,6 +139,8 @@ class DelegationService:
         handoff_root: Path | None = None,
         workspace_factory: Callable[[Path, str], Worktree] = create_worktree,
         run_tests: Callable[[Path], Awaitable[dict[str, Any] | None]] | None = None,
+        tokens: TokenStore | None = None,
+        mcp_url: str = "",
     ) -> None:
         self._log = eventlog
         self._approvals = approvals
@@ -144,6 +154,11 @@ class DelegationService:
         #: gate. Injected, because the service must not import its way around the
         #: executor; when absent, the report says "not verified" rather than implying.
         self._run_tests = run_tests
+        #: When both are set, the delegate is lent ORACLE's guarded tools over MCP
+        #: instead of being left to raw shell (INTEGRATIONS.md §4). Absent in unit
+        #: tests that are about the lifecycle rather than the callback path.
+        self._tokens = tokens
+        self._mcp_url = mcp_url
         self._active: dict[str, ActiveDelegation] = {}
 
     # ------------------------------------------------------------------ lifecycle
@@ -189,7 +204,19 @@ class DelegationService:
             log.warning("delegate.crashed", task_id=active.task_id, error=str(exc))
             active.outcome = Outcome.FAILED
             await self._finish(active, session_id, trace, {"error": str(exc)})
+        finally:
+            # Every exit path, HALT included: the capability dies with the delegation
+            # and its config file goes with it.
+            self._revoke(active)
         return active
+
+    def _revoke(self, active: ActiveDelegation) -> None:
+        if self._tokens is not None:
+            self._tokens.revoke(active.task_id)
+        if active.mcp_config is not None:
+            with contextlib.suppress(OSError):
+                active.mcp_config.unlink(missing_ok=True)
+            active.mcp_config = None
 
     async def _run_inner(
         self,
@@ -289,7 +316,17 @@ class DelegationService:
         # 6 — only now does anything cost a checkout: worktree, scrub included.
         worktree = await asyncio.to_thread(self._workspace_factory, source_repo, packet.task_id)
         active.worktree = worktree
-        live = packet.model_copy(update={"context_dir": str(written.directory)})
+        # 6b — lend ORACLE's guarded tools to the delegate. The capability is scoped to
+        # the worktree that has just been created, so it cannot be minted any earlier.
+        mcp_config = await asyncio.to_thread(
+            self._write_mcp_config, active, written.directory, worktree.ws.path
+        )
+        live = packet.model_copy(
+            update={
+                "context_dir": str(written.directory),
+                "mcp_config": str(mcp_config) if mcp_config else None,
+            }
+        )
         active.handle = await self._adapter.submit(live, worktree.ws)
         await self._state(
             active, DelegationState.RUNNING, session_id, trace, {"pid": active.handle.proc.pid}
@@ -336,6 +373,34 @@ class DelegationService:
             "branch": worktree.branch,
         }
         await self._finish(active, session_id, trace, active.result)
+
+    def _write_mcp_config(
+        self, active: ActiveDelegation, packet_dir: Path, worktree: Path
+    ) -> Path | None:
+        """The `--mcp-config` file: how the delegate reaches ORACLE's tools.
+
+        It lives beside the packet rather than inside the worktree, for the same reason
+        the packet does — the worktree is what gets diffed, and a config file with a
+        token in it must not turn up in the delegate's change set. Deleted by
+        `_revoke()` on every exit path.
+        """
+        if self._tokens is None or not self._mcp_url:
+            return None
+        token = self._tokens.mint(active.task_id, worktree)
+        config = {
+            "mcpServers": {
+                MCP_SERVER_NAME: {
+                    "command": sys.executable,
+                    "args": ["-m", "oracle.mcp"],
+                    "env": {"ORACLE_MCP_URL": self._mcp_url, "ORACLE_MCP_TOKEN": token},
+                }
+            }
+        }
+        path = packet_dir / "mcp.json"
+        path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        active.mcp_config = path
+        log.info("delegate.mcp_lent", task_id=active.task_id, config=str(path))
+        return path
 
     # ------------------------------------------------------------------ disposal
 

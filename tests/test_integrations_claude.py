@@ -168,3 +168,24 @@ async def test_cancel_mid_stream_kills_the_child(
     result = await asyncio.wait_for(a.collect(handle), timeout=15)
     assert not result.success
     assert result.structured is None
+
+
+MCP_FAILED = ROOT / "tests" / "fixtures" / "claude_stream" / "mcp-failed-v2.1.238.jsonl"
+
+
+async def test_a_run_whose_tool_server_failed_to_load_is_never_a_success(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """INTEGRATIONS.md §4: a silently unloaded MCP server leaves the delegate working
+    outside the policy gate — the hole the server exists to close. The vendor stream
+    still reports `is_error: false` and exit 0, and ORACLE still calls it a failure.
+
+    The fixture is the recorded smoke stream with `mcp_server_errors` set on `init`,
+    so everything else about it is real."""
+    events, result = await run_to_end(MCP_FAILED, monkeypatch, tmp_path)
+
+    kinds = [e.kind for e in events]
+    assert kinds[0] is AgentEventKind.ERROR, "the run continued past a missing tool server"
+    assert "outside the policy gate" in events[0].text
+    assert not result.success
+    assert "tool server failed to load" in result.result_text

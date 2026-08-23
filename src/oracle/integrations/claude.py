@@ -128,6 +128,10 @@ class ClaudeCodeAdapter:
             # The rendered packet lives OUTSIDE the worktree so it never pollutes the
             # diff the result is judged by; the delegate still needs read access to it.
             cmd += ["--add-dir", packet.context_dir]
+        if packet.mcp_config is not None:
+            # ORACLE's own tools, lent for this run. `--strict-mcp-config` above already
+            # guarantees the project's `.mcp.json` cannot join them.
+            cmd += ["--mcp-config", packet.mcp_config]
         if packet.result_schema is not None:
             cmd += ["--json-schema", json.dumps(packet.result_schema)]
         return cmd
@@ -187,9 +191,22 @@ class ClaudeCodeAdapter:
             h.session_id = event.get("session_id")
             problems = (event.get("mcp_server_errors") or []) + (event.get("plugin_errors") or [])
             if problems:
-                # With --strict-mcp-config a silently unloaded server must fail the run,
-                # not degrade into raw shell use — surfaced here, decided above the seam.
+                # A silently unloaded MCP server is the failure INTEGRATIONS.md §4 warns
+                # about: the delegate quietly falls back to raw shell, outside ORACLE's
+                # gate — exactly the hole the server exists to close. So this ENDS the
+                # run rather than logging a warning nobody reads. `init_failed` marks
+                # the handle so `collect()` cannot call it a success.
                 log.warning("delegate.init_errors", task_id=h.task_id, errors=problems)
+                h.init_failed = "; ".join(str(p) for p in problems)
+                return [
+                    AgentEvent(
+                        kind=AgentEventKind.ERROR,
+                        text=(
+                            "ORACLE's tool server did not load, so the delegate would have "
+                            f"worked outside the policy gate: {h.init_failed}"
+                        ),
+                    )
+                ]
             return [AgentEvent(kind=AgentEventKind.STARTED, text=str(event.get("model") or ""))]
         if kind == "system" and subtype == "api_retry":
             return [AgentEvent(kind=AgentEventKind.RETRYING, text=str(event.get("error") or ""))]
@@ -297,9 +314,20 @@ class ClaudeCodeAdapter:
         result = h.result or {}
         structured = result.get("structured_output")
         return AgentResult(
-            success=exit_code == 0 and h.result is not None and not result.get("is_error", False),
+            success=(
+                exit_code == 0
+                and h.result is not None
+                and not result.get("is_error", False)
+                # A run whose tool server never loaded worked outside the gate; the
+                # vendor may call that a success, ORACLE does not.
+                and h.init_failed is None
+            ),
             exit_code=exit_code,
-            result_text=str(result.get("result") or ""),
+            result_text=(
+                f"ORACLE's tool server failed to load: {h.init_failed}"
+                if h.init_failed
+                else str(result.get("result") or "")
+            ),
             structured=structured if isinstance(structured, dict) else None,
             cost_usd=result.get("total_cost_usd"),
             duration_ms=result.get("duration_ms"),

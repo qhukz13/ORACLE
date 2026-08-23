@@ -390,7 +390,7 @@ channel), raw TCP (rebuilding HTTP badly).
 |---|---|---|
 | **Claude Code** | `claude -p --bare --output-format stream-json` + `--json-schema`, `--resume`, `--allowedTools`; installed here (v2.1.234) | **Supported** |
 | **Anthropic API** | Messages API via `anthropic` SDK, for cheap non-agentic calls | **Supported** |
-| **MCP (inbound)** | ORACLE exposes its guarded tools as an MCP server so delegated agents call back in instead of running raw shell | **Supported** |
+| **MCP (inbound)** | ORACLE exposes its guarded tools as an MCP server so delegated agents call back in instead of running raw shell. **Built P6-T3 with no new dependency**: four JSON-RPC methods over stdio, pinned by tests that drive raw frames. `mcp==2.0.0` was installed and verified working first — it costs **24 packages** (`cryptography`, `pywin32`, `opentelemetry-api`, `jsonschema`…) in the daemon's trusted base, which is not a trade worth making for a wire format this small. Take the SDK if a client ever rejects the hand-rolled surface; that measurement is the justification ([INTEGRATIONS.md §4](INTEGRATIONS.md#4-oracle-as-an-mcp-server)) | **Supported** |
 | **Antigravity** | `agy -p --output-format stream-json` (CLI v1.1.x, SDK v0.1.x) — but see the open non-TTY stdout bug | **Potential** — blocked on [OQ-05](OPEN_QUESTIONS.md) |
 | **Handoff Packet** | Write a self-contained task to disk; collect results via git diff | **Fallback** — works with any agent, including ones that don't exist yet |
 

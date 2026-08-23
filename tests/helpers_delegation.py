@@ -102,6 +102,8 @@ def make_service(
     *,
     ttl_s: float = 5.0,
     run_tests: Any = None,
+    tokens: Any = None,
+    mcp_url: str = "",
 ) -> tuple[DelegationService, ApprovalStore, PolicyEngine]:
     policy_path = tmp_path / "policy.yaml"
     policy_path.write_text(POLICY.format(root=(tmp_path / "project").as_posix()), encoding="utf-8")
@@ -115,6 +117,8 @@ def make_service(
         adapter,
         handoff_root=tmp_path / "handoff",
         run_tests=run_tests,
+        tokens=tokens,
+        mcp_url=mcp_url,
     )
     return service, approvals, engine
 

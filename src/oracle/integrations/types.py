@@ -88,6 +88,10 @@ class HandoffPacket(BaseModel):
     #: layer; the prompt then points the delegate at the files instead of inlining
     #: them — piped stdin is capped at 10 MB and the prompt is worse.
     context_dir: str | None = None
+    #: The `--mcp-config` lending ORACLE's guarded tools to this delegation
+    #: (INTEGRATIONS.md §4). Set by the delegation service, which mints the token it
+    #: contains; absent means the delegate works with its own tools only.
+    mcp_config: str | None = None
 
     def render_prompt(self) -> str:
         """The `-p` argument. Large context never rides here — it goes to disk as the
@@ -124,6 +128,9 @@ class AgentHandle:
     #: The vendor `result` event, verbatim, once seen. Its presence is what "the run
     #: reached a semantic end" means — trailing housekeeping events do not count.
     result: dict[str, Any] | None = None
+    #: Set when `system/init` reported an MCP or plugin load failure. A run that lost
+    #: ORACLE's tool server is never a success, whatever the vendor's exit code says.
+    init_failed: str | None = None
     stderr: bytearray = field(default_factory=bytearray)
     #: The stderr pump task; held here so it is neither garbage-collected mid-run nor
     #: leaked past `collect()`.

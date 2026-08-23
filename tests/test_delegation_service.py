@@ -178,3 +178,46 @@ async def test_verifier_result_lands_in_the_report(
 
     assert active.result["tests"] == {"ran": True, "passed": 3, "failed": 0}
     assert seen and seen[0] == Path(active.result["workspace"])
+
+
+async def test_the_delegate_is_lent_oracles_tools_and_loses_them_at_the_end(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, eventlog: EventLog
+) -> None:
+    """The MCP lending path (INTEGRATIONS.md §4): a config with a live token exists
+    while the delegate runs, and both the file and the capability are gone when it
+    ends. A token on disk after the run is a key left in the door."""
+    import json
+
+    from oracle.mcp.tokens import TokenError, TokenStore
+
+    monkeypatch.setenv("STUB_FIXTURE", str(SMOKE))
+    repo = make_repo(tmp_path)
+    tokens = TokenStore()
+    adapter = stub_adapter()
+    service, approvals, _ = make_service(
+        tmp_path, eventlog, adapter, tokens=tokens, mcp_url="http://127.0.0.1:7777"
+    )
+
+    seen: dict[str, str] = {}
+    original = adapter.submit
+
+    async def capture(packet, ws):  # type: ignore[no-untyped-def]
+        # Read the config at the moment of submission: afterwards it is gone by design.
+        assert packet.mcp_config is not None
+        config = json.loads(Path(packet.mcp_config).read_text(encoding="utf-8"))
+        seen.update(config["mcpServers"]["oracle"]["env"])
+        return await original(packet, ws)
+
+    adapter.submit = capture  # type: ignore[method-assign]
+
+    run = asyncio.ensure_future(service.run(packet(), repo))
+    requested = await wait_for(eventlog, "approval.requested")
+    await approvals.resolve(str(requested.payload["approval_id"]), True)
+    active = await asyncio.wait_for(run, 30)
+
+    assert active.outcome == Outcome.SUCCESS
+    assert seen["ORACLE_MCP_URL"] == "http://127.0.0.1:7777"
+    # The token was real while the run was live, and is refused now that it is not.
+    with pytest.raises(TokenError):
+        tokens.verify(seen["ORACLE_MCP_TOKEN"])
+    assert active.mcp_config is None

@@ -82,6 +82,19 @@ never produces duplicates or holes. If `since_seq` is older than retention, the 
 | `halt` | `{reason}` | must work in every state, never touches the LLM |
 | `subscribe` | `{topics[]}` | mobile subscribes narrowly to save battery |
 
+### Inbound MCP (P6-T3)
+
+Two loopback endpoints a *delegated agent's* bridge process calls, authorised by a delegation
+capability rather than by being on the box ([INTEGRATIONS.md §4](INTEGRATIONS.md#4-oracle-as-an-mcp-server)):
+
+| Route | Body | Notes |
+|---|---|---|
+| `POST /api/v1/mcp/tools` | `{token}` | the tools this capability lends, as MCP descriptors. An unverifiable token gets an empty list — the client renders that as a server error, and a bridge that cannot list must not look like a working one |
+| `POST /api/v1/mcp/call` | `{token, tool, arguments}` | executes through the ordinary `ToolExecutor`. Refusals are `{ok: false}` results, not HTTP errors: the delegate should read them and adapt, not conclude the server is broken and shell out |
+
+Deliberately **not** on the WS protocol: the bridge is a short-lived child of the delegate's CLI, and
+handing it the event socket would hand a delegated agent the whole command surface.
+
 **Delegation events.** A delegation streams over the reserved `task.*` types (`created` →
 `updated` with `rendering`/`awaiting_egress`/`running`/`verifying` → `finished` with diff stat,
 gate-run test verdict and cost) plus a coalescable `delegate.event` feed (the delegate's normalised
