@@ -94,3 +94,27 @@ describe("keyboard navigation", () => {
     expect(container.innerHTML).toBe("");
   });
 });
+
+describe("buildItems — delegation", () => {
+  it("offers a delegation once the query names a known project", () => {
+    const items = buildItems("fix the auth tests in Asterim", ["Asterim", "GrowAMonster"]);
+    const delegate = items.find((i) => i.kind === "delegate");
+    expect(delegate).toBeTruthy();
+    // The phrasing the pre-router recognises deterministically, so the entry does not
+    // depend on the model classifying it.
+    expect(delegate?.send).toBe("ask Claude to fix the auth tests in Asterim");
+    expect(delegate?.hint).toContain("Asterim");
+    // The entry says a human still approves the egress; it is half a decision.
+    expect(delegate?.hint).toContain("approve");
+  });
+
+  it("does not offer one until a project is named", () => {
+    const items = buildItems("fix the auth tests", ["Asterim"]);
+    expect(items.some((i) => i.kind === "delegate")).toBe(false);
+  });
+
+  it("does not offer one for a slash command or a bare project browse", () => {
+    expect(buildItems("/halt", ["Asterim"]).some((i) => i.kind === "delegate")).toBe(false);
+    expect(buildItems("@Asterim", ["Asterim"]).some((i) => i.kind === "delegate")).toBe(false);
+  });
+});

@@ -218,6 +218,9 @@ async def _build_state(settings: Settings) -> AppState:
             selector=ToolSelector(registry, provider, stats=stats) if provider else None,
             approvals=approvals,
             projects_root=settings.projects_root,
+            # The `delegate` intent and the escalation signal both need this; without
+            # it the pipeline still routes and simply says delegation is not wired.
+            delegations=delegations,
         ),
         provider=provider,
         policy=engine,
@@ -235,6 +238,10 @@ async def _build_state(settings: Settings) -> AppState:
         projects=projects,
     )
     state.agent.degraded = degraded
+    # A delegation started by a turn outlives it, and must still be cancellable: routing
+    # it through `AppState.spawn` means HALT reaches it like every other tracked task.
+    # Assigned after construction because the pipeline is built inside the state.
+    state.agent.spawn = state.spawn
     return state
 
 

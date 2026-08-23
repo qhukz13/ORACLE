@@ -7,130 +7,126 @@
 
 ## Task
 
-**P6-T3 — Close the delegation hole: ORACLE's MCP server**
+**P6-T4 — The capstone: ORACLE decides to delegate, and the reference scenario runs**
 
 **Phase:** [6 — External agent integration](ROADMAP.md#phase-6--external-agent-integration--post-mvp) · **Scope:** Post-MVP
-**Status:** `IN PROGRESS — requirements 2-6 done 2026-08-24; live recording + gate open` · **Set:** 2026-08-24
-**Previous task:** P6-T2 — **done** (requirements 1–7, gate green; see [current_report.md](current_report.md)).
+**Status:** `IN PROGRESS — requirements 1-4, 6 done 2026-08-24; the live run is the last step` · **Set:** 2026-08-24
+**Previous task:** P6-T3 — **done** except the live CLI recording; see [current_report.md](current_report.md).
 
 ---
 
-## Carry-over — still the bge-m3 decision
+## Carry-over
 
-Unchanged: the scheduled run (`bge-m3-full-corpus-run`, fires on next app launch if 05:00 was missed)
-writes [OQ-02](OPEN_QUESTIONS.md#oq-02) and a dev log; the model choice goes to the owner. Its
-commits stay separate from delegation work. Nothing here depends on it.
+1. **bge-m3** — the scheduled run has still not produced artefacts; it fires on next app launch.
+   Its OQ-02 edits stay in their own commits.
+2. **The live MCP recording** from P6-T3 requirement 1 — one supervised run against the real CLI,
+   payload previewed. Folded into this task's requirement 5, because the reference scenario needs a
+   live run anyway and one egress serves both.
 
 ## Why this task exists
 
-[INTEGRATIONS.md §4](INTEGRATIONS.md#4-oracle-as-an-mcp-server) states the problem exactly:
+The machinery is built and none of it is reachable from a sentence. A delegation today starts only
+from a raw WS command; ORACLE itself never decides that a job is too big for it. That decision is
+what [INTEGRATIONS.md §8](INTEGRATIONS.md#8-reference-scenario) calls the actual intelligence in the
+system:
 
-> Without it, delegation is a hole in the security model — a second agent with its own permission
-> system, operating outside the policy engine that the rest of the design depends on.
+> Step 7 — recognising that this needs a stronger model — is the actual intelligence in the system,
+> and it is a decision a small model can make reliably because it is a classification, not a
+> solution.
 
-P6-T2 made egress visible and approvable. But once approved, the delegate works with **its own**
-tools under **its own** permission model. Its file reads, its test runs and its searches are invisible
-to ORACLE's audit log and ungoverned by ORACLE's gate. This task closes that: the delegate calls back
-in, and every call it makes lands in the same audit log, obeys the same scopes and tiers, and shows
-up in the same UI as anything ORACLE does itself.
+This task makes that sentence true, and then proves the whole twelve-step scenario end to end.
 
 ## The decision this task opens with
 
-**The MCP server is a bridge process, not a second runtime.** The delegate's CLI spawns it over
-stdio (`--mcp-config`), but the tools must execute in the daemon — one policy engine, one audit log,
-one event stream. So the bridge forwards to the daemon over loopback with a **per-delegation token**,
-and holds no policy of its own. A bridge that evaluated policy locally would be the second permission
-system this task exists to delete.
-
-**The SDK question, measured before writing code against it** (the OQ-09 rule): `mcp==2.0.0` installs
-and `MCPServer.run_stdio_async` works on this machine — but it brings **24 packages**, including
-`cryptography`, `pywin32`, `opentelemetry-api` and `jsonschema`, into the daemon's dependency tree
-for a protocol whose wire format is newline-delimited JSON-RPC 2.0. Requirement 1 settles it with a
-recorded contract rather than an opinion.
+**Does ORACLE delegate on its own, or propose and wait?** It delegates — and the egress preview is
+the human gate, which is exactly what P6-T2 built it for. Adding a second "shall I delegate?"
+question before the "here is what would be sent" question is two prompts for one decision, and
+[SECURITY.md §2](SECURITY.md#2-design-principles) says the answer to fatigue is fewer prompts, not
+politer ones. A delegation that is never approved costs a packet render and nothing else.
 
 ## Requirements
 
-1. **Settle the transport, with evidence.** **MOSTLY DONE 2026-08-24** — hand-rolled surface built and pinned by raw-frame tests; the SDK measurement (24 packages) is written into TECH_STACK.md §9 and INTEGRATIONS.md §4. **Open: the one supervised live run** against the real CLI. As designed: Implement the stdio JSON-RPC surface ORACLE needs
-   (`initialize`, `tools/list`, `tools/call`, `notifications/initialized`) and prove it against the
-   **real** client — the installed Claude CLI, the only client that matters here — the same way the
-   vendor stream contract was settled in P6-T1: record the exchange as fixtures. If the real client
-   rejects it, take the SDK and give it a TECH_STACK ledger line with this measurement as the
-   justification. Either outcome is a result; guessing is not.
-2. ~~**Scoped, expiring delegation tokens.**~~ **DONE 2026-08-24** (`mcp/tokens.py`; HMAC, process-lifetime key, revoked on every exit path). As designed: Minted by `DelegationService` per delegation, carrying:
-   the task id, the worktree path, the tool allowlist, an expiry. Verified in the daemon on every
-   call. Not a bearer token for the whole API — a capability for one delegation.
-3. ~~**`POST /api/v1/mcp/call`**~~ **DONE 2026-08-24** (`mcp/calls.py` + the endpoint; T2+ refused with a message telling the delegate to ask in its result). As designed: in the daemon: token → verify → **the same `ToolExecutor.execute`**
-   every other path uses. No bypass, no second gate, no separate approval flow. T2+ tools are
-   **refused** rather than prompting: an unattended delegate must not be able to raise a
-   confirmation dialog at the owner (that is prompt fatigue as a service).
-4. ~~**The exposed surface is a deliberate subset**~~ **DONE 2026-08-24** (`DEFAULT_TOOLS`; a test asserts every lent tool is T1 or below). As designed:, not the whole registry: `fs.read`, `fs.list`,
-   `git.status`, `git.diff`, `know.search`, `dev.run_tests`. Read and verify, scoped to the
-   delegation's worktree. Writes stay with the delegate's own tools inside the disposable worktree —
-   ORACLE does not need to mediate an edit it is going to diff anyway.
-5. ~~**Wire it into the delegation.**~~ **DONE 2026-08-24** (`--mcp-config` written beside the packet with the token inside and deleted on every exit; `mcp_server_errors` now ends the run). As designed: `ClaudeCodeAdapter` gains `--mcp-config` (written per run, token
-   inside, deleted after) and `--strict-mcp-config`; `--allowedTools` narrows to the MCP tools plus
-   the delegate's own edit tools. `mcp_server_errors` in `system/init` **fails the run** rather than
-   letting it degrade into raw shell use — INTEGRATIONS.md §4 says so and nothing asserts it yet.
-6. ~~**Every delegate tool call is visible.**~~ **DONE 2026-08-24** (`tool.started`/`tool.finished` with `task_id` and `actor="delegate"`; audit trail asserted through the real app). As designed: `tool.started` / `tool.finished` on the event log with
-   `task_id` set and an actor that says it was the delegate, so the UI's existing tool cards show
-   them under the delegation. The audit log entry names the delegate too — "who did this" must not
-   become ambiguous the moment a second agent exists.
+1. ~~**The `delegate` intent stops being a stub.**~~ **DONE 2026-08-24.** Better than planned: the *pre-router* already recognised "ask Claude to …" deterministically and was answering with a Phase-6-not-built stub, so the explicit route now costs ~5 ms and no model call. A project the user named in their own sentence is used; anything else asks. As designed: It already exists in the classifier's vocabulary
+   and its measured accuracy is in the P1 fixtures; today it lands in the "that needs a phase that
+   isn't built yet" branch. Route it into `DelegationService` with the project resolved, and when
+   no project can be resolved, **ask** rather than guessing — a delegation against the wrong
+   repository is expensive in a way a wrong answer is not.
+2. ~~**Escalation: the failure signature.**~~ **DONE 2026-08-24** (`_failure_signature`, narrow by design: a suite that ran and failed, never a tool that could not run). As designed: After an actionable turn that ends in a *reproducible
+   failure* — `dev.run_tests` reporting failures is the case §8 describes — ORACLE escalates the
+   same work to a delegate, carrying what it already learned (the failing tests, the tool it ran)
+   into the packet's ATTEMPTS.md. Deterministic, not a second model call: the signal is "a
+   verification tool reported failure in this turn", which is a fact, not a judgement.
+3. ~~**`delegating` is a real state.**~~ **DONE 2026-08-24**; both routes finish the turn `delegated`, documented in AGENT_RUNTIME.md. As designed: `agent.state: delegating` during the handoff, and the turn
+   finishes with `outcome: "delegated"` while the delegation continues under its own `task.*`
+   stream — a turn that stayed open for a ten-minute delegation would block the session for work
+   the user can already watch in the panel.
+4. ~~**The reference scenario as an executable test.**~~ **DONE 2026-08-24** — `tests/test_reference_scenario.py`, four cases: the full scenario, green-tests-do-not-escalate, the explicit route, and the unresolvable project. As designed: [INTEGRATIONS.md §8](INTEGRATIONS.md#8-reference-scenario)'s
+   twelve steps, driven with `FakeProvider` and the stub CLI: classify → tool → failing tests →
+   **escalate** → packet with the prior attempt → egress approval → run → collect diff +
+   independent tests → report. The test asserts the *sequence*, because the ordering is the design:
+   nothing egresses before the approval, and the evidence at the end is ORACLE's, not the
+   delegate's.
+5. **One supervised live run, closing two open items.** The real CLI, the real MCP bridge, a real
+   worktree: prove the delegate can call `mcp__oracle__*` back into the daemon and that the call
+   lands in the audit log. Record the exchange into `tests/fixtures/mcp/` so the transport contract
+   is pinned by evidence like the vendor stream is. Payload previewed before it is sent.
+6. ~~**The UI can start one.**~~ **DONE 2026-08-24** — the palette offers a delegation once the query names a known project, worded so the entry says a human still approves the egress. As designed: A delegation begins from something a person can type — the command
+   palette is the natural home, since it already routes typed intent. The panel from P6-T2 then
+   shows it. Without this the capstone is reachable only from a websocket frame.
 
 ## Constraints
 
-- **One policy engine.** The bridge holds no rules. If a call cannot be evaluated by the daemon it
-  fails closed.
-- **A delegation token grants strictly less than the owner has**: only the listed tools, only within
-  the worktree, only until expiry, only while that delegation is running.
-- **T2+ is refused, never prompted**, over MCP. Approval belongs to the human-facing path.
-- No new dependency unless requirement 1 proves one is needed; then it gets a ledger line first.
-- `tests/security/` grows: token forgery, expiry, path escape from the worktree, tier refusal,
-  tool-not-in-allowlist, and use-after-delegation-ends.
-- Tool count unchanged: MCP re-exposes registry tools, it does not add any.
+- **No new prompt before the egress preview.** Escalation proposes by *starting* the delegation;
+  the preview is where a human says no.
+- Escalation is **deterministic**: a fact about the turn's tool outcomes, never a second model call.
+  A model deciding to spend money on a stronger model is a loop nobody asked for.
+- The reference-scenario test uses `FakeProvider` and the stub CLI — it must run in CI, offline,
+  every time. The live run of requirement 5 stays a script, not a test.
+- A delegation started by escalation carries the failure into ATTEMPTS.md. A delegate that repeats
+  the attempt ORACLE just made is the waste the packet format exists to prevent.
+- Tool count unchanged; `ai.delegate` remains a policy entry rather than a registry tool.
 
 ## Acceptance criteria
 
-- [ ] The transport question is settled by a **recorded exchange with the real CLI**, and whichever
-      way it went is written into TECH_STACK.md and INTEGRATIONS.md §4 with the measurement.
-      **Half done:** the SDK-vs-hand-rolled measurement is recorded in both docs and the surface is
-      pinned by raw-frame tests plus a real-subprocess spawn; the live CLI recording is the one
-      remaining step, and it needs the owner's go-ahead like every egress.
-- [x] A delegated run calls back through MCP and the call appears in ORACLE's audit log and event
-      log — asserted end to end, not by inspection.
-- [x] Security suite: a forged token, an expired token, a token used after its delegation finished,
-      a path outside the worktree, a tool outside the allowlist, and a T2 tool each fail closed —
-      six tests, each asserting the call never reached the executor.
-- [x] `mcp_server_errors` in `system/init` fails the delegation with a clear reason.
-- [x] The MCP config file (with its token) is deleted when the delegation ends, including on HALT.
-- [x] The gate green including the security suite — `check: OK` 2026-08-24 after the MCP work.
+- [x] "ask Claude to fix the auth tests in Asterim" starts a delegation, with the project resolved,
+      and an unresolvable project asks instead of guessing. Asserted with `FakeProvider`.
+- [x] A turn whose `dev.run_tests` reports failures escalates, and the resulting packet's
+      ATTEMPTS.md names what ORACLE already tried. Asserted on the rendered file.
+- [x] `agent.state: delegating` is emitted, and `turn.finished` carries `outcome: "delegated"` while
+      the `task.*` stream continues.
+- [x] The reference scenario passes as one test, asserting the order — in particular that no egress
+      precedes the approval.
+- [ ] One live run: the delegate calls back through MCP, the call is in the audit log, and the
+      exchange is recorded as a fixture.
+- [x] The palette can start a delegation; vitest covers the entry point.
+- [x] The gate green including the security suite — `check: OK` 2026-08-24.
 - [ ] *(Carry-over)* bge-m3 recorded in OQ-02, decision to the owner.
 
 ## Relevant files
 
-New: `src/oracle/mcp/` (bridge + tokens) · `tests/security/test_mcp_tokens.py` ·
-`tests/test_mcp_server.py` · `tests/fixtures/mcp/` (recorded exchange).
-Modify: `src/oracle/api/app.py` (the call endpoint) · `src/oracle/delegation/service.py` (mint,
-write config, revoke) · `src/oracle/integrations/claude.py` (`--mcp-config`, init errors) ·
-`docs/INTEGRATIONS.md` §4 · `docs/TECH_STACK.md` §9 · `docs/API.md`.
-Read first: [INTEGRATIONS.md §4](INTEGRATIONS.md#4-oracle-as-an-mcp-server) ·
-[SECURITY.md](SECURITY.md) (scopes, tiers, audit) · `tools/executor.py` (the one execution path).
+Modify: `src/oracle/router/pipeline.py` (the delegate branch + escalation) ·
+`src/oracle/delegation/service.py` (attempts from the failing turn) ·
+`apps/desktop/src/components/CommandPalette.tsx` · `docs/INTEGRATIONS.md` §8 (mark it as executed) ·
+`docs/AGENT_RUNTIME.md` (the `delegating` state).
+New: `tests/test_reference_scenario.py` · `scripts/verify_mcp_live.py`.
+Read first: [INTEGRATIONS.md §8](INTEGRATIONS.md#8-reference-scenario) · `router/pipeline.py` ·
+[AGENT_RUNTIME.md §3](AGENT_RUNTIME.md#3-state-machine).
 
 ## Dependencies
 
-P6-T2 (built). The installed Claude CLI for requirement 1's recording — one supervised live run,
-payload previewed first, exactly as P6-T1 did it.
+P6-T1..T3, all built. The live run needs the owner's go-ahead, like every egress.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| Hand-rolled protocol drifts from what the client sends | Requirement 1: record the real exchange as fixtures; the fixtures are the contract, and they re-run in CI |
-| The bridge grows policy | It has no engine and no registry; it forwards. Asserted by the security suite, which drives the bridge with a stub daemon and shows refusals come from the daemon |
-| A leaked token outlives its delegation | Scoped + expiring + revoked on finish; "use after end" is one of the six security tests |
-| A delegate prompts the owner into fatigue | T2+ refused over MCP, never queued as an approval |
+| Escalation fires on every red test and burns quota | It carries the same approval gate as any egress; the preview names the cost before anything is sent |
+| The `delegate` intent misfires on "fix the typo" | The P1 fixture set already measures this label; re-run it, and if it regressed, that is a finding not a footnote |
+| The reference test becomes a mock of itself | It drives the real pipeline, real gate, real packet renderer and real worktree; only the model and the vendor CLI are fakes, and both replay recorded behaviour |
 
 ## Definition of done
 
-All acceptance criteria · the transport decision recorded in TECH_STACK.md and INTEGRATIONS.md §4 ·
-the security suite green · `current_report.md` overwritten · this file updated to **P6-T4** (the
-phase capstone: the router's delegate signal and the reference scenario end to end).
+All acceptance criteria · INTEGRATIONS.md §8 annotated with what actually happened when it ran ·
+the phase's Definition of Done in ROADMAP.md re-read and either met or explicitly amended ·
+the gate green · `current_report.md` overwritten · this file updated to **P7-T1** (Pipelines) or the
+phase's remaining work, whichever the state argues for.

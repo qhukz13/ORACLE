@@ -21,7 +21,7 @@ export interface PaletteItem {
   id: string;
   label: string;
   hint: string;
-  kind: "command" | "project" | "chat";
+  kind: "command" | "project" | "chat" | "delegate";
   /** What actually gets sent. For commands this is the slash form the pre-router eats. */
   send: string;
 }
@@ -79,6 +79,22 @@ export function buildItems(query: string, projects: string[]): PaletteItem[] {
         hint: "ask about this project",
         kind: "project",
         send: `what is the status of ${p}`,
+      });
+    }
+  }
+
+  // Delegation, offered per project once the user has typed something to delegate.
+  // The wording says where it goes, because the palette entry is the first half of a
+  // decision whose second half is the egress preview (docs/INTEGRATIONS.md#6).
+  if (!wantsCommand && !wantsProject && needle.length > 3) {
+    for (const p of projects) {
+      if (!lower.includes(p.toLowerCase())) continue;
+      items.push({
+        id: `delegate:${p}`,
+        label: `Delegate to a coding agent: “${q}”`,
+        hint: `${p} · you approve what is sent`,
+        kind: "delegate",
+        send: `ask Claude to ${q}`,
       });
     }
   }

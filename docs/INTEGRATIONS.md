@@ -387,6 +387,31 @@ Steps 1–6 cost nothing but local compute and typically take a few seconds. Ste
 this needs a stronger model — is the actual intelligence in the system, and it is a decision a small
 model can make reliably because it is a classification, not a solution.
 
+### As executed (P6-T4, 2026-08-24)
+
+This scenario is now a test — `tests/test_reference_scenario.py` — running the real pipeline, gate,
+approval store, packet renderer, worktree and collection, with only the local model and the vendor
+CLI replaced by replays. What it asserts is the **order**, because the order is the design: the tool
+call precedes the approval request, the approval precedes any egress, and the report follows the
+collection.
+
+Two things the design sketch above got slightly wrong, corrected by building it:
+
+- **Step 7 needs no model at all.** The escalation signal is "a verification tool reported failure in
+  this turn" — a fact about `dev.run_tests`, not a judgement. A model deciding to spend money on a
+  stronger model is a loop nobody asked for, and the fact is cheaper *and* more reliable. What
+  escalates is narrow on purpose: a test suite that ran and failed, never a tool that could not run
+  (a denial or a missing runner would hit the delegate the same way).
+- **Step 9 is the only prompt.** An earlier reading had ORACLE ask "shall I delegate?" and then
+  "here is what would be sent". That is two questions for one decision. Escalation *starts* the
+  delegation; the egress preview is where a human says no, and a refused delegation costs a packet
+  render and nothing else.
+
+The prior attempt from step 6 is carried into the packet's `ATTEMPTS.md` — the failing test names
+and what ORACLE already ran — so the delegate does not spend its first turns rediscovering it. The
+explicit route ("ask Claude to …") is recognised by the **pre-router** in ~5 ms rather than by the
+model, and a project the user did not name is asked about rather than guessed.
+
 ---
 
 ## 9. Adding a new agent

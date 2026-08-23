@@ -22,12 +22,17 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from oracle.core.approvals import ApprovalStore, Resolution
 from oracle.core.eventlog import EventLog
 from oracle.core.events import Event, new_id
+from oracle.delegation.service import DelegationService, PacketInputs
+from oracle.handoff.gather import gather_git_state, gather_project_docs
+from oracle.handoff.packet import Attempt
+from oracle.integrations.types import HandoffPacket
 from oracle.llm.provider import LLMProvider
 from oracle.llm.structured import StructuredOutputError, StructuredStats
 from oracle.llm.types import CallType, CompletionRequest, Message, ProviderUnavailable
@@ -51,6 +56,73 @@ _ANSWER_SYSTEM = (
     "You are ORACLE, a local assistant on the user's PC. Answer briefly and concretely. "
     "If you do not know, say so. Reply in the language the user used."
 )
+
+#: Tools whose failure means "the code is broken", not "the tool went wrong". These are
+#: the ones that can escalate: a failing test suite is a reproducible failure signature
+#: a delegate can work from, whereas a refused `fs.write` is a policy answer and a
+#: delegate would hit the same wall (INTEGRATIONS.md §8, step 7).
+_VERIFICATION_TOOLS = frozenset({"dev.run_tests", "dev.build", "dev.lint"})
+
+
+def _failure_signature(tool_id: str, outcome: ToolOutcome) -> str | None:
+    """One sentence describing a reproducible failure, or None if there isn't one.
+
+    Deliberately narrow. A tool that could not RUN (denied, missing program, bad path)
+    is not a failing build — handing that to a delegate would spend money to be told
+    the same thing.
+    """
+    if tool_id not in _VERIFICATION_TOOLS or outcome.error is not None:
+        return None
+    result = outcome.result
+    failed = int(getattr(result, "failed", 0) or 0) if result is not None else 0
+    if failed:
+        names = list(getattr(result, "failures", None) or [])[:3]
+        detail = ", ".join(str(getattr(f, "name", f)) for f in names)
+        return f"{failed} test{'s' if failed != 1 else ''} still failing" + (
+            f" ({detail})." if detail else "."
+        )
+    # A build or lint that exits non-zero without a parsed count.
+    if not outcome.ok:
+        return f"{tool_id} did not succeed."
+    return None
+
+
+def _named_project(text: str, projects: list[str]) -> str | None:
+    """A known project the user named in their own sentence, if exactly one.
+
+    Not a guess — the word is theirs. Two matches is ambiguity and resolves to None,
+    because delegating to the wrong repository sends that repository's context to a
+    cloud API, which is not the kind of mistake a retry fixes.
+    """
+    lowered = text.lower()
+    found = [p for p in projects if p.lower() in lowered]
+    return found[0] if len(found) == 1 else None
+
+
+def _project_of(args: dict[str, Any], projects_root: Path | None) -> Path | None:
+    """The project a tool call was aimed at, as a directory a delegation can own.
+
+    A delegation needs a repository root, and the tool's `path` argument is the only
+    evidence in the turn about which one. Refuses anything outside the projects root:
+    delegating against a directory the owner never pointed at is not a recovery, it is
+    a surprise.
+    """
+    raw = args.get("path") or args.get("repo")
+    if not isinstance(raw, str) or not raw or projects_root is None:
+        return None
+    try:
+        candidate = Path(raw).resolve()
+        root = projects_root.resolve()
+        if not candidate.is_relative_to(root):
+            return None
+    except OSError:  # pragma: no cover - unresolvable path is not a project
+        return None
+    # Walk up to the directory directly under the projects root: `dev.run_tests` may
+    # have been aimed at a subdirectory, and a worktree is made of the whole repo.
+    while candidate.parent != root and candidate.parent != candidate:
+        candidate = candidate.parent
+    return candidate if candidate.is_dir() else None
+
 
 _PENDING = {
     "run": "run that",
@@ -79,6 +151,8 @@ class TurnPipeline:
         selector: ToolSelector | None = None,
         approvals: ApprovalStore | None = None,
         projects_root: Path | None = None,
+        delegations: DelegationService | None = None,
+        spawn: Callable[[Any], None] | None = None,
     ) -> None:
         self._log = eventlog
         self._provider = provider
@@ -91,6 +165,13 @@ class TurnPipeline:
         self._selector = selector
         self._approvals = approvals
         self._projects_root = projects_root
+        #: Delegation. Absent means the `delegate` intent still says "not built" —
+        #: which is what P1 through P5 saw, and is a legitimate configuration.
+        self._delegations = delegations
+        #: How a delegation outlives the turn that started it. Public, because the
+        #: daemon assigns `AppState.spawn` here after building the state — which is
+        #: what puts a turn-started delegation under HALT like every other task.
+        self.spawn = spawn or self._own_spawn
         self._pipelines = pipelines or frozenset()
         self.stats = stats or StructuredStats()
         self._on_halt = on_halt
@@ -99,6 +180,14 @@ class TurnPipeline:
         self.degraded: str | None = None
         #: Set by HALT. The pipeline refuses to start a turn while true.
         self.halted = False
+        #: Delegations spawned by turns, held so they are neither garbage-collected
+        #: mid-run nor invisible at shutdown.
+        self._spawned: set[asyncio.Task[Any]] = set()
+
+    def _own_spawn(self, coro: Any) -> None:
+        task: asyncio.Task[Any] = asyncio.create_task(coro)
+        self._spawned.add(task)
+        task.add_done_callback(self._spawned.discard)
 
     # ------------------------------------------------------------------ helpers
 
@@ -149,14 +238,21 @@ class TurnPipeline:
             pre = pre_route(text, pipelines=self._pipelines)
             if pre.matched:
                 await emit("agent.state", session_id, turn_id, trace, {"state": "executing"})
-                await self._handle_preroute(pre, session_id, turn_id, trace)
+                started = await self._handle_preroute(pre, text, session_id, turn_id, trace)
                 await emit("agent.state", session_id, turn_id, trace, {"state": "idle"})
                 await emit(
                     "turn.finished",
                     session_id,
                     turn_id,
                     trace,
-                    {"outcome": "completed", "route": "pre-router", "reason": pre.reason},
+                    {
+                        # One vocabulary for both routes: a delegation started here ends
+                        # the turn exactly as one started by the model does, because a
+                        # client cannot be asked to know which path found it.
+                        "outcome": "delegated" if started else "completed",
+                        "route": "pre-router",
+                        "reason": pre.reason,
+                    },
                 )
                 return
 
@@ -234,6 +330,23 @@ class TurnPipeline:
                     turn_id,
                     trace,
                 )
+            elif cls.intent.intent == "delegate" and self._delegations is not None:
+                delegated = await self._delegate_intent(
+                    text, cls.resolved_project, session_id, turn_id, trace
+                )
+                if delegated:
+                    # The delegation outlives this turn and streams under `task.*`;
+                    # holding the turn open for it would block the session for work the
+                    # user can already watch.
+                    await emit("agent.state", session_id, turn_id, trace, {"state": "idle"})
+                    await emit(
+                        "turn.finished",
+                        session_id,
+                        turn_id,
+                        trace,
+                        {"outcome": "delegated", "intent": "delegate", "route": "model"},
+                    )
+                    return
             else:
                 verb = _PENDING.get(cls.intent.intent, "do that")
                 where = f" in {cls.resolved_project}" if cls.resolved_project else ""
@@ -438,6 +551,111 @@ class TurnPipeline:
         await self._emit("agent.state", session_id, turn_id, trace, {"state": "idle"})
         await self._say(summary, session_id, turn_id, trace)
 
+        # The escalation signal (INTEGRATIONS.md §8, step 7). Deterministic on purpose:
+        # "a verification tool reported failure" is a fact about this turn, not a
+        # judgement, and a model deciding to spend money on a stronger model is a loop
+        # nobody asked for. Nothing egresses here — the delegation it starts asks for
+        # the egress preview like any other, which is the human gate.
+        failure = _failure_signature(tool_id, outcome)
+        if failure is not None:
+            await self._escalate(failure, selection, session_id, turn_id, trace)
+
+    async def _delegate_intent(
+        self, text: str, project: str | None, session_id: str, turn_id: str, trace: str
+    ) -> bool:
+        """ "Ask Claude to …" — the explicit route. Returns whether one started.
+
+        An unresolvable project **asks** rather than guessing. A wrong answer costs a
+        retry; a delegation against the wrong repository costs a worktree, a packet of
+        that repository's context sent to a cloud API, and the owner's trust.
+        """
+        path = self._project_path(project or _named_project(text, self._projects))
+        if path is None:
+            known = ", ".join(self._projects) or "none discovered"
+            await self._say(
+                "Which project should I hand that to? I won't guess — a delegation "
+                f"builds a packet from the project's own files. Known: {known}.",
+                session_id,
+                turn_id,
+                trace,
+            )
+            return False
+        await self._start_delegation(
+            task=text, project=path, session_id=session_id, turn_id=turn_id, trace=trace
+        )
+        return True
+
+    async def _escalate(
+        self,
+        failure: str,
+        selection: Selection,
+        session_id: str,
+        turn_id: str,
+        trace: str,
+    ) -> None:
+        """Hand the same work to a delegate, carrying what this turn already learned."""
+        if self._delegations is None:
+            return
+        project = _project_of(selection.args, self._projects_root)
+        if project is None:
+            return
+        await self._say(
+            f"{failure} I'll hand this to a coding agent — you'll see exactly what would be "
+            "sent before anything leaves the machine.",
+            session_id,
+            turn_id,
+            trace,
+        )
+        await self._start_delegation(
+            task=f"Fix the failing tests in {project.name}. {failure}",
+            project=project,
+            session_id=session_id,
+            turn_id=turn_id,
+            trace=trace,
+            attempts=(
+                Attempt(
+                    date=date.today().isoformat(),
+                    agent="oracle",
+                    summary=(
+                        f"ran {selection.tool} and it reported failure: {failure} "
+                        "Do not simply re-run it; find the cause."
+                    ),
+                ),
+            ),
+        )
+
+    async def _start_delegation(
+        self,
+        *,
+        task: str,
+        project: Path,
+        session_id: str,
+        turn_id: str,
+        trace: str,
+        attempts: tuple[Attempt, ...] = (),
+    ) -> None:
+        """Spawn a delegation and let the turn end.
+
+        The turn does NOT wait for it: a delegation runs for minutes, and a session
+        blocked on one would stop the user asking anything else — while the panel is
+        already showing them the run (docs/UI.md, the delegation panel).
+        """
+        assert self._delegations is not None
+        await self._emit("agent.state", session_id, turn_id, trace, {"state": "delegating"})
+        packet = HandoffPacket(
+            task_id=new_id("dlg"),
+            task=task,
+            allowed_tools=("Read", "Edit", "Write"),
+        )
+        inputs = PacketInputs(
+            excerpts=await asyncio.to_thread(gather_project_docs, project),
+            state=await asyncio.to_thread(gather_git_state, project),
+            attempts=attempts,
+        )
+        self.spawn(
+            self._delegations.run(packet, project, inputs, session_id=session_id, trace_id=trace)
+        )
+
     async def _preview_of(self, tool_id: str, args: dict[str, Any]) -> dict[str, Any]:
         """What the confirmation card shows under EFFECT.
 
@@ -477,8 +695,9 @@ class TurnPipeline:
     # ------------------------------------------------------------------- parts
 
     async def _handle_preroute(
-        self, pre: PreRouteResult, session_id: str, turn_id: str, trace: str
-    ) -> None:
+        self, pre: PreRouteResult, text: str, session_id: str, turn_id: str, trace: str
+    ) -> bool:
+        """Returns whether a delegation was started, which changes the turn's outcome."""
         if pre.kind is PreRouteKind.HALT:
             if self._on_halt:
                 self._on_halt()
@@ -488,13 +707,19 @@ class TurnPipeline:
                 self._run_command(pre.command or "help", pre.args), session_id, turn_id, trace
             )
         elif pre.kind is PreRouteKind.DELEGATE:
-            await self._say(
-                "That names an external coding agent. Delegation arrives in Phase 6 — "
-                "for now I can only route it.",
-                session_id,
-                turn_id,
-                trace,
-            )
+            # "ask Claude to ..." is recognised deterministically in ~5 ms, which is
+            # the pre-router's whole point (OQ-15). It resolves no project, so the
+            # delegate path looks for one the user named themselves and asks otherwise.
+            if self._delegations is None:
+                await self._say(
+                    "That names an external coding agent, and delegation is not wired "
+                    "into this runtime.",
+                    session_id,
+                    turn_id,
+                    trace,
+                )
+            else:
+                return await self._delegate_intent(text, None, session_id, turn_id, trace)
         elif pre.kind is PreRouteKind.PIPELINE:
             await self._say(
                 f"Recognised pipeline {pre.command!r}. Pipelines arrive in Phase 7.",
@@ -502,6 +727,7 @@ class TurnPipeline:
                 turn_id,
                 trace,
             )
+        return False
 
     def _run_command(self, command: str, args: str) -> str:
         if command == "help":

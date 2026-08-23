@@ -128,6 +128,24 @@ Rules: transitions are events (§ event log); `halted` is reachable from every s
 by explicit human action; `error` is terminal for the turn but never for the session; every state has
 a timeout that moves it to `error` rather than hanging forever.
 
+### What `delegating` actually does today  `IMPLEMENTED 2026-08-24`
+
+It is a **handoff**, not a wait. The state is emitted while the delegation is created; the turn then
+finishes with `outcome: "delegated"` and the delegation continues under its own `task.*` stream. A
+turn that stayed open for a ten-minute delegation would block the session for work the user can
+already watch in the delegation panel, and the diagram's arrow back to `summarizing` describes the
+*delegation's* completion rather than the turn's.
+
+Two ways in, and neither is a second prompt (INTEGRATIONS.md §8):
+
+- **Explicit** — "ask Claude to …", recognised by the pre-router in ~5 ms. An unnamed project is
+  asked about, never guessed.
+- **Escalation** — a verification tool (`dev.run_tests`, `dev.build`, `dev.lint`) reported failure
+  in this turn. Deterministic: a fact about the turn's outcomes, not a second model call. What
+  ORACLE already tried is carried into the packet so the delegate does not repeat it.
+
+The egress preview is the only prompt on either path.
+
 ### What `planning` actually does today  `IMPLEMENTED 2026-08-21`
 
 For an actionable intent (`run`, `modify`, `investigate`, `search`, `status`), `planning` is **tool
