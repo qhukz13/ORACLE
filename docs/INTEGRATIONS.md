@@ -51,26 +51,58 @@ failing halfway through.
 
 ## 3. Claude Code CLI — **Supported**
 
-Installed on this machine: **v2.1.234** `VERIFIED`.
+Installed on this machine: **v2.1.238** (checked 2026-08-23).
+
+### Authentication — measured 2026-08-23, and it changed the contract
+
+The owner authenticates Claude Code with a **Claude Max subscription** (OAuth login) and has **no
+API credit**. That kills the original `--bare` + `ANTHROPIC_API_KEY` design, measured, not assumed:
+
+- `--bare` ignores the OAuth login. `VERIFIED` on v2.1.238: `apiKeySource: "none"`, the run fails
+  with *"Not logged in · Please run /login"* at zero cost — nothing egresses.
+- `--bare` also does not read `CLAUDE_CODE_OAUTH_TOKEN` (the `claude setup-token` subscription
+  token). Documented explicitly: bare mode authenticates only via `ANTHROPIC_API_KEY` or an
+  `apiKeyHelper`.
+- A **non-bare** `-p` run picks up the existing subscription login with no key and no token.
+  `VERIFIED` on v2.1.238 on this machine: `is_error: false`, structured result collected.
+  Subscription use for headless `-p` is permitted; `setup-token` exists precisely for it.
+
+So ORACLE runs **without `--bare`**, and rebuilds its isolation materially instead of by flag —
+see the worktree scrub below. The `ANTHROPIC_API_KEY`-from-Credential-Manager path
+([SECURITY.md §7](SECURITY.md#7-secrets-and-egress)) remains documented as the alternative for a
+machine with API billing, and `--bare` would be preferred again there.
 
 ### Invocation
 
 ```bash
 claude -p "<task>" \
-  --bare \
   --output-format stream-json --verbose \
   --json-schema '<result schema>' \
+  --setting-sources user \
+  --strict-mcp-config \
   --allowedTools "Read,Edit,Bash(git diff *),Bash(npm test *)" \
   --permission-mode dontAsk \
   --add-dir "<worktree>" \
   --append-system-prompt-file "<constraints.md>"
 ```
 
+**Precondition — the worktree scrub.** Without `--bare`, a `-p` session loads hooks from the target
+project's `.claude/settings.json` and connects MCP servers from its `.mcp.json`, *even in a folder
+never trusted* (`VERIFIED` on v2.1.234; the reason `--bare` was chosen originally). Delegates only
+ever run in ORACLE's **disposable worktree**, so the fix is material rather than a flag: after
+`git worktree add` and before invocation, ORACLE **deletes `.claude/` and `.mcp.json` from the
+worktree**. Hooks cannot load from files that do not exist, and the diff-based result collection is
+indifferent to their absence. Residual exposure: user-level (`~/.claude`) hooks and plugins still
+load — those are the owner's own configuration on the owner's machine, and they are listed in
+`system/init` (`plugins`, `mcp_servers`), which the adapter checks and logs.
+
 Each flag is load-bearing:
 
 | Flag | Why ORACLE uses it |
 |---|---|
-| `--bare` | **Security-critical.** `VERIFIED`: without it, `claude -p` loads hooks from the project's `.claude/settings.json` and connects MCP servers from `.mcp.json` *even in a folder never trusted*, because a `-p` session shows no trust dialog. ORACLE runs Claude against arbitrary project directories, so this is exactly the exposure. `--bare` skips hooks, plugins, MCP auto-discovery, auto memory and `CLAUDE.md`. Docs also note it will become the `-p` default. |
+| *(no `--bare`)* | Blocked by auth on this machine, see above. Its isolation is rebuilt by the worktree scrub + the two flags below. |
+| `--setting-sources user` | Skip project/local settings sources — belt to the scrub's braces for hooks that arrive via settings. |
+| `--strict-mcp-config` | Only MCP servers passed via `--mcp-config` exist; the project's `.mcp.json` is ignored even if the scrub missed one. |
 | `--output-format stream-json` | Live progress events → ORACLE's event stream → the UI. |
 | `--json-schema` | Forces a structured result into `structured_output`, so ORACLE parses a typed object rather than scraping prose. |
 | `--permission-mode dontAsk` | `VERIFIED`: denies anything outside the allow rules — the right posture for an unattended run. `-p` starts in Manual mode otherwise. |
@@ -78,16 +110,23 @@ Each flag is load-bearing:
 | `--add-dir` | Scopes the run to the isolated worktree. |
 | `--resume <session_id>` | Follow-up turns. `VERIFIED`: since v2.1.223 a session is findable by ID from any directory. |
 
-`--bare` requires `ANTHROPIC_API_KEY` in the environment, since it never reads OAuth credentials or
-the keychain. ORACLE injects it from Windows Credential Manager only for this invocation, per the
-`secret.read` capability ([SECURITY.md §7](SECURITY.md#7-secrets-and-egress)).
-
 ### Stream events consumed
 
-`VERIFIED` shapes: `system/init` (session id, model, tools, `mcp_server_errors`, `plugin_errors`) ·
-assistant/user messages, where `parent_tool_use_id` identifies subagent output · `system/api_retry`
-(attempt, delay, error category) — surfaced as a "retrying" state rather than a failure ·
-final `result` with `total_cost_usd` for the cost display in the Task Inspector.
+`VERIFIED` shapes (re-recorded on v2.1.238, `tests/fixtures/claude_stream/smoke-v2.1.238.jsonl`):
+`system/init` (session id, model, tools, `mcp_server_errors`, `plugin_errors`) · assistant/user
+messages, where `parent_tool_use_id` identifies subagent output · `system/api_retry` (attempt,
+delay, error category) — surfaced as a "retrying" state rather than a failure · `result` with
+`total_cost_usd` for the cost display in the Task Inspector.
+
+Three corrections the v2.1.238 recording forced, each one an adapter rule:
+
+- **`result` is the terminal *semantic* event, not the last line** — a `system/task_summary`
+  follows it. The adapter finishes on `result` and drains the rest.
+- **`system/init` is not necessarily first** — user-level hooks emit `system/hook_started` /
+  `hook_response` *before* init. The adapter waits for init rather than assuming position 0.
+- **Unknown event types are logged and skipped, never fatal** — v2.1.238 already emits kinds the
+  v2.1.234 doc never listed (`system/thinking_tokens`, `rate_limit_event`, `system/task_summary`),
+  so the vocabulary will grow again.
 
 ### Process control
 
