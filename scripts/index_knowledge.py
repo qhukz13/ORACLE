@@ -33,7 +33,7 @@ from oracle.config import Settings
 from oracle.logsink import configure
 from oracle.rag.cache import EmbeddingCache, cache_path, warm_from_index
 from oracle.rag.collections import load_registry
-from oracle.rag.embedding import BGE_M3, E5_BASE, E5_SMALL, Embedder, ModelSpec
+from oracle.rag.embedding import BGE_M3, DEFAULT, E5_BASE, E5_SMALL, Embedder, ModelSpec
 from oracle.rag.indexer import index
 from oracle.rag.retrieval import retrieve
 from oracle.rag.store import KnowledgeStore
@@ -120,7 +120,7 @@ def main() -> int:
     ap.add_argument("--db", default=None)
     ap.add_argument(
         "--model",
-        default=E5_BASE.name,
+        default=DEFAULT.name,
         choices=sorted(MODELS),
         help="which embedding model to build with. A different model needs its own --db "
         "and gets its own cache file; mixing them in one index is refused by bind().",

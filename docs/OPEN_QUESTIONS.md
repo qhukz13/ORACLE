@@ -13,7 +13,7 @@ doc, delete the marker.
 | # | Question | Marker | Blocks | Status |
 |---|---|---|---|---|
 | [OQ-01](#oq-01) | Which router model actually fits and performs? | ~~`EXPERIMENT NEEDED`~~ | Phase 1 | **RESOLVED 2026-08-21 — 0.8b, 93.3% accuracy** |
-| [OQ-02](#oq-02) | Which embedding model for mixed RU/EN? | ~~`EXPERIMENT NEEDED`~~ | Phase 5 | **RESOLVED 2026-08-24 — `bge-m3`, but only with the fusion gate fixed; unfixed it loses** |
+| [OQ-02](#oq-02) | Which embedding model for mixed RU/EN? | ~~`EXPERIMENT NEEDED`~~ | Phase 5 | **RESOLVED 2026-08-24 — `bge-m3`, shipped; it only wins with the fusion gate fixed** |
 | [OQ-03](#oq-03) | How long will Pascal keep GPU acceleration? | `UNKNOWN` | risk, not a phase | monitoring |
 | [OQ-04](#oq-04) | Does `realpath` resolve Windows junctions? | ~~`TO VERIFY`~~ | Phase 2 | **RESOLVED 2026-08-21 — yes; but `is_symlink()` lies** |
 | [OQ-05](#oq-05) | Does `agy -p` emit stdout when piped? | ~~`EXPERIMENT NEEDED`~~ | Phase 6 (Antigravity only) | **RESOLVED 2026-08-21 — yes, with `--output-format`** |
@@ -113,9 +113,11 @@ The gate now drops terms in a script the corpus is not written in, and requires 
 survivors to cover 40% of the question. No configuration regresses; `bge-m3` gains eight
 points on the column this question exists to decide.
 
-**`DEFAULT` is still `multilingual-e5-base`.** The switch is one line (`DEFAULT = BGE_M3`)
-and one ~50-minute rebuild, and it doubles resident memory from ~1.5 GB to ~3 GB — a
-resource decision for the owner rather than a measurement. The measurement says take it.
+**`DEFAULT` is `bge-m3` as of 2026-08-24.** The owner took the switch: one line
+(`DEFAULT = BGE_M3`), one full rebuild, and resident memory goes from ~1.5 GB to ~3 GB.
+`e5-base` keeps its `ModelSpec` and is one line back — `KnowledgeStore.bind` refuses an
+index built by the other model, so a switch either way is a rebuild, never silent
+nonsense.
 
 **What this question no longer answers.** At 61% the system is nineteen points under its
 own 80% recall gate, and 7 of 25 Russian cases never enter the candidate set at all. That

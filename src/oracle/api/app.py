@@ -381,18 +381,21 @@ def _register_routes(app: FastAPI) -> None:
         handle, and a health view that reports a stale handle's contents is worse than
         one that costs a few milliseconds to open.
         """
-        from oracle.rag.embedding import E5_BASE
+        # `DEFAULT`, not a named spec: this endpoint exists to say whether the index on
+        # disk matches the model this build would use, and hardcoding one turns a model
+        # switch into a health view that lies.
+        from oracle.rag.embedding import DEFAULT
         from oracle.rag.store import KnowledgeStore, SchemaMismatch
 
         st = state_of(app)
         path = st.settings.data_dir / "knowledge.db"
         if not path.exists():
-            return {"built": False, "path": str(path), "model": E5_BASE.name}
+            return {"built": False, "path": str(path), "model": DEFAULT.name}
         try:
-            store = KnowledgeStore(path, E5_BASE.out_dim)
+            store = KnowledgeStore(path, DEFAULT.out_dim)
             try:
-                store.bind(E5_BASE.name, E5_BASE.out_dim)
-                return {"built": True, "model": E5_BASE.name, **store.stats()}
+                store.bind(DEFAULT.name, DEFAULT.out_dim)
+                return {"built": True, "model": DEFAULT.name, **store.stats()}
             finally:
                 store.close()
         except SchemaMismatch as exc:

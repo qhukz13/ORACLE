@@ -162,10 +162,12 @@ into a link table so retrieval can expand one hop to directly linked notes; `#ta
 
 ## 4. Embeddings
 
-**Default: `multilingual-e5-base` (768d), ONNX Runtime, CPU.** Rationale in
+**Default: `bge-m3` (1024d), ONNX Runtime, CPU** — since 2026-08-24; `multilingual-e5-base` (768d)
+before that, and still one line away. Rationale in
 [TECH_STACK.md §4](TECH_STACK.md#4-knowledge) — Russian and English in one model, and CPU execution so
-the 4 GB of VRAM stays dedicated to the router model. E5 requires `query:` / `passage:` prefixes; the
-indexer and the retriever must agree on this, and a test asserts it (getting it wrong silently halves
+the 4 GB of VRAM stays dedicated to the router model. E5 requires `query:` / `passage:` prefixes and
+bge-m3 requires none; the indexer and the retriever must agree on whichever is in force, and a test
+asserts it (getting it wrong silently halves
 quality and is a classic bug).
 
 **Confirmed by measurement, [OQ-02](OPEN_QUESTIONS.md#oq-02), 2026-08-22**
@@ -212,10 +214,11 @@ that exists — so an unfiltered lexical list cost `bge-m3` twelve points of cro
 recall and `e5-base` nothing. The 2026-08-22 conclusion that the Russian failures *are* the
 embedding was read through that same instrument.
 
-**`DEFAULT` remains `multilingual-e5-base`.** The evidence favours `bge-m3`; the switch is
-`DEFAULT = BGE_M3` plus one rebuild, and it commits the machine to ~3 GB resident instead
-of ~1.5 GB. That is the owner's call, and [OQ-02](OPEN_QUESTIONS.md#oq-02) records it as
-one.
+**`DEFAULT` is `bge-m3` from 2026-08-24.** The switch was taken with the gate fix, because
+neither is worth much without the other: `bge-m3` through the old gate scored 53%, below
+the model it replaced. It costs ~3 GB resident instead of ~1.5 GB and a full rebuild.
+`e5-base` keeps its `ModelSpec`, and `KnowledgeStore.bind` refuses an index built by the
+other model — so going back is a rebuild, not a silent regression.
 
 **None of this reaches the gate.** 61% against 80%, with 7 of 25 Russian cases never
 entering the candidate set at all — a shape no reranker can fix. That is now

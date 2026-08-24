@@ -222,11 +222,14 @@ class TestKnowledgeHealth:
 
         from oracle.rag.chunking import Chunk
         from oracle.rag.collections import ContentKind, Document
-        from oracle.rag.embedding import E5_BASE
+        from oracle.rag.embedding import DEFAULT
         from oracle.rag.store import KnowledgeStore
 
-        store = KnowledgeStore(settings.data_dir / "knowledge.db", E5_BASE.out_dim)
-        store.bind(E5_BASE.name, E5_BASE.out_dim)
+        # `DEFAULT`, not a named spec: this asserts that an index built by the model
+        # this build ships reads back as healthy, and it has to keep doing that across
+        # a model switch.
+        store = KnowledgeStore(settings.data_dir / "knowledge.db", DEFAULT.out_dim)
+        store.bind(DEFAULT.name, DEFAULT.out_dim)
         doc = Document(
             collection="projects",
             project="Asterim",
@@ -240,7 +243,7 @@ class TestKnowledgeHealth:
         store.put(
             doc,
             [chunk],
-            np.zeros((1, E5_BASE.out_dim), dtype=np.float32),
+            np.zeros((1, DEFAULT.out_dim), dtype=np.float32),
             content_hash="h",
             provenance="local_owned",
             indexed_at="2026-08-22T00:00:00Z",
@@ -261,11 +264,11 @@ class TestKnowledgeHealth:
     ) -> None:
         """Not stale — wrong. Querying it returns confident nonsense, so the health view
         has to say so rather than reporting a healthy row count."""
-        from oracle.rag.embedding import E5_BASE
+        from oracle.rag.embedding import DEFAULT
         from oracle.rag.store import KnowledgeStore
 
-        store = KnowledgeStore(settings.data_dir / "knowledge.db", E5_BASE.out_dim)
-        store.bind("some-other-model", E5_BASE.out_dim)
+        store = KnowledgeStore(settings.data_dir / "knowledge.db", DEFAULT.out_dim)
+        store.bind("some-other-model", DEFAULT.out_dim)
         store.close()
 
         body = client.get("/api/v1/knowledge").json()

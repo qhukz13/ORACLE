@@ -176,7 +176,7 @@ CREATE TABLE chunks (
 
 -- dense: brute-force KNN is correct at this corpus size (RAG.md §1)
 CREATE VIRTUAL TABLE chunk_vectors USING vec0(
-  chunk_id TEXT PRIMARY KEY, embedding FLOAT[768]
+  chunk_id TEXT PRIMARY KEY, embedding FLOAT[1024]   -- the model's dim; 768 before 2026-08-24
 );
 
 -- lexical: BM25 over the same chunks, same file, same transaction
@@ -215,11 +215,21 @@ two things it genuinely cannot do are why the schema above has an `ident` column
 **Vector dimension is fixed at index-build time.** Changing the embedding model requires a full
 reindex, and that is exactly why the index is disposable.
 
-**A full reindex takes about three quarters of an hour, not "minutes".** Measured end to end on
-2026-08-22: 1,330 documents, 10,287 chunks, 9,385 of them embedded by `multilingual-e5-base` on 24
-Haswell threads, **42.8 minutes**, producing an 85 MB file. See [OQ-02](OPEN_QUESTIONS.md#oq-02). Disposability is
-still real, but it costs an hour of background CPU, which makes the incremental path load-bearing
-rather than a convenience.
+**A full reindex costs hours on a cold cache, not "minutes".** The corpus as of 2026-08-24 is
+1,414 documents and 14,586 chunks, embedded by `bge-m3` (1024d) on 24 Haswell threads into a
+**140 MB** file. What that costs depends entirely on the embedding cache, which is keyed by
+`sha256(text)` and lives outside this database:
+
+| | measured |
+|---|---|
+| Cold — first build after the 2026-08-24 model switch | **~3 h** (extrapolated at 1.37 chunks/s) |
+| Warm — index deleted, chunking unchanged | **3.6 min** (100% cache hit, 53 chunks re-embedded) |
+| Incremental, nothing changed | seconds |
+
+The `e5-base` equivalents were 42.8 min cold and an 85 MB file; the model switch trades roughly
+3x the cold build and 65% more disk for the recall in [OQ-02](OPEN_QUESTIONS.md#oq-02).
+Disposability is still real, but a cold rebuild costs an afternoon of background CPU, which makes
+the incremental path load-bearing rather than a convenience — see [OQ-17](OPEN_QUESTIONS.md#oq-17).
 
 ---
 

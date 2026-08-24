@@ -228,7 +228,7 @@ per model and break the "provider is replaceable" property.
 | **Vector store** | **sqlite-vec** in `knowledge.db` | see below |
 | **Lexical** | SQLite **FTS5** (BM25) | same file, same transaction, no second engine |
 | **Fusion** | Reciprocal Rank Fusion | no tuning knobs, robust; beats dense-only on code and on exact identifiers |
-| **Embeddings** | multilingual-e5-base (768d) via **ONNX Runtime on CPU** | Russian + English; CPU keeps VRAM free |
+| **Embeddings** | bge-m3 (1024d) via **ONNX Runtime on CPU** | Russian + English; CPU keeps VRAM free |
 | **Code structure** | tree-sitter (**built, off by default**) | function/class-level chunks with real symbol names — but measurably worse recall on the current fixture set; see the ledger row |
 | **Watching** | `watchfiles` (Rust notify) | far better Windows behaviour than `watchdog` |
 | **PDF** | `pypdfium2` | Apache/BSD licensing; `PyMuPDF` is AGPL and we avoid that entanglement |
@@ -266,8 +266,8 @@ does not matter, and the GPU staying warm does.
 **RESOLVED 2026-08-24** — [OQ-02](OPEN_QUESTIONS.md#oq-02): `bge-m3` wins on the full corpus, 61%
 recall@5 against `multilingual-e5-base`'s 55% and 44% against 36% on Russian questions — but only
 once the fusion gate stopped admitting BM25 on every query. Measured with the old gate it *lost*, at
-53%. `DEFAULT` is still `e5-base`; the switch is one line and a ~2.5 h cold rebuild, and doubles
-resident memory to ~3 GB. Matryoshka truncation to 384d was evaluated and **rejected** — it costs 9
+53%. **`DEFAULT` is `bge-m3` as of 2026-08-24**, at ~3 GB resident instead of ~1.5 GB; `e5-base`
+keeps its `ModelSpec` one line away. Matryoshka truncation to 384d was evaluated and **rejected** — it costs 9
 points here, not "little", because E5 is not Matryoshka-trained
 ([log](../logs/development/2026-08-24-oq02-bge-m3.md)).
 

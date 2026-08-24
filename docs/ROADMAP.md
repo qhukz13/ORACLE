@@ -374,8 +374,10 @@ is the prerequisite for context assembly good enough to delegate well (P6).
    tree-sitter is built and **off** — better symbol names, measurably worse recall
    ([log](../logs/development/2026-08-22-treesitter-chunking.md)).
 4. Chunking strategies per type; embeddings via ONNX on CPU
-   ([OQ-02](OPEN_QUESTIONS.md#oq-02) — **resolved 2026-08-22**: `multilingual-e5-base` at 768d,
-   not truncated and not quantised).
+   ([OQ-02](OPEN_QUESTIONS.md#oq-02) — **resolved 2026-08-24**: `bge-m3` at 1024d, not truncated
+   and not quantised, and only ahead of `multilingual-e5-base` once the fusion gate stopped
+   admitting BM25 on every query. Recall still misses this phase's gate — see
+   [OQ-18](OPEN_QUESTIONS.md#oq-18)).
 5. Hybrid retrieval: dense + BM25 + RRF; metadata pre-filtering by project/collection.
 6. Incremental indexing: content hash + mtime; `watchfiles` with debounce; respect `.gitignore` and `.oracleignore`.
 7. `know.*` tools; citations rendered in the UI.

@@ -60,8 +60,10 @@ class ModelSpec:
         return self.query_prefix if role == QUERY else self.passage_prefix
 
 
-#: Chosen by measurement in OQ-02, not by reputation. See
-#: `logs/development/2026-08-22-oq02-embeddings.md` for the numbers and the runners-up.
+#: Shipped from 2026-08-22 to 2026-08-24 and kept as a real option, not a rejected one:
+#: it is a third of the indexing cost and half the resident memory, and on English
+#: questions it scores what `bge-m3` scores. It loses on the cross-language column this
+#: project is built around — 36% against 44% — which is what decided OQ-02.
 E5_BASE = ModelSpec(
     name="multilingual-e5-base",
     path=Path("D:/ORACLE/models/embeddings/e5-base/onnx"),
@@ -80,11 +82,18 @@ E5_SMALL = ModelSpec(
     passage_prefix="passage: ",
 )
 
-#: The runner-up, kept because it is a real option rather than a rejected one.
-#: Measured *better* than e5-base — 95% vs 90% hybrid recall@5, and 100% vs 75% on the
-#: Russian-question subset — at 2.6x the indexing time (1.0 chunks/s, so ~2.6 h for a
-#: full build) and 2x the resident memory. The overall gap is one fixture out of 21,
-#: which the fixture set cannot resolve, so e5-base ships and this stays one line away.
+#: Chosen by measurement in OQ-02, not by reputation, and only on the second attempt:
+#: `logs/development/2026-08-24-oq02-bge-m3.md` has the numbers. Over the full corpus and
+#: 38 fixtures it scores **61% recall@5 and 44% on Russian questions**, against e5-base's
+#: 55% and 36%. Measured through the *old* fusion gate it lost, 53% — the gate admitted
+#: BM25 on every query, and fusion can only displace a correct dense hit that exists, so
+#: the better dense half was the one being damaged. The gate fix shipped with this switch
+#: and neither is worth much without the other.
+#:
+#: It costs ~2.5 h for a cold build (1.37 chunks/s) and ~3 GB resident against ~1.5 GB.
+#: The cold build is paid once per model — see OQ-17 — and p95 is 332 ms, inside the
+#: 400 ms budget.
+#:
 #: BGE-M3 uses CLS pooling and no prefixes; both differ from E5 and both matter.
 #: Switching means rebuilding: `KnowledgeStore.bind` refuses an index built by the other.
 BGE_M3 = ModelSpec(
@@ -95,7 +104,7 @@ BGE_M3 = ModelSpec(
 )
 
 #: What the indexer and the `know.*` tools use. One name to change.
-DEFAULT = E5_BASE
+DEFAULT = BGE_M3
 
 
 def normalise(spec: ModelSpec, vecs: np.ndarray) -> np.ndarray:
