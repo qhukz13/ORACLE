@@ -1,0 +1,63 @@
+{
+  "objective": "taskgraph",
+  "effort": "low",
+  "seconds": 29.99,
+  "usage": {
+    "input_tokens": 52472,
+    "output_tokens": 2360,
+    "thinking_tokens": 0,
+    "total_tokens": 54832
+  },
+  "structured_output": {
+    "objective": "Implement ORACLE's durable task graph (Phase 7): tasks table with status vocabulary, ready-set scheduling over DAG, cycle path detection, and crash recovery.",
+    "risks": [],
+    "summary": "Generated execution plan for ORACLE Phase 7 durable task graph.",
+    "tasks": [
+      {
+        "acceptance": [
+          "python -m pytest tests/test_db_schema.py passes"
+        ],
+        "expected_outcome": "diff",
+        "id": "A",
+        "objective": "Define TaskStatus enum and tasks table schema with aiosqlite",
+        "role": "coder"
+      },
+      {
+        "acceptance": [
+          "python -m pytest tests/test_dag_validation.py passes"
+        ],
+        "expected_outcome": "diff",
+        "id": "B",
+        "objective": "Implement DAG validation and cycle path detection",
+        "role": "coder"
+      },
+      {
+        "acceptance": [
+          "python -m pytest tests/test_scheduler.py passes"
+        ],
+        "expected_outcome": "diff",
+        "id": "C",
+        "objective": "Implement ready-set task graph scheduler",
+        "role": "coder"
+      },
+      {
+        "acceptance": [
+          "python -m pytest tests/test_crash_recovery.py passes"
+        ],
+        "expected_outcome": "diff",
+        "id": "D",
+        "objective": "Implement crash recovery without auto-restarting interrupted agents",
+        "role": "coder"
+      },
+      {
+        "acceptance": [
+          "python -m pytest tests/test_task_graph_integration.py passes"
+        ],
+        "expected_outcome": "diff",
+        "id": "E",
+        "objective": "Integration test suite for Phase 7 durable task graph",
+        "role": "tester"
+      }
+    ]
+  }
+}
