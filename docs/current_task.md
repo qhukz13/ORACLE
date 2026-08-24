@@ -70,7 +70,10 @@ politer ones. A delegation that is never approved costs a packet render and noth
    independent tests → report. The test asserts the *sequence*, because the ordering is the design:
    nothing egresses before the approval, and the evidence at the end is ORACLE's, not the
    delegate's.
-5. **One supervised live run, closing two open items.** The real CLI, the real MCP bridge, a real
+5. ~~**One supervised live run, closing two open items.**~~ **DONE 2026-08-24** — all five checks
+   green on the third attempt; the two failures were the design working (a token minted outside the
+   daemon is a bad signature; the audit log lives under `log_dir`). Recorded as
+   `tests/fixtures/mcp/live-verify.jsonl`; INTEGRATIONS.md §8 annotated. As designed: The real CLI, the real MCP bridge, a real
    worktree: prove the delegate can call `mcp__oracle__*` back into the daemon and that the call
    lands in the audit log. Record the exchange into `tests/fixtures/mcp/` so the transport contract
    is pinned by evidence like the vendor stream is. Payload previewed before it is sent.
@@ -100,8 +103,8 @@ politer ones. A delegation that is never approved costs a packet render and noth
       the `task.*` stream continues.
 - [x] The reference scenario passes as one test, asserting the order — in particular that no egress
       precedes the approval.
-- [ ] One live run: the delegate calls back through MCP, the call is in the audit log, and the
-      exchange is recorded as a fixture.
+- [x] One live run: the delegate calls back through MCP, the call is in the audit log, and the
+      exchange is recorded as a fixture — 2026-08-24, five checks green.
 - [x] The palette can start a delegation; vitest covers the entry point.
 - [x] The gate green including the security suite — `check: OK` 2026-08-24.
 - [x] *(Carry-over)* bge-m3 recorded in OQ-02 2026-08-24, decision to the owner: the numbers

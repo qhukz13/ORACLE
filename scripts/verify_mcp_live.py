@@ -34,7 +34,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from oracle.config import Settings
-from oracle.mcp.tokens import TokenStore
 from oracle.policy.audit import AuditLog
 
 G, R, Y, B, D, X = "\033[32m", "\033[31m", "\033[33m", "\033[34m", "\033[2m", "\033[0m"
@@ -68,22 +67,7 @@ async def run(dry_run: bool) -> int:
     workspace = Path(tempfile.mkdtemp(prefix="oracle-mcp-live-"))
     (workspace / "note.txt").write_text(SECRET_LINE, encoding="utf-8")
 
-    tokens = TokenStore()
-    token = tokens.mint("live-verify", workspace)
-    config = {
-        "mcpServers": {
-            "oracle": {
-                "command": sys.executable,
-                "args": ["-m", "oracle.mcp"],
-                "env": {
-                    "ORACLE_MCP_URL": f"http://127.0.0.1:{port}",
-                    "ORACLE_MCP_TOKEN": token,
-                },
-            }
-        }
-    }
     config_path = workspace / "mcp.json"
-    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
     cmd = [
         "claude",
@@ -116,8 +100,28 @@ async def run(dry_run: bool) -> int:
 
     # A daemon of this script's own, on its own port and its own data dir: the point is
     # to prove the path, not to disturb whatever the owner has running.
-    server = await start_daemon(settings, port, workspace)
+    server, app = await start_daemon(settings, port, workspace)
     try:
+        # Minted from the *daemon's* TokenStore, after it starts: the HMAC key is
+        # process-lifetime and per-store ("one per daemon"), so a token minted by a
+        # standalone store is, by design, a bad signature to this daemon. The first
+        # live run failed exactly there.
+        from oracle.api.app import state_of
+
+        token = state_of(app).tokens.mint("live-verify", workspace)
+        config = {
+            "mcpServers": {
+                "oracle": {
+                    "command": sys.executable,
+                    "args": ["-m", "oracle.mcp"],
+                    "env": {
+                        "ORACLE_MCP_URL": f"http://127.0.0.1:{port}",
+                        "ORACLE_MCP_TOKEN": token,
+                    },
+                }
+            }
+        }
+        config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(workspace),
@@ -144,7 +148,7 @@ async def run(dry_run: bool) -> int:
         for c in (e.get("message") or {}).get("content", [])
         if c.get("type") == "tool_use"
     ]
-    audit_path = AuditLog(workspace / "data" / "audit.jsonl").path
+    audit_path = AuditLog(workspace / "logs" / "audit" / "audit.jsonl").path
     audited = (
         (await asyncio.to_thread(audit_path.read_text, encoding="utf-8")).splitlines()
         if await asyncio.to_thread(audit_path.exists)
@@ -178,7 +182,7 @@ async def run(dry_run: bool) -> int:
     return 0 if all(ok for _, ok, _ in checks) else 1
 
 
-async def start_daemon(settings: Settings, port: int, workspace: Path) -> object:
+async def start_daemon(settings: Settings, port: int, workspace: Path) -> tuple[object, object]:
     """A throwaway daemon whose policy scopes only the verification workspace."""
     import uvicorn
 
@@ -203,6 +207,10 @@ async def start_daemon(settings: Settings, port: int, workspace: Path) -> object
             "prewarm_toolhost": False,
             "projects_root": workspace,
             "data_dir": workspace / "data",
+            # Its own log_dir, because that is where the audit log lives
+            # (settings.audit_path) — without this the run audits into the owner's
+            # real logs, and the check below reads an empty file.
+            "log_dir": workspace / "logs",
         }
     )
     app = create_app(local)
@@ -213,7 +221,7 @@ async def start_daemon(settings: Settings, port: int, workspace: Path) -> object
         if server.started:
             break
         await asyncio.sleep(0.1)
-    return server
+    return server, app
 
 
 def main() -> int:

@@ -412,6 +412,27 @@ and what ORACLE already ran — so the delegate does not spend its first turns r
 explicit route ("ask Claude to …") is recognised by the **pre-router** in ~5 ms rather than by the
 model, and a project the user did not name is asked about rather than guessed.
 
+### The live run (2026-08-24)
+
+The one claim no offline test can make — §4's "the delegate calls `mcp__oracle__fs_read` instead of
+shelling out, and the call lands in ORACLE's audit log" — was proven live with
+`scripts/verify_mcp_live.py`: real `claude` CLI under the machine's subscription login, real
+`python -m oracle.mcp` bridge, a throwaway daemon on loopback, payload previewed and approved before
+egress. The delegate loaded the server, called the ORACLE tool rather than its own Read, answered
+correctly, and the call is in the audit log. The exchange is pinned as
+`tests/fixtures/mcp/live-verify.jsonl`.
+
+It took three attempts, and both failures were the design working:
+
+- **A token minted outside the daemon is a bad signature.** The script first minted from its own
+  `TokenStore`; the daemon verified with its own process-lifetime key and refused
+  (`mcp.tools_rejected: bad signature`), exactly as "one per daemon" intends. The script now mints
+  from the running daemon's store — which is also the only way a real delegation ever gets one.
+- **The audit log lives under `log_dir`, not `data_dir`.** The throwaway daemon inherited the real
+  `log_dir`, so its one audit entry landed in the owner's live audit log (harmless — a genuine,
+  gated `fs.read`) while the check read an empty file. The verification daemon now scopes `log_dir`
+  into its workspace like everything else it touches.
+
 ---
 
 ## 9. Adding a new agent

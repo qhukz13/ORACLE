@@ -3,87 +3,59 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** OQ-02 carry-over — the `bge-m3` run. **Done.** Phase 6's own remaining item is still
-**one supervised live run**, untouched: it needs the owner present.
-**Status:** OQ-02 resolved, a retrieval bug found and fixed, [OQ-18](OPEN_QUESTIONS.md#oq-18) opened.
-Gate green.
+**Task:** P6-T4 — the capstone. **Done, all acceptance criteria.** Phase 6 has one unbuilt task left
+(the Antigravity adapter, ROADMAP task 7) and one aspirational DoD clause ("daily use") that only
+time can check off.
+**Status:** The live MCP run is green — the delegate called back through ORACLE's gate and the call
+is in the audit log. `bge-m3` shipped as `DEFAULT`. Gate green.
 **Date:** 2026-08-24
 
 ---
 
 ## What happened
 
-The scheduled `bge-m3` run finally produced artefacts, and the answer was the opposite of the
-expected one twice over.
+**The owner took the OQ-02 switch.** `DEFAULT = BGE_M3` shipped with the docs updated to the
+measured costs: 1024d, 140 MB index, ~3 h cold build, 3.6 min warm from the embedding cache, ~3 GB
+resident. The health endpoint and its tests now read `DEFAULT` instead of a hardcoded spec, so a
+model switch can never make the health view lie. `e5-base` keeps its `ModelSpec` one line away, and
+`KnowledgeStore.bind` still refuses an index built by the other model.
 
-**First reading: `bge-m3` loses.** Full corpus, 38 fixtures, shipped retrieval code — 53% recall@5
-against `e5-base`'s 55%, and 32% against 36% on the cross-language column OQ-02 exists to decide. At
-2.3x the build time and 2x the memory. It also failed the latency gate at p95 401 ms.
+**The live run closed P6-T4.** One supervised egress, payload previewed and approved, against the
+real `claude` CLI and the real `python -m oracle.mcp` bridge, with a throwaway daemon on loopback.
+All five checks green: server loaded, tool offered, delegate used `mcp__oracle__fs_read` instead of
+its own Read, answer correct, call in the audit log. The exchange is pinned as
+`tests/fixtures/mcp/live-verify.jsonl`; [INTEGRATIONS.md §8](INTEGRATIONS.md#8-reference-scenario)
+records how it actually went.
 
-**Second reading: the gate was scoring it.** `discriminating_terms` — which decides whether BM25's
-thirty results join the fusion — was admitting them on **38 questions out of 38**, including all 25
-Russian ones, for which BM25 returned the corpus's one Russian-documented project whatever the
-question was about. Fusion can only displace a correct dense hit *that exists*, so the damage scaled
-with how good the dense half was: twelve points off `bge-m3`, nothing off `e5-base`.
+It took three attempts, and both failures were findings, not flakes:
 
-With the gate fixed:
+1. **`mcp.tools_rejected: bad signature`** — the script minted its capability token from its own
+   `TokenStore` while the daemon verified with its own process-lifetime key. That refusal is the
+   design ("one per daemon", never persisted); the script now mints from the running daemon's store,
+   which is the only way a real delegation gets a token anyway.
+2. **`0 entries` in the audit check** — the audit log lives under `settings.log_dir`
+   (`log_dir/audit/audit.jsonl`), not `data_dir`, and the throwaway daemon had inherited the real
+   one. Its single entry — a genuine, gated `fs.read` — landed in the owner's live audit log
+   (harmless, left in place; the log is hash-chained). The verification daemon now scopes `log_dir`
+   into its workspace like everything else.
 
-| embedding | fusion gate | recall@5 | crosslang | p95 |
-|---|---|---:|---:|---:|
-| `e5-base` | as shipped | 55% | 36% | 271 ms |
-| `e5-base` | fixed | 55% | 36% | 260 ms |
-| `bge-m3` | as shipped | 53% | 32% | 401 ms (fails) |
-| **`bge-m3`** | **fixed** | **61%** | **44%** | 332 ms |
+## Where Phase 6 stands
 
-No configuration regresses; `bge-m3` gains eight points on the column that matters, and the latency
-failure goes away because BM25 stops running on every query.
+Every P6-T4 acceptance criterion is checked. Against the phase's Definition of Done in ROADMAP.md:
 
-## What changed in the design
+- **"Claude adapter in daily use"** — cannot be true the day the capstone lands; it is now
+  *usable* daily (palette, explicit route, escalation), which is what the phase could deliver.
+- **"Fallback proven by disabling the CLI"** — done in P6-T3.
+- **"Antigravity either working or explicitly documented as blocked"** — neither: `agy` is verified
+  and Supported (OQ-05 resolved), but ROADMAP task 7's `AntigravityAdapter` is not built. This is
+  the phase's remaining work.
 
-- **The fusion policy and the embedding choice are not independent.** RAG.md §5 already recorded
-  that fusion was worth +9 to `e5-base` and −5 to `e5-small` and read it as a curiosity. It is a
-  rule: the stronger the dense retriever, the more an unfiltered lexical list costs. A model
-  comparison run through a leaky gate measures the gate.
-- **The 2026-08-22 denominator fix was the right diagnosis and the wrong remedy.** Scoping Cyrillic
-  terms to the Cyrillic sub-corpus dropped `как` and moved recall not at all — because `если` (4% of
-  the Russian) survives, and the genuinely rare Russian words match the wrong project anyway. That
-  null result was then read as "the Russian failures are the embedding", through the same instrument.
-- **Two rules now gate the lexical half**, both chosen off a measured plateau rather than argued:
-  a term must be in the script the corpus is written in (*minority*, not Cyrillic — a Russian corpus
-  gates out Latin), and the survivors must cover 40% of the question's answerable terms. A bare
-  `PairingService` lookup is 100% of its question and still fuses.
-- **One test assertion reversed on evidence.** `test_a_rare_russian_word_still_counts` asserted the
-  opposite of what ships; its docstring now records what it used to claim and why the measurement
-  refuted the premise.
+## What's next — the owner's pick
 
-## The decision waiting for the owner
-
-**`DEFAULT` is still `multilingual-e5-base`.** The evidence favours `bge-m3` — six points overall,
-eight on Russian — and the switch is one line (`DEFAULT = BGE_M3`) plus one rebuild. It costs a
-~2.5 h cold build and takes resident memory from ~1.5 GB to ~3 GB. That is a resource commitment on
-this machine rather than a measurement, so it is left flagged rather than taken.
-
-## What is left
-
-1. **One supervised live run** — unchanged from the last report, and still Phase 6's only open item.
-   `uv run python scripts/verify_mcp_live.py` (`--dry-run` shows the payload and sends nothing).
-   Closes P6-T3 requirement 1 and P6-T4 requirement 5. Needs the owner's go-ahead, like every egress.
-2. **[OQ-18](OPEN_QUESTIONS.md#oq-18), opened by this work.** 61% is nineteen points under the
-   Phase 5 recall gate, and 7 of 25 Russian cases never enter the candidate set at all — a shape no
-   reranker reaches. Two untried levers: query translation, and the ~20% of chunks silently
-   truncated at 512 tokens. **Count the truncation first** — it is free and it changes what the
-   other experiment means.
-3. `AntigravityAdapter` — still the deliberate gap in Phase 6's Definition of Done, to close or to
-   record in ROADMAP.md as out of scope.
-
-## Standing state
-
-Branch `phase6-integration`. Gate green: ruff, mypy, tsc, pytest, security, vitest — `check: OK`.
-Both measurement indexes are on disk (`D:/tmp/bge.db`, `D:/tmp/e5.db`) if anyone wants to re-run a
-column; `knowledge.db` itself was never touched.
-
-Logs: [OQ-02 / bge-m3](../logs/development/2026-08-24-oq02-bge-m3.md) ·
-[capstone](../logs/development/2026-08-24-p6t4-capstone.md) ·
-[MCP server](../logs/development/2026-08-24-p6t3-mcp-server.md) ·
-[egress approval](../logs/development/2026-08-24-p6t2-egress-approval.md) ·
-[the denominator, superseded](../logs/development/2026-08-22-fusion-denominator.md)
+1. **P6-T5, the Antigravity adapter** — finishes Phase 6's task list against an already-verified
+   CLI contract (INTEGRATIONS.md §5).
+2. **[OQ-18](OPEN_QUESTIONS.md#oq-18)** — best measured recall is 61% against the Phase 5 gate's
+   80%, and 7 of 25 Russian fixtures never enter the candidate set. Blocks the Phase 5 gate, and
+   context quality is what delegation quality rests on.
+3. **P7-T1, Pipelines** — the next phase, if Phase 6 is declared done-enough with the above
+   recorded.
