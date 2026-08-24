@@ -196,7 +196,7 @@ and simply absent from the catalogue. If I want that, I use Explorer.
 | `dev.install_deps` | T2 | later | network + arbitrary postinstall scripts. Not built; `dev.execute` covers it under confirmation |
 | `dev.lint` | T1 | 3 | **built** |
 | `dev.run_script` | — | later | subsumed by detection: `dev.build`/`dev.lint` already run only what `package.json` declares |
-| `dev.docker` | T1–T3 | 7 | `ps`/`logs` T0–T1, `run`/`build` T2, `prune`/`rmi` T3 |
+| `dev.docker` | T1–T3 | 10 | `ps`/`logs` T0–T1, `run`/`build` T2, `prune`/`rmi` T3 |
 | `dev.execute` | **T2** | 3 | **built.** The gated escape hatch — allowlisted program + argv, never a shell string. The only tool whose argv the model chooses, and therefore the only one the subcommand rules inspect |
 
 ### `term.*` — terminal
@@ -232,13 +232,18 @@ Splitting `build_packet` from `delegate` is deliberate: it makes "show me what y
 a free, safe, always-available action, and it is what makes the egress preview meaningful rather
 than a rubber stamp.
 
+**Phase 8 note:** a planner invocation is priced under `ai.delegate` too — same policy entry,
+same egress preview, different role in the packet. Planning does not get a cheaper gate for being
+"just planning"; it is an egress of project context like any other
+([PLANNER.md](PLANNER.md), [ADR-0021](DECISIONS.md#adr-0021--planner-output-is-untrusted-input)).
+
 ### `pipe.*` — pipelines
 
 | Tool | Tier | Phase | Notes |
 |---|---|---|---|
-| `pipe.list` / `pipe.describe` | T0 | 7 | |
-| `pipe.run` | inherited | 7 | **tier = max tier of its steps**, computed at validation |
-| `pipe.cancel` | T1 | 7 | |
+| `pipe.list` / `pipe.describe` | T0 | 10 | |
+| `pipe.run` | inherited | 10 | **tier = max tier of its steps**, computed at validation |
+| `pipe.cancel` | T1 | 10 | |
 
 ### `oracle.*` — self
 

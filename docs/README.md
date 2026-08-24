@@ -9,7 +9,7 @@ Read in this order. It takes about 30 minutes and is worth it.
 1. **[../README.md](../README.md)** — what ORACLE is, the five rules, the target hardware.
 2. **[ARCHITECTURE.md](ARCHITECTURE.md)** — layers, process model, control flow, degradation. The map.
 3. **[current_task.md](current_task.md)** — **your actual assignment.**
-4. **[DECISIONS.md](DECISIONS.md)** — 16 ADRs. Check before choosing any technology; most choices are made.
+4. **[DECISIONS.md](DECISIONS.md)** — 23 ADRs. Check before choosing any technology; most choices are made.
 5. **[OPEN_QUESTIONS.md](OPEN_QUESTIONS.md)** — what is *not* known. Check before assuming.
 6. **[ROADMAP.md](ROADMAP.md)** — the phase your task belongs to, and its Definition of Done.
 
@@ -36,7 +36,10 @@ Then read whichever subsystem doc your task touches.
 ### Subsystems
 | Doc | Answers |
 |---|---|
-| [AGENT_RUNTIME.md](AGENT_RUNTIME.md) | The turn pipeline, planning, context budget, cancellation |
+| [AGENT_RUNTIME.md](AGENT_RUNTIME.md) | The turn pipeline, context budget, cancellation |
+| [ORCHESTRATION.md](ORCHESTRATION.md) | The supervisor, the task graph, scheduling, failure, replanning |
+| [PLANNER.md](PLANNER.md) | Structured plans, TaskSpecs, roles, agent selection, fallbacks |
+| [ASTERIM_REUSE.md](ASTERIM_REUSE.md) | What Asterim already solved, and what ORACLE ports from it |
 | [TOOLS.md](TOOLS.md) | The tool catalogue, contracts, and how to add one |
 | [SECURITY.md](SECURITY.md) | Threat model, capabilities, scopes, risk tiers, taint, audit |
 | [RAG.md](RAG.md) | What gets indexed, how it's chunked, how retrieval works |
@@ -58,6 +61,8 @@ Then read whichever subsystem doc your task touches.
 | Why not Postgres/Qdrant? | [ADR-0006](DECISIONS.md#adr-0006--sqlite-only-storage-two-files-sqlite-vec--fts5) |
 | Which model, and will it fit? | [TECH_STACK.md §3](TECH_STACK.md#3-local-llm) · [OQ-01](OPEN_QUESTIONS.md#oq-01) |
 | How does delegation to Claude work? | [INTEGRATIONS.md §3](INTEGRATIONS.md#3-claude-code-cli--supported) |
+| What is a task / task graph / plan? | [ORCHESTRATION.md](ORCHESTRATION.md) · [PLANNER.md](PLANNER.md) |
+| Who plans, who supervises, who executes? | [ARCHITECTURE.md §1](ARCHITECTURE.md#1-what-oracle-is) · [ADR-0019](DECISIONS.md#adr-0019--the-supervisor-completes-the-orchestrator) |
 | What happens when Ollama is down? | [ARCHITECTURE.md §8](ARCHITECTURE.md#8-degradation--what-happens-when-a-piece-is-missing) |
 | How do I add a tool? | [TOOLS.md §5](TOOLS.md#5-adding-a-tool--the-checklist) |
 | What is NOT being built yet? | [ROADMAP.md](ROADMAP.md#the-mvp-stated-once) · [ADR-0016](DECISIONS.md#adr-0016--mvp-excludes-the-interesting-parts) |

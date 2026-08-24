@@ -31,7 +31,7 @@ no regression safety at all.
 
 ## 3. Security tests are a merge gate
 
-From [Phase 2](ROADMAP.md#phase-2--tool-system--policy-gate--mvp) onward, `tests/security/` must pass
+From Phase 2 (built 2026-08-21; see the foundation table in [ROADMAP.md](ROADMAP.md)) onward, `tests/security/` must pass
 before anything merges. It is not a suite that grows when convenient; every new surface adds a case.
 
 ```
@@ -124,7 +124,7 @@ Stated so nobody assumes coverage that doesn't exist:
 - Actual model *quality* of prose answers — judged by use, not by a metric.
 - The real Claude/Antigravity CLIs in CI — costly, non-deterministic, and rate-limited. Contract tests
   against recorded fixtures cover the integration; **the fixtures can go stale**, which is why
-  quarterly re-verification is a standing item ([ROADMAP P11](ROADMAP.md#phase-11--hardening--continuous)).
+  quarterly re-verification is a standing item ([ROADMAP P14](ROADMAP.md#phase-14--hardening--continuous)).
 - Voice accuracy — manual.
 - Visual design — visual regression catches layout breakage, not whether it looks good.
 

@@ -1,5 +1,12 @@
 # ORACLE — Memory
 
+> Status: **design — not yet implemented** (`src/oracle/memory/` does not exist; audited
+> 2026-08-24). Scheduled as **Phase 9**, with one early slice: the `Attempt` record (§4) starts
+> being *written* in Phase 7, when task completion has somewhere durable to record it — because
+> the Handoff Packet's `ATTEMPTS.md` and the replanning loop
+> ([ORCHESTRATION.md §4](ORCHESTRATION.md#4-failure-and-replanning)) are its consumers and now
+> load-bearing. The design below stands as written.
+
 What ORACLE remembers *about me and about its own work*. Distinct from [RAG.md](RAG.md), which is
 retrieval over documents I wrote. Memory is what ORACLE learned; RAG is what it can look up.
 

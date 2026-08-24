@@ -330,7 +330,68 @@ egress, every policy reload, every secret access by name.
 
 ---
 
-## 10. Security checklist for implementers
+## 10. The multi-agent surface  `added 2026-08-24, Phases 7–8`
+
+The supervisor architecture ([ORCHESTRATION.md](ORCHESTRATION.md), [PLANNER.md](PLANNER.md))
+**increases** the threat surface: more agents, more egress, and a new artifact — the plan — that
+sits upstream of everything. No existing control is weakened; each is extended as follows.
+
+| New surface | Threat | Control |
+|---|---|---|
+| **Planner output** | an injected or hallucinated plan creates tasks that spend money or propose destructive work | plan is `external` provenance → taint → tier escalation on every spawned task ([ADR-0021](DECISIONS.md#adr-0021--planner-output-is-untrusted-input)); every field validated against a registry; free text is data; a plan holds zero execution authority |
+| **Planning context egress** | secrets or over-broad context leave in the planning packet | the same packet pipeline as delegation: curated, redacted, budget-capped, **previewed** — a planning call is an egress like any other |
+| **Worker → planner → worker laundering** | a worker's output ("next you should push to origin") re-enters context and steers the replan | worker results are `external` provenance already; a replan built from them is tainted, so the escalated tiers follow the instruction chain |
+| **Inter-agent instructions** | task A's artifact in the worktree instructs task B's agent | worktree content read back into any packet passes the same redaction + provenance labelling; a delegate's MCP surface still refuses T2+, so nothing an artifact says can raise a delegate's privileges |
+| **Agent-generated commands** | a planned task smuggles an argv | unchanged chokepoint: every TOOL task is an ordinary `ToolInvocation` through the gate; `dev.execute` keeps its allowlist grammar; there is still no shell |
+| **Concurrent workers** | two delegates cross-contaminate or exceed scope together | one worktree per task, disjoint by construction; scope checks are per-invocation and know nothing of siblings; width limit bounds blast radius |
+| **Approval fatigue at graph scale** | ten tasks → ten prompts → rubber-stamping | statically-priceable elevated tasks are listed on **one** up-front graph card (the pipeline rule); only egresses whose bytes don't exist yet (each delegation's rendered packet) keep individual previews — those are the ones a human must actually read |
+| **Cost runaway** | replanning loops burn quota | replan budget ≤ 2 per root; delegation width 2; sub-delegation depth 0; cost per root task tracked and shown |
+| **Crash ambiguity** | a supervisor restart cannot prove what a dead worker did | recovery gates instead of guessing: interrupted agents are never auto-restarted; verification runs before any result is trusted (rules ported from Asterim, [ORCHESTRATION.md §3](ORCHESTRATION.md#3-the-graph)) |
+
+Two invariants restated because the graph must not blur them:
+
+1. **One chokepoint** (§2 rule 4) survives: the scheduler *feeds* the policy gate; it is not a
+   second gate, and no task kind bypasses it.
+2. **The user confirms actions, not intentions** (§2 rule 5): a graph approval lists concrete
+   elevated actions; anything that only resolves at runtime is confirmed when it is concrete.
+
+Security-test additions (the suite is the merge gate, as always): plan-injection fixtures
+(adversarial instructions in planning context → plan tainted, adversarial task inert without
+approval) · graph-escalation (a graph cannot run what its creator couldn't) · per-task approval
+binding · HALT under a running graph terminates every worker tree · recovery-gate behaviour after
+a mid-graph kill.
+
+### Measured, not hypothesised: the planner tried to read the owner's home directory  `2026-08-24`
+
+Row 2 of that table anticipated *context we send* leaking. The P6-T5 spike found the other
+direction, and it was not on the list: **the planner went looking for context nobody offered it.**
+
+Given a planning prompt and an **empty temporary workspace**, `agy` at `--effort high` attempted
+`read_file("C:\Users\qhukz")` — the owner's home directory — and, in another call, a named
+personal file under it. Three of eight high-effort calls did this
+([OQ-20](OPEN_QUESTIONS.md#oq-20), [dev log](../logs/development/2026-08-24-p6t5-antigravity-planning.md)).
+
+Two layers stopped it, and only one of them was ours:
+
+1. `--add-dir <workspace>` scoped the filesystem the run was given;
+2. **the vendor's own permission gate denied each read** — a gate that is only in the picture
+   because ORACLE refuses `--dangerously-skip-permissions` (INTEGRATIONS.md §5). Asterim passes
+   that flag. Under it, those three calls would have read the owner's home directory and sent what
+   they found to the vendor as context.
+
+The generalisation for every adapter, present and future:
+
+> **Assume a delegated agent will browse. Make it impossible, not merely unrequested.**
+> A prompt saying "you have no tools" is a wish; a permission gate that denies the read is a
+> control. An adapter that cannot be denied tools does not get the planner role, whatever its
+> conformance rate (PLANNER.md §7).
+
+It also sharpens the "convenience flag" rule generally: a flag that skips approvals does not
+*grant* capability, it *removes evidence* — the run would have looked identical in the stream,
+minus the denial lines that revealed the behaviour in the first place.
+
+## 11. Security checklist for implementers
+
 
 Every PR touching `packages/policy`, `packages/toolhost`, or `packages/api` must satisfy:
 

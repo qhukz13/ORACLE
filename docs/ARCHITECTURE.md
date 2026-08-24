@@ -1,20 +1,26 @@
 # ORACLE — Architecture
 
-> Status: **design**, no implementation. Decisions here are binding unless superseded by a new ADR
-> in [DECISIONS.md](DECISIONS.md).
+> Status: **built through Phase 6** (verified against source 2026-08-24, ~16.5k LOC, 558 Python
+> tests); the supervisor arc ([ORCHESTRATION.md](ORCHESTRATION.md), [PLANNER.md](PLANNER.md)) is
+> design. Decisions here are binding unless superseded by a new ADR in [DECISIONS.md](DECISIONS.md).
 
 ## 1. What ORACLE is
 
-A **local orchestrator**. It receives intent, decides who should do the work, assembles the context
-that worker needs, enforces what that worker is allowed to touch, and reports the result.
+A **local supervisor of agents** — an operating runtime, not a chatbot with tools. It receives
+intent, gathers context, maintains task state, decides who should do the work, enforces what that
+worker is allowed to touch, verifies what came back, and reports with evidence.
 
-It is explicitly *not* a large model with a shell. The intelligence is distributed:
+It is explicitly *not* a large model with a shell, and it is not required to be the smartest model
+in the system. The intelligence is distributed
+([ADR-0001](DECISIONS.md#adr-0001--orchestrator-not-a-monolithic-agent),
+[ADR-0019](DECISIONS.md#adr-0019--the-supervisor-completes-the-orchestrator)):
 
 | Concern | Handled by | Why |
 |---|---|---|
-| Intent understanding, routing, short answers | small local LLM (~2B) | fast, private, free, good enough |
-| Deliberate multi-step planning | mid local LLM (~4B) or delegation | rarely needed, expensive |
-| Deep code reasoning, large refactors | Claude Code / Antigravity | genuinely better at it |
+| Orchestration, state, scheduling, permissions, verification | **deterministic Python** | an LLM in the control loop makes every guarantee a claim about a model |
+| Intent understanding, routing, short answers, summaries | small local LLM (0.8B, measured) | fast, private, free, reliable *as a classifier* |
+| Plan authorship: decomposition, task specs, review | **planner role** — Antigravity by default, with a fallback ladder | genuinely better at it; returns validated data, never executes ([PLANNER.md](PLANNER.md)) |
+| Deep code reasoning, implementation, debugging | Claude Code (worker role) | genuinely better at it |
 | Deterministic work (git, tests, search, launch) | plain code | an LLM adds latency and error, nothing else |
 
 **The most common correct action is not to call the LLM at all.** Slash commands, palette actions,
@@ -61,7 +67,7 @@ Written down so scope creep is a visible violation, not a drift.
 ```
 
 **All four clients are peers.** None has a privileged path. This is the single most important
-structural decision in the project: it means adding voice (Phase 10) or mobile (Phase 8) requires
+structural decision in the project: it means adding voice (Phase 13) or mobile (Phase 12) requires
 *zero* changes to the agent core, and it means the desktop shell can be replaced or dropped without
 losing functionality. See [ADR-0007](DECISIONS.md#adr-0007--clients-are-peers-of-one-local-api).
 
@@ -145,11 +151,13 @@ The layering from the brief was mostly right. Two changes:
 │ L2  API + Event       REST for state, WS for stream, auth,     │
 │                       resumable event feed                     │
 ├────────────────────────────────────────────────────────────────┤
-│ L3  Agent Runtime     sessions, turns, tasks, cancellation,    │
+│ L3  Agent Runtime     sessions, turns, cancellation,           │
 │                       state machine, event sourcing            │
 ├────────────────────────────────────────────────────────────────┤
-│ L4  Router + Planner  deterministic pre-router → intent →      │
-│                       bounded plan → step execution → critic   │
+│ L4  Router + Supervisor  pre-router → intent → single tool     │
+│                       │  OR: task graph — plan (delegated) →   │
+│                       │  validate → schedule → verify → replan │
+│                       │  (ORCHESTRATION.md · PLANNER.md)       │
 ├────────────────────────────────────────────────────────────────┤
 │ L5  Context Assembly  budget, retrieve, rank, redact, render   │
 ├────────────────────────────────────────────────────────────────┤
@@ -170,7 +178,7 @@ The layering from the brief was mostly right. Two changes:
 | **L1 Presentation** | rendering, local UI state, keyboard | contain business logic, hold credentials, talk to anything but L2 |
 | **L2 API/Event** | authn/authz, serialization, backpressure, resume | make agent decisions, touch the filesystem |
 | **L3 Runtime** | lifecycle, the event log, cancellation, HALT | call a tool directly, format prompts |
-| **L4 Router/Planner** | intent, plan construction & validation, retries | execute anything, assume a tool exists without a registry lookup |
+| **L4 Router/Supervisor** | intent, task graph, plan validation, scheduling, retries, replanning | execute anything, trust a plan, assume a tool exists without a registry lookup |
 | **L5 Context** | token budget, retrieval, redaction, prompt rendering | mutate state, decide permissions |
 | **L6 Capability** | tool contracts, argument validation | perform the side effect |
 | **POLICY GATE** | allow / confirm / confirm_strong / deny + audit | be bypassed, be influenced by retrieved content |
@@ -314,25 +322,33 @@ The last row is the important one. A security control that fails open is not a s
 
 ## 9. Component inventory
 
+> Corrected 2026-08-24 to the **as-built** layout. The original sketch here showed a `packages/`
+> monorepo that was never created; the real code is one flat package, and pretending otherwise
+> misdirected every reader. Entries marked *(planned)* are the supervisor arc.
+
 ```
-packages/
-  core/           runtime, event log, sessions, state machine, cancellation, HALT
-  router/         pre-router, intent, planner, critic, prompt templates
-  context/        budget manager, retrieval orchestration, redaction, renderers
-  tools/          tool registry, contracts, schemas, argument validation
-  policy/         rules engine, scopes, risk tiers, taint tracking, approvals
-  toolhost/       separate process: execution, isolation, job objects, undo journal
-  knowledge/      indexer, watchers, parsers, chunkers, embeddings, hybrid search
-  memory/         working / episodic / semantic memory, project facts
-  integrations/   LLMProvider impls · ExternalAgentAdapter impls · MCP server
-  pipelines/      YAML schema, validator, executor
-  api/            FastAPI app, WS protocol, auth, pairing, event fan-out
-  storage/        migrations, repositories, blob store
+src/oracle/
+  core/            runtime, event log, sessions, approvals, HALT          [built]
+  router/          pre-router, intent, selection, turn pipeline           [built]
+  context/         budget manager, token counting                         [built; bands 5–7 empty]
+  tools/           registry, contracts, 33 tools, undo journal            [built]
+  policy/          engine, scopes, tiers, taint, paths, programs, audit   [built]
+  toolhost/        separate process, Job Objects, argv-only protocol      [built]
+  rag/             indexer, watcher, chunkers, embeddings, hybrid search  [built]
+  handoff/         packet builder + renderer (TaskSpec superset planned)  [built]
+  delegation/      the single-delegation lifecycle → DELEGATION runner    [built → refactor P7]
+  integrations/    ExternalAgentAdapter · ClaudeCodeAdapter · workspace   [built]
+                   AntigravityAdapter                                     (P6-T5)
+  mcp/             ORACLE's MCP server: bridge, tokens, catalogue         [built]
+  api/             FastAPI app, WS protocol, event fan-out                [built]
+  storage/         migrations (0001; 0002 tasks planned), db access       [built]
+  orchestration/   task graph, scheduler, runners, recovery               (P7 — ORCHESTRATION.md)
+  planning/        ExecutionPlan, validation, roles, agent selection      (P8 — PLANNER.md)
+  memory/          facts, preferences, attempts                           (P9 — MEMORY.md)
 apps/
-  desktop/        Tauri shell (thin) + React frontend
-  mobile/         PWA (shares frontend primitives, different layout)
-tests/
-  unit/ integration/ security/ replay/ e2e/
+  desktop/         Tauri shell (thin) + React frontend                    [built]
+  mobile/          PWA                                                    (P12)
+tests/             46 files, ~558 tests; tests/security/ is the merge gate
 ```
 
 ## 10. Glossary
@@ -346,6 +362,9 @@ tests/
 | **Scope** | A bounded region a capability may act in — a filesystem root, a project, an allowed program. |
 | **Risk tier** | T0–T4; determines whether a step runs automatically, needs confirmation, or is refused. |
 | **Taint** | A flag on a turn meaning "untrusted external content entered the context". Raises risk tiers. |
-| **Handoff Packet** | A self-contained task description for an external agent; the vendor-neutral fallback. |
+| **Handoff Packet** | A self-contained task description for an external agent; the vendor-neutral fallback. The rendered form of a **TaskSpec** ([PLANNER.md §3](PLANNER.md#3-taskspec--the-specification-a-worker-receives)). |
+| **Root task** | The top of one task graph; carries the user's objective, the replan budget, and the aggregate status. |
+| **ExecutionPlan** | The planner's structured output: tasks, roles, dependencies. Data, validated before use; never authority ([PLANNER.md](PLANNER.md)). |
+| **Role** | A named job with an expected output shape (`coder`, `reviewer`, `planner`, …), held by an agent per the capability registry. |
 | **Egress preview** | The exact payload leaving the machine, shown before it leaves. |
 | **Node** | A UI object in the orbital view: a project, task, agent, collection or process. |

@@ -136,8 +136,10 @@ GET    /api/v1/sessions/{id}/events     paged history (?since_seq=&limit=)
 DELETE /api/v1/sessions/{id}
 
 GET    /api/v1/tasks                    ?status=active|waiting|done|failed
-GET    /api/v1/tasks/{id}               full record incl. steps and costs
-POST   /api/v1/tasks/{id}/cancel
+GET    /api/v1/tasks/{id}               full record incl. costs; from Phase 7: kind, role,
+                                        agent, depends_on, supersedes, root_id — the execution
+                                        tree is GET /tasks?root_id= (ORCHESTRATION.md §6)
+POST   /api/v1/tasks/{id}/cancel        cancels the task; dependents become skipped
 
 GET    /api/v1/approvals                pending
 POST   /api/v1/approvals/{id}           {decision, nonce}

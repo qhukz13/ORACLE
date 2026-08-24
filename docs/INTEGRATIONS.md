@@ -4,7 +4,7 @@ How ORACLE delegates real work to Claude Code, Antigravity, and anything that co
 verifies what came back.
 
 > All CLI facts below were checked against primary documentation on **2026-08-21** and are marked
-> `VERIFIED`. Vendor CLIs drift; re-verify quarterly ([ROADMAP P11](ROADMAP.md#phase-11--hardening--continuous)).
+> `VERIFIED`. Vendor CLIs drift; re-verify quarterly ([ROADMAP P14](ROADMAP.md#phase-14--hardening--continuous)).
 
 ## 1. Integration tiers
 
@@ -248,8 +248,122 @@ The adapter parses `body = obj[obj["event"]]`.
 prompt. Delegation is inherently expensive, but this makes Antigravity a poor fit for small calls;
 route those to Claude or the local model.
 
-Still untested (Phase 6 adapter work, not blockers): unauthenticated behaviour in a non-TTY, which
-`preflight()` depends on · `--json-schema` structured output · SIGINT/SIGTERM cancellation semantics.
+Two of the three items OQ-05 left untested were measured in P6-T5 below (`--json-schema`,
+cancellation). The third — unauthenticated behaviour — resisted measurement and is still
+`UNKNOWN`; see *What could not be observed*.
+
+### Contract cross-checks  `2026-08-24`
+
+- The official headless docs (antigravity.google/docs/cli/headless, fetched 2026-08-24) confirm
+  the surface above and add: `--input-format stream-json` for multi-turn within one process,
+  `--print-timeout` default 5m, `--continue`/`--conversation` resume. `VERIFIED`.
+- Asterim's working integration (`ASTERIM_REUSE.md`) confirms two things the docs understate:
+  the prompt rides as the **value of `-p`** (last argument), not stdin — the opposite of Claude —
+  and `agy.cmd` shim handling matters on Windows. `VERIFIED` in Asterim's usage.
+- Asterim passes `--dangerously-skip-permissions`; ORACLE **will not**. Headless approval prompts
+  are soft-denied by default, which is the posture ORACLE wants: a denial surfaces in the result,
+  where the planner ladder or a human handles it. Same reasoning as Claude's `dontAsk`.
+- No official Antigravity SDK could be confirmed; no native ACP support (open feature request).
+  The CLI is the integration surface. `VERIFIED` absence as of 2026-08-24.
+
+### As built (P6-T5, 2026-08-24)
+
+`src/oracle/integrations/antigravity.py`, against fixtures recorded from **`agy` v1.1.19** by
+`scripts/record_agy_stream.py` and replayed offline in `tests/test_antigravity_adapter.py`
+(15 tests, in `make check`). What the recording changed:
+
+**Vendor drift is continuous, not quarterly.** The CLI updated itself from v1.1.17 to v1.1.19
+*during this task's recording session*, roughly forty minutes apart. The first fixture set was
+discarded and re-recorded rather than mixed. Re-verification cadence is a floor, not a schedule.
+
+**Without `--dangerously-skip-permissions`, headless `agy` is read-only.** Measured, not
+inferred: `view_file` and `find_by_name` run unprompted; `write_to_file` is soft-denied
+(`permission check failed … user denied permission`), the model retries via `run_command` and is
+denied again, and the run terminates `status: ERROR` with **exit code 1**. ORACLE will not pass
+that flag, so this is now a stated capability, not a surprise:
+
+> **Antigravity can hold `planner`, `reviewer` and `researcher`. It can never hold `coder`.**
+
+That is a happy accident of alignment — every role the capability registry assigns it
+(PLANNER.md §4) is read-only — but it must be written down, because a packet with write tools
+would otherwise fail looking like a model failure.
+
+**Exit code and vendor status are both required.** A soft denial yields exit 1 *and*
+`status: ERROR`; the schema path yields exit 0 *and* `SUCCESS`. `collect()` requires the
+conjunction, and a test pins the disagreeing case.
+
+**`--json-schema` works, including `$defs`/`$ref`.** The `result` body carries
+`structured_output` — already **filtered to the requested schema** — beside a `json_schema` echo
+of what was asked for. The raw `response` string carries extra vendor keys (`toolAction`,
+`toolSummary`) that `structured_output` does not. ORACLE reads `structured_output`; the prose is
+never parsed.
+
+**Cancellation, timed to the millisecond**
+(`tests/fixtures/agents/antigravity/cancel-v1.1.19.timing.txt`): `CTRL_BREAK` at 12.00 s →
+terminal `result` at 12.11 s → child exits 1 at 12.15 s. Interrupt alone suffices; terminate and
+kill were never reached; nothing was left in the workspace. But the status is **`ERROR` with the
+message "timeout waiting for response"** — never the documented `CANCELED`/`INTERRUPTED`. So **a
+cancelled run and a genuine vendor timeout are indistinguishable from the stream alone**; only
+ORACLE's own record of having sent the signal separates them, which is why the adapter never
+infers cancellation from the stream.
+
+**Tool steps arrive twice** — `ACTIVE`, then `DONE` or `ERROR`, under one `step_index`. Only the
+first becomes a `tool_use` event, or every call would be double-counted in the inspector.
+
+**ORACLE's tool server cannot be lent to `agy`.** There is no `--mcp-config`: MCP servers are
+global config edited by `agy mcp`. Honouring a packet's `mcp_config` would mutate machine state
+for one delegation; ignoring it would run a delegate that believes it holds ORACLE's guarded
+tools. `command()` therefore **fails closed** and the packet routes to Claude. Nor is there an
+allow-list flag — `--add-dir` scopes the filesystem, and nothing scopes the toolset.
+
+**Cost, again.** ~15k input tokens per *turn*, so multi-turn runs accumulate fast: 31k for a
+two-turn read, 46k for the denied write, 55.6k for a planning call. `usage` reports tokens and
+never money — this is quota-metered — so `capabilities().cost_reporting` is **false** and
+`AgentResult.cost_usd` stays `None` rather than carrying an invented figure.
+
+#### What could not be observed
+
+`preflight()` distinguishes three states, and only two were observed for real. The probe for the
+third is `agy models` — a vendor round trip that costs **no model tokens**, which matters because
+every `-p` call costs ~15k before the model reads a word.
+
+| State | Observed? | How |
+|---|---|---|
+| binary missing | yes | `shutil.which` on a name that is not there |
+| ready | yes | `--version` → `1.1.19`, `models` → the model list |
+| present but **unauthenticated** | **no** — `UNKNOWN` | see below |
+
+Redirecting `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` and `XDG_CONFIG_HOME` to an empty
+directory **did not deauthenticate `agy`**: it ran the task normally. Its credentials do not come
+from any of those. The Antigravity IDE was running throughout, which is a plausible source and an
+untested hypothesis, not a finding. The real configuration was never touched, deliberately. So
+the unauthenticated branch is written from the vendor's documented behaviour and is marked
+`ASSUMPTION` in the adapter until someone signs out, or runs it on a machine that never signed
+in. **Do not infer it from a green preflight here.**
+
+### As planner — the role it did not get  `measured 2026-08-24`
+
+The adapter serves two roles through the same interface. As a **worker** (reviewer/researcher) it
+is a peer of the Claude adapter, and that is the role it keeps.
+
+As the **planner** it would be invoked with a planning TaskSpec and `--json-schema <ExecutionPlan>`,
+returning a structured plan and executing nothing (authority, validation, taint and fallbacks in
+[PLANNER.md](PLANNER.md)). The design made it the default holder because its ~15k-token prompt
+overhead amortises over a whole graph. **The P6-T5 spike measured it and the ladder promoted**
+([OQ-20](OPEN_QUESTIONS.md#oq-20)): 12/16 plans valid on first attempt — **75% against a 90%
+gate** — at ~55k tokens and 27–43 s per plan. Claude authors plans now; the mechanism is unchanged,
+only the registry line.
+
+Three findings behind that number, all of which outlive the verdict:
+
+* **`--effort high` is where it broke.** Every failure was a high-effort run in which the planner
+  browsed the filesystem — reaching for the owner's home directory from an empty workspace — and
+  was denied by the vendor's permission gate, which ended the run. If it is ever reconsidered for
+  this role, `--effort low` is pinned (SECURITY.md §10).
+* **`structured_output` can be silently emptied.** One `SUCCESS` returned a schema-valid plan with
+  `tasks: []` while its raw `response` held six well-formed tasks: the vendor's filter drops
+  non-conforming items without saying so. Never treat the field's presence as proof of content.
+* **Conformant ≠ schedulable.** Only 7 of 12 valid plans declared any dependency at all.
 
 ---
 
@@ -435,7 +549,26 @@ It took three attempts, and both failures were the design working:
 
 ---
 
-## 9. Adding a new agent
+## 9. The external landscape — surveyed 2026-08-24, decisions in ADR-0022
+
+Recorded here so the next evaluation starts from evidence, not memory. Full analysis:
+[`logs/development/2026-08-24-supervisor-replan.md`](../logs/development/2026-08-24-supervisor-replan.md).
+
+| Candidate | License | Verdict | Trigger to revisit |
+|---|---|---|---|
+| **Claude Agent SDK** (Python, 0.x) | MIT `ASSUMED` | keep the pinned CLI contract; the SDK wraps the same transport with typed events + PreToolUse hooks that could enforce the gate in-process — genuinely better, and not worth replacing a working, fixture-pinned contract for while it is 0.x | next breaking CLI drift ([OQ-19](OPEN_QUESTIONS.md#oq-19)) |
+| **ACP** (Agent Client Protocol) | Apache-2.0 | JSON-RPC/stdio agent protocol; permission-request channel maps well onto the gate — but Claude and Antigravity both require Node adapter shims, so today it adds a hop to reach agents ORACLE reaches natively | a third-party agent worth integrating |
+| **OpenHands Software Agent SDK** | MIT `VERIFIED` | closest reference architecture (event stream, modular tools/workspace); adopting its server would duplicate the runtime | reference only |
+| **LangGraph** | MIT `VERIFIED` | durable execution/checkpointing duplicate the event-sourced runtime; graph needs are ~300 LOC of pure functions | never for the graph |
+| **CrewAI** | MIT | LLM manager-agent is the anti-pattern ADR-0019 rejects; role vocabulary referenced | — |
+| **AutoGen / MS Agent Framework** | MIT `ASSUMED` | AutoGen in maintenance mode; successor's typed workflow graphs are reference material | — |
+| **A2A** (Linux Foundation) | Apache-2.0 | peer-agent interop over HTTP; out of scope for a local supervisor | ORACLE ever exposing itself as an agent |
+| **MCP spec 2026-07-28** | — | stateless core + Tasks extension + MRTR; ORACLE's hand-rolled server speaks `2025-06-18` and works | a client rejecting the surface ([OQ-21](OPEN_QUESTIONS.md#oq-21)) |
+| **Pydantic-AI** (v2) | MIT `VERIFIED` | strongest candidate *if* the local-model worker tier ever wants a library; not needed for routing as built | the three-tier model stack getting scheduled |
+
+No copyleft exposure exists on any considered path.
+
+## 10. Adding a new agent
 
 1. Implement `ExternalAgentAdapter`; normalise its events into ORACLE's vocabulary.
 2. Implement `preflight()` honestly — the degradation path depends on it.

@@ -1,6 +1,13 @@
 # ORACLE — Pipelines
 
-Declarative, repeatable local workflows. **Phase 7, Post-MVP.**
+Declarative, repeatable local workflows. **Phase 10** (renumbered 2026-08-24; was Phase 7).
+
+> **Replan note 2026-08-24:** the executor is no longer a subsystem of its own — a pipeline
+> **compiles to a task graph** and runs on the Phase 7 scheduler
+> ([ORCHESTRATION.md](ORCHESTRATION.md)). Everything user-facing in this document — the YAML
+> schema, validation-before-execution, one up-front approval, the scope guard, the litmus test —
+> stands unchanged. "Steps → tool invocations through the same policy gate" now reads "steps →
+> tasks", which is the same sentence with better machinery under it.
 
 ## 1. Scope, fixed up front
 
@@ -133,7 +140,7 @@ free. Building a separate "pipeline runs" subsystem would duplicate all of it.
 
 ## 7. Initial pipelines
 
-Two, both real, built at Phase 7:
+Two, both real, built at Phase 10:
 
 - `asterim-check` — the example above.
 - `oracle-selfcheck` — lint, typecheck, unit tests, security suite, audit-log verification. ORACLE

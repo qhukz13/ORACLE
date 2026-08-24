@@ -1,639 +1,360 @@
 # ORACLE — Roadmap
 
-> Sequenced so that **every phase ends with something usable**, and so that no phase can execute a
-> side effect before the machinery that governs side effects exists.
->
-> Scope labels: **MVP** · **Post-MVP** · **Experimental** · **Future**.
+> **Rewritten 2026-08-24** for the supervisor architecture
+> ([ADR-0019](DECISIONS.md#adr-0019--the-supervisor-completes-the-orchestrator)–[0022](DECISIONS.md#adr-0022--external-agent-frameworks-evaluated-not-adopted),
+> analysis in [`logs/development/2026-08-24-supervisor-replan.md`](../logs/development/2026-08-24-supervisor-replan.md)).
+> The previous roadmap's Phases 0–6 are **built** and are recorded below as the foundation, not
+> re-scheduled as future work. Sequencing keeps the original discipline: every phase ends with
+> something usable, and nothing executes a side effect before the machinery that governs it exists.
+
+## Where the project actually is
+
+Verified against source 2026-08-24, not against docs:
+
+| Subsystem | Status | Evidence |
+|---|---|---|
+| Event-sourced runtime, sessions, WS resume | **implemented** | `src/oracle/core/`, `api/app.py` |
+| Pre-router, intent, single-tool selection | **implemented, measured** (93.3% / 100%) | `src/oracle/router/` |
+| Tool system: 33 contracts, registry, undo | **implemented** | `src/oracle/tools/` |
+| Policy gate: tiers, scopes, taint, approvals, HALT, audit chain | **implemented** (265 security tests) | `src/oracle/policy/` |
+| Toolhost: separate process, Job Objects | **implemented, measured** | `src/oracle/toolhost/` |
+| RAG: hybrid retrieval, bge-m3, watcher, cache | **implemented**; recall gate unmet ([OQ-18](OPEN_QUESTIONS.md#oq-18)) | `src/oracle/rag/` |
+| Delegation: packet, egress preview, worktree, verification, Claude adapter | **implemented, live-verified** | `src/oracle/delegation/`, `integrations/` |
+| ORACLE's MCP server (delegate callback) | **implemented, live-verified** | `src/oracle/mcp/` |
+| Desktop UI: chat, palette, confirmations, terminal, delegation panel | **implemented** (127 UI tests) | `apps/desktop/` |
+| Context assembly bands 5–7 (memory/retrieval/history) | **partially implemented** — budget exists, no producers | `context/budget.py` |
+| Memory subsystem | **planned only** — 0 LOC | [MEMORY.md](MEMORY.md) |
+| AntigravityAdapter | **planned only** — contract verified, adapter unbuilt | [OQ-05](OPEN_QUESTIONS.md#oq-05) |
+| Task graph, planner, multi-worker supervision | **new work** — this roadmap | [ORCHESTRATION.md](ORCHESTRATION.md), [PLANNER.md](PLANNER.md) |
+| Pipelines, mobile, voice, orbit view | **deferred as before** | below |
+
+**Needs refactor** (narrow, named): `DelegationService` becomes the runner for one task kind
+(P7) · Handoff Packet gains the `TaskSpec` superset (P8) · `AgentCaps` grows into the capability
+registry (P8) · ARCHITECTURE.md's `packages/` inventory corrected to the real `src/oracle/` layout
+(done in this replan).
+
+### The MVP, stated once
+
+> ORACLE runs on my PC, holds a conversation with a local model, executes a guarded set of file,
+> git and dev commands against my real projects, shows me what it's doing in a desktop UI with a
+> working terminal, asks before anything risky, and logs everything.
+
+**Delivered** (Phases 0–4, 2026-08-21). Retained here because [ADR-0016](DECISIONS.md#adr-0016--mvp-excludes-the-interesting-parts)
+binds to it and because it remains the scope-creep test for the foundation: anything the
+supervisor arc adds must justify itself against the phases below, not against this sentence.
+The supervisor-arc equivalent is the long-term goal, stated once:
+
+> I give ORACLE a high-level goal; it safely coordinates local models, Claude, Antigravity,
+> deterministic tools, pipelines, RAG and memory — while itself remaining local, secure,
+> observable, modular, replaceable, testable, and open-source friendly.
 
 ## Phase map
 
 ```
- MVP ────────────────────────────────────────────────┐
-  P0  Foundation & walking skeleton                  │
-  P1  Local LLM + agent runtime                      │
-  P2  Tool system + policy gate      ← security first│
-  P3  PC & dev control tools                         │
-  P4  Desktop UI v1                  ★ MVP MILESTONE │
- ────────────────────────────────────────────────────┘
- Post-MVP
-  P5  Project knowledge (RAG)
-  P6  External agent integration (Claude, Antigravity)
-  P7  Pipelines
-  P8  Mobile
-  P9  Advanced UI (orbit, timeline, global search)
- Experimental
-  P10 Voice
- Continuous
-  P11 Hardening
+ FOUNDATION (built) ────────────────────────────────────────┐
+  P0 Walking skeleton · P1 Local LLM + runtime              │
+  P2 Policy gate · P3 Tools · P4 Desktop UI  ★ MVP          │
+  P5 Knowledge (RAG) · P6 Delegation (Claude, MCP, egress)  │
+ ───────────────────────────────────────────────────────────┘
+ SUPERVISOR ARC
+  P6-T5  Antigravity adapter + planning spike   ← DONE 2026-08-24 (OQ-20: no)
+  P7     Task graph & supervisor
+  P8     Planner integration & multi-worker
+  P9     Memory & context engine
+ CAPABILITY ARC
+  P10    Pipelines (on the task graph)
+  P11    Execution visualisation & advanced UI
+  P12    Mobile
+ EXPERIMENTAL
+  P13    Voice
+ CONTINUOUS
+  P14    Hardening (standing, began at P2)
 ```
 
-**Why this order.** Two constraints fix it almost completely: (1) nothing may perform a side effect
-before the policy gate exists, which pins P2 ahead of P3; (2) the MVP must be something I use daily,
-because a personal tool that isn't used daily is never finished — which pins a real UI at P4 rather
-than at P9. Knowledge and delegation are the *interesting* parts and are therefore the easiest to
-start with and the easiest to never finish; they come after there is a working product to attach them
-to.
-
-### The MVP, stated once
-
-> ORACLE runs on my PC, holds a conversation with a local model, executes a guarded set of file, git
-> and dev commands against my real projects, shows me what it's doing in a desktop UI with a working
-> terminal, asks before anything risky, and logs everything.
-
-Anything not required by that sentence is not in the MVP. This paragraph is the scope-creep test.
+**Why this order.** The spike (P6-T5) is deliberately first and deliberately tiny: the planner arc
+rests on one unverified assumption — that `agy --json-schema` reliably returns a valid structured
+plan — and the fallback ladder changes shape if it fails, so it is answered before the graph is
+built, not after. P7 before P8 because a scheduler that can run *hand-written* graphs is testable
+without any planner and is the rollback position if planning disappoints. Memory at P9, not
+earlier, because P7/P8 need only the `Attempt` record (built in P7 as a table write, not a
+subsystem) while full memory competes with nothing until context quality becomes the bottleneck —
+which [OQ-18](OPEN_QUESTIONS.md#oq-18) says it already is for retrieval, so P9 carries that too.
+Pipelines move *after* the graph exists so a pipeline is a compiled task graph rather than a
+parallel executor. Mobile, voice, orbit keep their old relative order and their old reasons.
 
 ---
 
-## Phase 0 — Foundation & walking skeleton  **[MVP]**
+## Phase 6 — **done, 2026-08-24**: P6-T5, the Antigravity adapter + planning spike
 
-**Objective.** An end-to-end path from a UI keystroke to a backend event and back, with persistence
-and logging — carrying no intelligence at all.
+**Outcome.** The adapter is built, fixture-tested and in `make check`. The spike answered its
+central question with a **no**: Antigravity returned valid `ExecutionPlan`s 75% of the time
+against a 90% gate, so the fallback ladder promoted and **Claude is Phase 8's default planner**
+([OQ-20](OPEN_QUESTIONS.md#oq-20),
+[dev log](../logs/development/2026-08-24-p6t5-antigravity-planning.md)). A documented "no" was a
+success condition of this task, and it cost one line of the capability registry — which is what
+designing the ladder before running the spike was for.
 
-**Why it exists.** Every later phase plugs into this seam. Building it first means integration risk
-is paid on day one, when it is cheap, instead of at P4 when it is not. It also establishes the event
-log, which everything else assumes.
+**Objective (as set).** Close Phase 6's open task and answer the planner arc's blocking questions
+with one small, isolated experiment.
 
-**Depends on.** Nothing.
+**Why now.** ROADMAP task 7 of old Phase 6 was never built; the CLI contract is verified
+([INTEGRATIONS.md §5](INTEGRATIONS.md#5-antigravity--supported-unblocked-2026-08-21)); and the
+replan's riskiest assumption (structured plans from `agy`) is testable in days.
 
-**Architecture touched.** L2 API/Event, L3 Runtime (skeleton), L9 Storage.
+**The spike answers, with evidence:** launch reliability from a subprocess · `--json-schema`
+conformance rate for `ExecutionPlan` · latency and token cost per planning call · cancellation
+(SIGINT/SIGTERM) semantics · workspace boundary behaviour · fixture-recordability of the stream.
+Each maps to a numbered question in the spike checklist; the ones already answered by OQ-05 are
+not re-asked.
 
-**Components.** `packages/api`, `packages/core` (event log, sessions), `packages/storage`,
-`apps/desktop` (Tauri shell + minimal React), the logging subsystem.
+**Acceptance.** `AntigravityAdapter` passes the adapter contract tests against recorded fixtures ·
+one supervised live planning run returns a plan that validates (or the failure is recorded and the
+fallback ladder is promoted) · one worker task executed from that plan end to end through the
+existing delegation lifecycle · findings recorded in a dev log and OQ-20 resolved or narrowed.
 
-**Tasks.**
-1. `git init`; repo layout per [ARCHITECTURE.md §9](ARCHITECTURE.md#9-component-inventory); `uv` project on Python 3.12.
-2. `oracled`: FastAPI + uvicorn on loopback; `/health`, `/api/v1/status`.
-3. WS endpoint with the versioned envelope; global monotonic `seq`; `since_seq` replay.
-4. SQLite bootstrap: `oracle.db` + migration runner; `sessions`, `events` tables.
-5. Event log: append, fan-out, resume; a synthetic `echo` "agent" that emits realistic events.
-6. Logging: JSONL sink, rotation, redaction filter, `trace_id` propagation ([LOGGING.md](LOGGING.md)).
-7. Tauri shell wrapping a minimal React app: connect, send a message, render the event stream.
-8. `make check` → ruff + mypy + pytest + vitest.
+**Rollback.** The spike is isolated (`scripts/` + one adapter file + fixtures); a negative result
+costs the adapter only, and Phase 7 proceeds with hand-written graphs regardless.
 
-**Deliverables.** A running desktop app that echoes through the real backend and persists a
-replayable event log.
+**What it actually cost, and what it bought.** ~1.2M Antigravity tokens across 20 live calls and
+one Claude delegation. It bought: the adapter, four recorded fixtures, a measured answer to OQ-20,
+and three findings that outlive the verdict — a delegated planner **browses the filesystem** and is
+stopped only by the permission gate ORACLE refuses to skip ([SECURITY.md §10](SECURITY.md#10-the-multi-agent-surface--added-2026-08-24-phases-78)) ·
+`structured_output` can be **silently emptied** by the vendor's own schema filter · a vendor CLI can
+**self-update mid-session** (1.1.17 → 1.1.19), so quarterly re-verification is a floor.
+
+---
+
+## Phase 7 — Task graph & supervisor  **[Supervisor arc]**
+
+**Goal.** ORACLE runs a **hand-written** multi-task graph: durable tasks, dependencies, batched
+topological scheduling, bounded concurrency, cancellation, crash recovery, human gates — with no
+planner involved yet.
+
+**Why now.** It is the load-bearing new subsystem, and it is fully testable deterministically
+(FakeProvider + stub CLIs) without any new vendor risk. Everything later plugs into it.
+
+**Depends on.** P6 (delegation lifecycle — reused as the DELEGATION runner). Not on P6-T5.
+
+**Existing work reused.** `DelegationService` (becomes `DelegationRunner`, its lifecycle intact) ·
+`ToolExecutor` (the TOOL runner) · event log, approvals, audit — unchanged. Ported from Asterim
+([ASTERIM_REUSE.md](ASTERIM_REUSE.md)): DAG algebra, status vocabulary, recovery rules, gate
+rules, launcher edge cases.
+
+**New implementation.** `src/oracle/orchestration/`: Task/TaskResult models · migration `0002`
+(`tasks` table) · graph validation (cycle-as-path) · scheduler loop · runners per TaskKind ·
+retry/timeout/cancel per [ORCHESTRATION.md §3–4](ORCHESTRATION.md) · `task.*` event flow for
+graphs · `Attempt` recording on task completion (the table, not the subsystem) · minimal API
+(`GET /api/v1/tasks` grows graph fields) · minimal UI: the existing task list shows a tree.
+
+**Tests.** Graph algebra property tests · scheduler determinism with fake runners · crash-recovery
+tests that kill the daemon mid-graph · security: a graph cannot execute a tool its caller could
+not; approvals bind per task; HALT kills every running task's tree.
 
 **Acceptance criteria.**
-- Send a message from the desktop app → an event is persisted → it renders. Reload → history intact.
-- Kill the backend mid-session → the UI shows offline, reconnects, and catches up via `since_seq`
-  with **no gaps and no duplicates**.
-- Two clients (Tauri + browser tab) see identical event streams.
-- Logs contain `trace_id` end to end; a planted fake secret is redacted at the sink.
+- A hand-written 4-task graph (tool → delegation → verify → report) runs end to end with the
+  delegation using the stub CLI; order and gating asserted like the reference scenario.
+- One failure mid-graph: dependents `SKIPPED`, aggregate status correct, UI shows why.
+- Kill the daemon mid-graph; restart recovers per the rules — the interrupted task gates, nothing
+  auto-restarts, no event gap.
+- Two delegations run concurrently in separate worktrees without interference; the third queues.
+- Cancel one branch; the independent branch completes.
+- The security suite grows the graph cases and stays green.
 
-**Testing.** Unit: event-log sequencing, resume-from-seq. Integration: WS reconnect under forced
-disconnect. E2E: Playwright happy path.
+**Definition of done.** Acceptance met · `make check` green · ORCHESTRATION.md corrected to
+as-built · report + next task updated.
 
-**Risks.** Tauri↔sidecar lifecycle on Windows (orphaned backend on force-quit) → own the process from
-Rust with a Job Object and verify explicitly. Port conflicts → pick a port, persist it, expose it to
-the frontend.
+**Risks.** Scheduler edge cases on Windows asyncio (see OQ-16's rule: pipes on threads) · scope
+creep toward a workflow engine — the litmus is ORCHESTRATION.md §8.
 
-**Definition of done.** All acceptance criteria pass; `make check` is green; `docs/current_report.md`
-updated.
-
----
-
-## Phase 1 — Local LLM + agent runtime  **[MVP]**  ·  **P1-T1 DONE 2026-08-21**
-
-**Objective.** ORACLE answers questions with a local model, with a real turn pipeline, state machine,
-streaming, and cancellation. **No tools, no side effects.**
-
-**Why it exists.** The model choice is the project's biggest unknown and its hardest constraint
-(3.5 GB VRAM). Settling it early — with measurements, not opinions — prevents an architecture built
-on a model that turns out not to fit.
-
-**Depends on.** P0.
-
-**Architecture touched.** L3 Runtime, L4 Router, L5 Context (basic), L8 LLMProvider.
-
-**Tasks.**
-1. ~~Benchmark placement and latency~~ — **DONE 2026-08-21**, ahead of the phase.
-   Router is **`qwen3.5:0.8b` @ 16k, 100% GPU, `think:false`**
-   ([results](../logs/development/2026-08-21-oq01-router-benchmark.md)).
-   **Still owed in this phase:** the 30-case intent + tool-selection fixture set that answers the
-   *accuracy* half of [OQ-01](OPEN_QUESTIONS.md#oq-01). Build it **before** the router logic, not after.
-2. `LLMProvider` protocol + `OllamaProvider` + `FakeProvider` (replay).
-3. Structured output: JSON Schema → validate → one repair → deterministic fallback; track the failure rate.
-4. Turn pipeline stages 0–3 and 8; the state machine; streaming deltas over WS.
-5. Pre-router: slash commands + a first palette action set.
-6. Context Assembler v1: priority bands, real tokenizer counting, budget enforcement.
-7. Cancellation tokens through the whole loop; per-turn timeout.
-8. Ollama supervision: detect not-running, model-not-pulled, and degrade with a clear banner.
-
-**Deliverables.** Streaming local chat; intent classification; a measured, documented model choice.
-
-**Acceptance criteria.** (latency targets now grounded in the measured TTFT curve, not guessed)
-- ~~`route` TTFT < 900 ms p50~~ — **MISSED, and the gate was mis-derived.** It came from OQ-01's
-  prompt-eval numbers alone and never budgeted for generation or Ollama's ~600 ms fixed per-request
-  overhead. Measured routed turn: **p50 1542 ms**. Restated target: a routed turn under ~1.5 s, and
-  **>50% of turns resolved by the pre-router at ~5 ms** ([OQ-15](OPEN_QUESTIONS.md#oq-15)).
-- ✅ Structured-output failure rate **< 2%** — measured **0.00%** over the fixture set.
-- ✅ Intent classification **≥ 85%** — measured **93.3%**; clarify behaviour **100%**.
-- Cancel mid-stream stops token generation within 500 ms.
-- With Ollama stopped, slash commands still work and the UI says why chat doesn't.
-- Context never exceeds the **per-call-type** budget — asserted, not hoped.
-- The router model stays resident: no reload between consecutive turns (measured load cost is
-  7–14 s warm, 51 s cold, so a reload is user-visible and unacceptable).
-
-**Testing.** `FakeProvider` replay tests for the whole pipeline (deterministic). Property tests on
-budget allocation. A recorded fixture suite for intent accuracy that reruns on any prompt change.
-
-**Risks.**
-- ~~*The 2b model doesn't fit.*~~ **Confirmed — it doesn't** (36%/64% CPU/GPU at every context length).
-  Already handled: 0.8b is the router.
-- ***0.8b is too weak on the accuracy fixtures.*** **The main risk of this phase.** Nothing smaller is
-  worth using and nothing larger fits this GPU. Mitigations in order: try
-  `OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0` and a text-only build ([OQ-10](OPEN_QUESTIONS.md#oq-10))
-  to pull `2b` onto the card; accept `2b` hybrid (~20 tok/s, ~3.4 s TTFT); or shift load to the
-  deterministic pre-router. **Decide with fixture data, not impressions.**
-- *Ollama drops Pascal* ([OQ-03](OPEN_QUESTIONS.md)) → CPU fallback path must be tested in this phase,
-  not discovered later.
-- *Prompt fiddling becomes the whole phase.* → the fixture suite is the stop condition; when the
-  numbers pass, stop.
-
-**Definition of done.** Acceptance met; benchmark written up; ADR-0004 updated with the real numbers.
+**Rollback.** The graph is additive; the single-turn pipeline and single delegation path are
+untouched and remain the default until P8 wires intent to graphs.
 
 ---
 
-## Phase 2 — Tool system + policy gate  **[MVP]**
+## Phase 8 — Planner integration & multi-worker  **[Supervisor arc]**
 
-> **P2-T1 mostly DONE 2026-08-21** — gate built and proven with 103 security tests;
-> process isolation deliberately deferred to Phase 3 (see the note at the end of this phase).
+**Goal.** "Continue development on X" produces a validated `ExecutionPlan` from the planner, a
+graph approval, scheduled workers with roles, verification, bounded replanning, and a report — the
+[ORCHESTRATION.md §7](ORCHESTRATION.md#7-end-to-end-example) scenario, live.
 
-**Objective.** The full capability/policy/execution machinery, proven with **read-only tools only**.
+**Why now.** P7 gave plans somewhere to run; P6-T5 established who can author them — **Claude**,
+after Antigravity missed the conformance gate (OQ-20). Phase 8 builds the planner tier against the
+Claude adapter, which already has structured output, fixtures and a pinned contract; Antigravity
+stays in the registry as a reviewer/researcher.
 
-**Why it exists.** This is the phase that makes ORACLE safe to keep building. Every security control
-lands here, before a single write tool exists. Retrofitting a policy engine after tools exist is how
-these projects end up as unrestricted shell wrappers.
+**Depends on.** P7, P6-T5.
 
-**Depends on.** P1.
+**Existing work reused.** Handoff Packet (extended to TaskSpec, [PLANNER.md §3](PLANNER.md#3-taskspec--the-specification-a-worker-receives)) ·
+egress preview (planning calls are egresses) · `AgentCaps` → capability registry · pre-router and
+intent (a new `continue_project`-class intent routes to the supervisor).
 
-**Architecture touched.** L6 Capability, POLICY GATE, L7 Tool Host.
-
-**Tasks.**
-1. Tool registry + contract decorator; startup validation; JSON Schema generation.
-2. Resolved types: `ScopedPath`, `ProjectRef`, `ProgramRef`.
-3. **Path canonicaliser** with the full Windows algorithm ([SECURITY.md §4](SECURITY.md#4-path-safety-windows-specific)),
-   plus the `realpath`-vs-junction experiment ([OQ-04](OPEN_QUESTIONS.md)).
-4. Policy engine: `config/policy.yaml`, scopes, capabilities, tiers, deny-always, fail-closed loading.
-5. `oracle-toolhost` as a **separate process**: JSON-RPC over pipe, Job Object, timeouts, argv-only.
-   **DEFERRED to Phase 3 — see the note below.**
-6. Approvals: bound `arg_hash`, expiry, single-use, re-check before execution.
-7. Taint tracking: provenance on context items; escalation rules.
-8. Hash-chained audit log + `oracle audit verify`.
-9. HALT: API → runtime → job-object termination → deny-all → manual resume.
-10. Read-only tools: `fs.read`, `fs.list`, `sys.info`, `sys.processes`, `oracle.*`.
-11. **`tests/security/` red-team suite** — traversal, symlinks, junctions, ADS, 8.3 names, approval
-    replay, mutated arguments, injected instructions in fixture files.
-
-**Deliverables.** A policy-gated tool system; an isolated executor; an audit log; a security suite.
+**New implementation.** `ExecutionPlan` schema + validation + one-repair · planner invocation as a
+PLANNING task · role registry + `config/agents.yaml` · agent selection ([PLANNER.md §5](PLANNER.md#5-agent-selection)) ·
+fallback ladder including deterministic template plans · replanning with lineage (`supersedes`) ·
+plan-injection security fixtures · graph approval card.
 
 **Acceptance criteria.**
-- Every red-team case is **denied**, and each denial names the rule that fired.
-- A corrupt/absent `policy.yaml` yields read-only mode, loudly — never open access.
-- Killing the toolhost mid-call leaves the runtime healthy; the step is marked `failed`.
-- HALT terminates a `ping -t` process tree within 2 s, from a cold hotkey press.
-- Tampering with one audit line makes `audit verify` fail.
-- An approval for args A cannot execute args B.
-- `grep -r "shell=True"` returns nothing; a lint rule enforces it.
+- The reference multi-task scenario runs with FakeProvider + stub CLIs as one deterministic test
+  asserting the order: context → planning egress approval → validation → graph approval → per-task
+  gating → verification → report.
+- An invalid plan gets exactly one repair, then falls to the ladder; asserted per rung.
+- A planted injection in planning context yields a tainted plan whose tasks are escalated and the
+  adversarial task inert without approval (security suite).
+- A planner recommending an agent the policy forbids is overridden, and the audit shows the rule.
+- One supervised live run of the full scenario on a real project, both vendors, all previews human-approved.
+- Replan on a red verification produces a superseding task; budget exhaustion fails the root with
+  the full lineage reported.
 
-**Testing.** Hypothesis property tests on the canonicaliser (generated adversarial paths). The
-security suite is a **merge gate** from here on.
+**Definition of done.** Acceptance met · PLANNER.md as-built · OQ-20 resolved · gate green.
 
-**Risks.** Windows path edge cases are genuinely hard → property testing plus a real fixture tree with
-actual symlinks and junctions, not mocks. IPC overhead → measure; budget < 50 ms per call.
+**Risks.** Plan quality below usefulness → the ladder *is* the mitigation; measure, don't polish
+prompts forever (fixture suite is the stop condition, as in P1) · cost per planned graph → the
+approval card shows estimates; track spend per root task.
 
-**Note on process isolation (ADR-0003).** The toolhost is specified but not yet a separate process;
-the executor runs in-process. ADR-0003's three justifications are (a) a crashing tool must not take
-down the agent, (b) a tool must not be able to read `ANTHROPIC_API_KEY`, (c) killing a thread does not
-kill `npm install`'s grandchildren. **None of them bite for Phase 2's read-only file tools, and all
-three bite hard in Phase 3** when `dev.execute`, `git` and `npm` start spawning real process trees.
-Building it at the point where it is load-bearing is deliberate sequencing, not an omission — but it
-is a **hard prerequisite for the first Phase 3 tool that spawns a process**, and the acceptance
-criterion "killing the toolhost mid-call leaves the runtime healthy" moves with it.
-
-**Definition of done.** Security suite green and wired into `scripts/check.py`; audit verification
-working; ADR-0005 confirmed against the implementation; ADR-0003 confirmed at the start of Phase 3.
+**Rollback.** Disable the planner path (config): ORACLE reverts to P7 graphs + P6 delegation.
 
 ---
 
-## Phase 3 — PC & dev control tools  **[MVP]**  ·  **P3-T1 DONE 2026-08-21**
+## Phase 9 — Memory & context engine  **[Supervisor arc]**
 
-**Objective.** The tools that make ORACLE useful: git, tests, files, apps, terminal.
+**Goal.** The context bands stop being empty: facts, preferences, attempts retrieval into band 5;
+retrieval into band 6 for `answer`/`reason` calls; history summarisation into band 7. Plus the
+Phase 5 recall gate finally met or the gate re-argued with evidence ([OQ-18](OPEN_QUESTIONS.md#oq-18)).
 
-**Why it exists.** First real value. This is where the daily-use habit forms — or doesn't.
+**Why now.** Delegation and planning quality are now bounded by context quality: packets already
+carry `ATTEMPTS.md`, and P7 writes attempts — this phase makes them retrievable, and closes the
+known retrieval gap (truncated chunks first, query translation second, per OQ-18's ordering).
 
-**Depends on.** P2 (hard: no write tool ships before the gate).
+**Depends on.** P7 (attempt records exist). P8 benefits but does not block.
 
-**Tasks.** All done — plus process isolation, which P2 deferred here.
-0. ~~`oracle-toolhost` as a real separate process, with supervision and a Job Object.~~ **DONE**
-1. ~~Undo journal + trash; `fs.write`/`fs.patch`/`fs.move`/`fs.delete`.~~ **DONE**
-2. ~~`git.*`: status, diff, log, add, commit, branch, stash, push (T2).~~ **DONE** — plus the
-   hidden `git.undo` the journal dispatches, because reversing a commit needs a process and the
-   parent must not spawn one.
-3. ~~`dev.run_tests` with structured results, `dev.build`, `dev.lint`, `dev.execute`.~~ **DONE**.
-   `dev.run_script` was dropped: detection already runs only what `package.json` declares.
-4. ~~`app.launch` via `config/apps.yaml`; `sys.*`.~~ **DONE** — and it is the one tool that runs
-   in the parent ([ADR-0018](DECISIONS.md#adr-0018--a-launched-application-is-not-a-tool-call)).
-5. ~~`term.*` on ConPTY; `term.write` confirmed every time.~~ **DONE** ([OQ-09](OPEN_QUESTIONS.md#oq-09)).
-6. ~~Project registry: detect type, test/build/lint commands, read `AGENTS.md`/`CLAUDE.md`.~~ **DONE**
-7. ~~Confirmation flow end to end, including `dry_run` previews for T3.~~ **DONE** — the
-   `approval.requested` / `approval.resolved` round trip, and a dry run that performs nothing.
-8. ~~Tool selection in the router.~~ **DONE**, and measured: 100% on 18 cases.
+**Existing work reused.** [MEMORY.md](MEMORY.md)'s design stands as written — facts schema, write
+policy, decay, the Memory UI view · `context/budget.py` bands · RAG for `task_signature` matching.
 
-**Deliverables.** A tool set that handles a real morning's work on Asterim.
+**New implementation.** `src/oracle/memory/`: facts + preferences store, attempt retrieval, the
+restrictive write policy, memory events, REST endpoints, Memory view in the UI · band 5–7
+producers wired into assembly · OQ-18's two levers measured in order.
 
-**Acceptance criteria.** All verified live, not inferred from unit tests.
-- [x] "commit my changes in Asterim with message X" works end to end and is undoable —
-      routed through the real 0.8B model to `git.commit`; undo returns HEAD and leaves the work staged.
-- [x] "run the Asterim tests" returns structured pass/fail counts — `1 passed, 1 failed`, `junit-xml`.
-- [x] `git.push` prompts; approving executes exactly the previewed argv — and the bare remote received it.
-- [x] A recursive delete shows a real file list from `dry_run` before asking — and a dry run no longer
-      needs the approval it exists to inform, which was circular.
-- [x] The terminal streams a long burst without dropping bytes or blocking the event loop —
-      **2000/2000 lines, 204,090 bytes, loop ticks p50 13.5 ms.** This one failed first and found two
-      real bugs; see `logs/development/2026-08-21-terminal-loses-output.md`.
-- [x] Project detection correctly classifies all seven projects in `C:\Projects` (eight directories,
-      including an empty one that correctly reports `unknown`).
-- [x] A tool whose program is not on the allowlist is refused, naming the rule.
-- [x] `grep -r "shell=True"` returns nothing; lint enforces it, and so does a security test.
+**Acceptance criteria.** MEMORY.md's own rules, asserted: no write mid-plan, no write from a
+tainted turn, contradiction surfaces instead of auto-deleting · a repeated task's packet carries
+the prior attempt without hand-feeding · retrieval recall ≥ 80% on the fixture set, or the gate
+re-set with a written argument · "why does ORACLE think that?" answerable in one click.
 
-**Testing.** 360 tests, 1 skipped. Integration tests against a real git repo, a real ConPTY and a
-real toolhost. A soak of 100 tool calls leaving zero orphaned processes. Two measurement scripts that
-need Ollama and are therefore deliberately not tests: `eval_intent.py`, `eval_selection.py`.
+**Risks.** Wrong memories are worse than none — the write policy is the control; keep it
+restrictive even if recall feels low at first.
 
-**Risks.** Test-runner output parsing is fragile → prefer machine-readable output (`--json`,
-`--junit-xml`) and treat scraping as a fallback. Windows PTY quirks → budget real time for
-`pywinpty`; ConPTY resize and encoding are the usual traps.
-
-**Definition of done.** All acceptance criteria; every new tool has policy rules and a security test.
-
-**What actually got built.** 27 tools (26 offerable), the program allowlist, the app catalogue, the
-approval round trip, and tool selection in the router. Four development logs, three of them about
-things that were nearly ticked off without being measured.
-
-**Deviations from the plan, and why.**
-- **`push` and `delete` shipped in MVP**, having been deferred. The phase that makes a commit
-  meaningful is the same one that makes pushing it meaningful; both arrived with their tiers and
-  their security tests, which was the real requirement.
-- **`dev.run_script` and `fs.open_in_os` were dropped.** The first is subsumed by project detection;
-  the second is `ShellExecute` by another name and cannot be a promise about what happens.
-- **One ADR came out of implementation** ([ADR-0018](DECISIONS.md#adr-0018--a-launched-application-is-not-a-tool-call)):
-  a launched application cannot live inside the Job Object, and that had to be argued rather than
-  assumed.
+**Rollback.** Memory is a band producer; disabling it returns context assembly to today's state.
 
 ---
 
-## Phase 4 — Desktop UI v1  ★ **MVP MILESTONE**  ·  **P4-T1 DONE 2026-08-21**
+## Phase 10 — Pipelines  **[Capability arc]**
 
-**Objective.** The interface I actually use: chat, tasks, terminal, approvals, command palette.
+**Goal.** [PIPELINES.md](PIPELINES.md) as specified — with one architectural change from the
+replan: **a pipeline compiles to a task graph.** The YAML front-end, validation, up-front
+approval, and scope guard are unchanged; the executor is P7's scheduler, not a second engine.
+"A step is a delegation (or a tool task) — no second way to run an agent."
 
-**Why it exists.** The MVP is complete here. Everything before this is infrastructure; this is the
-product.
-
-**Depends on.** P3.
-
-**Scope discipline.** **No orbital visualisation in this phase.** It is P9. Building the decorative
-centrepiece before the functional shell is the classic way this kind of project dies at 80%.
-
-**Tasks.** Built in the order of what carries risk, not the order listed.
-1. ~~App shell: command bar, sidebar, centre stage, inspector, dock.~~ **DONE**
-2. ~~Chat with tool-call cards and errors as typed cards.~~ **DONE** — plus an Undo
-   control that appears only where the journal recorded one.
-3. ~~**Command palette** (`Ctrl+K`) feeding the pre-router.~~ **DONE**
-4. ~~Confirmation Center.~~ **DONE, and built first** — it is the one surface that is
-   *part of* the security model rather than a view onto it.
-5. ~~Terminal dock on xterm.js.~~ **DONE**. Sub-tabs and search are deferred; one
-   session, `Ctrl+\``.
-6. ~~Task list + inspector.~~ **DONE as a TURN inspector.** Tasks are a Phase 6/7
-   concept — there is no delegation or multi-step plan to inspect yet — but the
-   questions are the same, and the sections are the ones this spec asks for.
-7. ~~Design tokens, `prefers-reduced-motion`, focus rings, keyboard nav.~~ **DONE**
-8. ~~Empty states, offline banner, degraded banner.~~ **DONE**
-
-**Deliverables.** A desktop application usable as a daily driver.
-
-**Acceptance criteria.**
-- [x] Every MVP action is reachable **without a mouse** — `Ctrl+K` palette, `Ctrl+B`/`Ctrl+I`/
-      ``Ctrl+` `` panes, `F1` HALT, Enter to send, `A`/`D` to decide an approval, `Escape` to deny.
-- [x] An approval can be read and decided in **under 5 s** — the card is one screen and the
-      preview is the actual argv plus a real dry run.
-- [x] A T3 delete shows the real file list from `dry_run` first — verified in ORACLE's own
-      scratch scope, and the preview deleted nothing.
-- [x] The terminal handles 10k lines — **10,000 emitted, 10,000 seen, zero missing**, 1.03 MB
-      in 6.0 s, event loop p50 12.1 ms. See the caveat below on the rendering half.
-- [x] With the backend down, the app opens, explains, and reconnects on its own — verified by
-      killing the backend mid-session and bringing it back.
-- [x] Colour is never the only carrier of meaning — asserted per component, not just intended.
-- [x] Accessibility: **zero serious or critical axe violations** across all four components.
-
-**Testing.** 77 TS tests (was 14), including axe over the rendered DOM. **Playwright was not
-added.** It would have meant a browser download and a second harness to run the same journeys
-that are already driven against the real backend; the E2E behaviours in this list were verified
-by driving the actual app instead, which is where the two real UI bugs were found.
-
-**Caveat, stated rather than buried.** The browser pane available here never composites, and
-xterm measures a character by rendering one — so the terminal's *rendering* could not be
-verified, only its buffer and the pipeline behind it. That is why the 10k-line figure is
-reported for the pipeline and not as a frame rate.
-
-**Risks.** UI polish is infinitely expandable → timebox; the acceptance list above is the definition,
-not "it feels good". WebView2 rendering differences → test in WebView2, not only in Chrome.
-
-**Definition of done.** The acceptance list above, all of it ticked.
-
-> **Retired 2026-08-22:** this used to be *"a full working day without opening a terminal manually"*.
-> It was struck for two reasons. It was **never the goal** — the terminal is deliberately a
-> first-class surface here, with `term.*` tools, a ConPTY dock and OQ-09 spent on getting it right;
-> a criterion that scores opening a terminal as failure contradicts the thing Phase 3 and 4 built.
-> And it was **unfalsifiable in practice**: it survived two task hand-offs unticked, not because
-> anyone tried and failed but because "a full working day" is not an experiment anyone runs. A
-> criterion nobody can fail is not holding the phase to anything.
-
-**What the phase found.** Two real bugs, both from driving the actual app rather than the tests:
-a stale approval replayed from history sat at the head of the queue where nothing could answer
-it, and `git.push` was unroutable — so the Confirmation Center, the whole point of the phase,
-could never have fired from a routed turn.
+**Depends on.** P7. **Reused:** everything in P7; the YAML schema and validator are the new code.
+**Acceptance:** as in PIPELINES.md §8, plus: a pipeline run and a hand-written graph of the same
+steps produce identical event shapes. **Risk:** DSL creep — the litmus stands.
 
 ---
 
-## Phase 5 — Project knowledge (RAG)  **[Post-MVP]**
+## Phase 11 — Execution visualisation & advanced UI  **[Capability arc]**
 
-**Objective.** ORACLE understands my projects and notes: hybrid search, incremental indexing,
-attributed retrieval.
+**Goal.** The UI represents the supervisor honestly, and the knowledge becomes visible:
 
-**Why it exists.** It is what turns "an agent with tools" into "an agent that knows my work", and it
-is the prerequisite for context assembly good enough to delegate well (P6).
+1. The **execution tree** (root → plan → tasks → attempts → events) in the center stage and
+   inspector ([UI.md §6b](UI.md#6b-the-execution-tree--phase-11)).
+2. The orbit updated so the core is ORACLE and orbiting nodes are
+   projects/task-groups/agents/collections ([UI.md §3](UI.md#3-the-core-orbital-view--phase-11)).
+3. The **knowledge graph** *(added 2026-08-24 from the owner's design references)* — an
+   interactive map of every indexed document across the Obsidian vaults, project docs and PDFs:
+   collection-coloured clusters, wikilink and (optional) semantic edges, focus mode, retrieval
+   traces, select-as-context. Full spec in [UI.md §11b](UI.md#11b-the-knowledge-graph--phase-11);
+   layout/rendering decision in [ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered).
+   The data layer already exists (`knowledge.db` documents + embeddings + the `links` table);
+   this phase adds the offline layout pass, the persisted positions, and the view.
+4. Timeline, agent queue, global search, notifications as previously specified.
 
-**Depends on.** P4.
+**Why late, still.** Amplifiers, not foundations — and now informed by real multi-agent event
+data. The orbit keeps its go/no-go test (OQ-14) and its deterministic layout (ADR-0013; port
+Asterim's `dagColumns` longest-path ranking for the tree). The knowledge graph opens with the
+[OQ-22](OPEN_QUESTIONS.md#oq-22) measurements — offline layout cost, canvas-vs-SVG at corpus
+scale, semantic-edge readability — *before* the view is built on them, per sequencing rule 6.
 
-**Tasks.**
-1. `knowledge.db`: sqlite-vec + FTS5 schema ([DATABASE.md](DATABASE.md)).
-2. **Collection registry** — explicit opt-in per source. Never "index Documents": that folder
-   contains game saves and Paradox Interactive data. See [RAG.md](RAG.md#2-what-gets-indexed).
-3. Parsers: heading-aware Markdown with Obsidian wikilinks, `pypdfium2` (PDF, text layer only).
-   tree-sitter is built and **off** — better symbol names, measurably worse recall
-   ([log](../logs/development/2026-08-22-treesitter-chunking.md)).
-4. Chunking strategies per type; embeddings via ONNX on CPU
-   ([OQ-02](OPEN_QUESTIONS.md#oq-02) — **resolved 2026-08-24**: `bge-m3` at 1024d, not truncated
-   and not quantised, and only ahead of `multilingual-e5-base` once the fusion gate stopped
-   admitting BM25 on every query. Recall still misses this phase's gate — see
-   [OQ-18](OPEN_QUESTIONS.md#oq-18)).
-5. Hybrid retrieval: dense + BM25 + RRF; metadata pre-filtering by project/collection.
-6. Incremental indexing: content hash + mtime; `watchfiles` with debounce; respect `.gitignore` and `.oracleignore`.
-7. `know.*` tools; citations rendered in the UI.
-8. Index health view: what's indexed, when, how big, what failed.
+**Depends on.** P8 (there must be an execution to visualise); the graph view depends only on P5's
+index and could start earlier if the phase is split — it shares no code with the supervisor arc.
 
-**Deliverables.** Working project- and note-aware retrieval with source attribution.
-
-**Acceptance criteria.**
-- ~~Full index of all projects + vaults completes in **< 10 min** on this CPU~~ — **struck
-  2026-08-22.** It was one number for two very different operations. Measured at **42.8 min** with no
-  embedding cache ([OQ-02](OPEN_QUESTIONS.md#oq-02)) — the corpus is ~3.7M tokens and
-  `multilingual-e5-base` sustains ~1,900 tokens/s on 24 Haswell threads, so ten minutes was never
-  reachable for a cold build. With the cache it is **37 s**, because the cost was never the index,
-  it was the forward passes. Replaced by:
-  - Full rebuild on a **cold** embedding cache — a first build, or a change of model — **≤ 60 min**,
-    background, explicitly initiated, with the cost stated before it starts. Measured: 42.8 min.
-  - Full rebuild on a **warm** cache, chunking unchanged — the delete-and-rebuild the disposability
-    promise rests on — **< 2 min**. Measured: **37 s**, with zero forward passes
-    ([log](../logs/development/2026-08-22-embedding-cache.md)).
-  - Full rebuild after a **chunking change** — **≤ 25 min**. The cache is keyed on chunk *text*, so
-    moving boundaries misses it: the first tree-sitter build hit only 45% and took **19.9 min**,
-    against 2.5 min once later changes moved less text. A developer-facing number — it happens when
-    this repo edits `chunking.py`, not on a user's machine
-    ([log](../logs/development/2026-08-22-treesitter-chunking.md)).
-  - **Incremental update of a changed file in < 5 s** — unchanged, and measured at 4.4 s for a
-    no-change pass over all 1,330 documents.
-  - See [OQ-17](OPEN_QUESTIONS.md#oq-17): this makes the incremental path load-bearing rather than a
-    convenience, which is a different design.
-- Retrieval p95 **< 400 ms** over the full corpus.
-- On a 20-question fixture set, the correct source appears in the top 5 **≥ 80%** of the time.
-- Deleting `knowledge.db` and reindexing reproduces equivalent results — the index is truly disposable.
-- `node_modules`, `target/`, `.git/objects`, binaries and media are never indexed. Asserted.
-- Every retrieved chunk carries a real, clickable source.
-
-**Testing.** Golden retrieval fixtures (query → expected source). Indexer idempotency: index twice,
-identical state. Injection fixtures: a note containing "ignore previous instructions" must set taint
-and must not change behaviour.
-
-**Risks.** Embedding quality on mixed RU/EN → resolve via [OQ-02](OPEN_QUESTIONS.md) before building
-on it. Watcher storms during a `npm install` → debounce plus exclusion rules. Index bloat → size
-budget with an alert.
-
-**Definition of done.** Acceptance met; the fixture suite is a merge gate; indexing strategy documented.
+**Acceptance:** UI.md's existing criteria plus:
+- the execution tree answers "what is running, what is waiting on me, what failed, why" with
+  labels covered · every task node links to its evidence in ≤ 2 clicks;
+- the knowledge graph answers its four questions on the real corpus — shape (clusters/hubs),
+  neglect (orphans and stale docs findable in one filter), reach (any note's 2-hop neighbourhood
+  in one interaction), use (a chat citation's "show on graph" lights the actual sources);
+- graph budgets hold as measured in OQ-22: 60 fps pan/zoom, idle < 5% CPU, first paint < 1 s,
+  positions stable across sessions;
+- the list-view equivalent passes the axe audit and offers every graph action;
+- select-as-context feeds a real context package, and if that package later egresses, the
+  ordinary preview prices it.
 
 ---
 
-## Phase 6 — External agent integration  **[Post-MVP]**
+## Phase 12 — Mobile  **[Capability arc]**
 
-**Objective.** Delegate real coding work to Claude Code, collect results verifiably, and report.
-
-**Why it exists.** The headline capability. It only works if P5 gave it good context and P2 gave it a
-safe egress path — which is exactly why it is sixth and not second.
-
-**Depends on.** P5.
-
-**Tasks.**
-1. `ExternalAgentAdapter` protocol; `ClaudeCodeAdapter` using
-   `claude -p --bare --output-format stream-json` ([INTEGRATIONS.md](INTEGRATIONS.md)).
-2. **Handoff Packet** builder: task, constraints, acceptance criteria, curated file set, prior attempts.
-3. **Egress preview** UI — exact payload, redactions visible, approve/edit/cancel.
-4. Git-worktree isolation; verifiable result collection by diff + tests.
-5. Progress streaming: map the adapter's events onto ORACLE's event types.
-6. ORACLE's **MCP server**, so the delegated agent calls back into guarded tools instead of raw shell.
-7. `AntigravityAdapter` — **only after** [OQ-05](OPEN_QUESTIONS.md#oq-05) resolves the non-TTY stdout question.
-8. The vendor-neutral **fallback**: write the packet to disk, watch for the diff.
-
-**Deliverables.** End-to-end delegation with verified results.
-
-**Acceptance criteria.**
-- The reference scenario ("why is Asterim auth broken") runs start to finish and produces a diff plus
-  a test result.
-- Nothing leaves the machine without an approved egress preview. Asserted by a test that fails if any
-  egress path skips the gate.
-- A planted secret in a candidate context file is redacted before the preview renders.
-- Cancelling a delegation kills the child process tree and leaves the worktree clean.
-- If the CLI is missing, the fallback packet path engages automatically with a clear explanation.
-
-**Testing.** Adapter contract tests against a **stub CLI** that emits recorded stream-json — no
-network, no cost, deterministic. One live smoke test, run manually.
-
-**Risks.** *Vendor CLI surfaces change under us* → pin the contract in INTEGRATIONS.md, test against
-recorded fixtures, and treat the fallback as a first-class path rather than an afterthought.
-*Antigravity's non-TTY bug* ([OQ-05](OPEN_QUESTIONS.md)) → do not build on it until verified; the
-adapter is optional by design.
-
-**Definition of done.** Claude adapter in daily use; fallback proven by disabling the CLI; Antigravity
-either working or explicitly documented as blocked with evidence.
+Unchanged in scope and design ([MOBILE.md](MOBILE.md)): PWA, TLS + QR pairing + device tokens,
+`since_seq` resume, approve/observe/ask subset, remote HALT, **T3 desktop-only**. The phone talks
+to ORACLE, never to workers — the supervisor architecture strengthens this: task trees and worker
+status are already API objects by P7/P11. Old Phase 8 acceptance criteria carry over verbatim.
 
 ---
 
-## Phase 7 — Pipelines  **[Post-MVP]**
+## Phase 13 — Voice  **[Experimental]**
 
-**Objective.** Declarative, repeatable local workflows over registered tools.
-
-**Depends on.** P3 (tools) and P6 (so a pipeline step can delegate).
-
-**Scope guard.** Linear steps with conditions, timeouts, retries and artifacts. **Not** a CI system:
-no matrix builds, no remote runners, no caching layer, no container-as-step beyond `dev.docker` calls.
-
-**Tasks.** YAML schema + validator; the executor (steps → tool invocations through the same policy
-gate); per-step logs and artifacts; discovery from `.oracle/pipelines/*.yaml`; a run view in the UI;
-tier inheritance (a pipeline's tier is the max of its steps, computed at validation).
-
-**Acceptance criteria.**
-- The `asterim-check` pipeline (git status → backend tests → frontend tests → build → report) runs
-  end to end and reports per-step results.
-- A failing step honours its `on_failure` policy.
-- A pipeline containing a T2 step asks **once, up front**, not mid-run.
-- Cancelling a pipeline stops the current step and marks the rest `skipped`.
-- An invalid pipeline fails validation with a line number, before anything executes.
-
-**Risks.** DSL creep → if a pipeline needs branching and variables, it wants to be a script; say no
-and keep the DSL small.
-
-**Definition of done.** Two real pipelines in daily use.
+Unchanged ([old roadmap Phase 10](DECISIONS.md#adr-0007--clients-are-peers-of-one-local-api)
+reasoning): a separate client process of the same API; zero core changes is the acceptance test;
+TTS re-evaluated at implementation time (Piper archived). Still explicitly after the core
+orchestration works — implementing voice before P8 lands is the named anti-goal it always was.
 
 ---
 
-## Phase 8 — Mobile  **[Post-MVP]**
+## Phase 14 — Hardening  **[Continuous]**
 
-**Objective.** Control and observe ORACLE from my phone on the LAN, safely.
-
-**Depends on.** P4 (UI primitives), P2 (approvals model).
-
-**Tasks.** PWA served by the backend; TLS with a stable self-signed cert; QR pairing with SPKI
-pinning; device tokens (Argon2id) and per-device capability profiles; mDNS discovery; reconnect via
-`since_seq`; mobile layouts for chat, tasks, approvals, logs, system; remote HALT; device management
-and revocation UI.
-
-**Acceptance criteria.**
-- Pairing takes **< 30 s** from QR scan to connected.
-- Approving a T2 action from the phone works; **T3 is refused on mobile** with an explanation.
-- Killing Wi-Fi for 60 s and returning resumes with no lost or duplicated events.
-- An unpaired device on the same LAN gets nothing (verified by an actual attempt from another device).
-- A changed server certificate causes the client to refuse to connect.
-- Remote HALT works from a locked phone in under 5 s.
-
-**Risks.** Self-signed TLS and service workers: browsers require a secure context, and an untrusted
-cert may block PWA install and Web Push ([OQ-06](OPEN_QUESTIONS.md)). → v1 uses in-app WS
-notifications only; push is deferred until the cert question is settled.
-
-**Definition of done.** Used from the phone for a week without falling back to the desktop for
-approvals.
-
----
-
-## Phase 9 — Advanced UI  **[Post-MVP]**
-
-**Objective.** The orbital core view, activity timeline, agent queue, global search, notifications,
-system monitor.
-
-**Why it is late.** These are amplifiers, not foundations. Built at P4 they would be guesses about
-what information matters; built here they are informed by months of real event data.
-
-**Tasks.** Orbital core with deterministic polar layout and real state semantics; node interaction →
-inspector; activity timeline over the event log; agent queue (now/next/waiting/done); global search
-across projects, files, notes, tasks, logs and git history; notification system; compact system
-monitor.
-
-**Acceptance criteria.**
-- The orbit conveys **information**: state, category, recency, activity — verified by covering the
-  labels and still being able to answer "what is ORACLE doing?".
-- Node positions are **stable across sessions** (deterministic layout, no physics jitter).
-- With `prefers-reduced-motion`, all orbital animation stops and the view stays fully usable.
-- A screen-reader user gets an equivalent list view of every node.
-- Global search returns results across all six sources in **< 300 ms**.
-- The orbit costs **< 5% CPU** when idle and pauses entirely when the window is unfocused.
-
-**Risks.** Beautiful and useless → the covered-labels test above is the gate; if it fails, cut it.
-
-**Definition of done.** The orbit is genuinely the view I leave open. If it isn't, it gets deleted —
-that outcome is acceptable and should be recorded as an ADR.
-
----
-
-## Phase 10 — Voice  **[Experimental]**
-
-**Objective.** Speak to ORACLE and hear it answer, without touching the agent core.
-
-**Depends on.** P4 only — voice is just another client of the same API.
-
-**Tasks.** A separate `oracle-voice` process; Silero VAD; faster-whisper STT (Russian needs `small`+);
-openWakeWord; TTS chosen at implementation time — **Piper was archived in Oct 2025**, so re-evaluate
-against Windows SAPI/WinRT and Silero TTS ([TECH_STACK.md §10](TECH_STACK.md#10-voice-phase-10--deliberately-unresolved));
-barge-in; a push-to-talk fallback.
-
-**Acceptance criteria.**
-- Wake word → transcript in **< 2 s**; Russian and English both usable.
-- Voice runs on the CPU without evicting the router model from VRAM.
-- **Zero changes to `packages/core`** to add voice. If a core change is needed, the client-peer
-  architecture failed and that is worth knowing.
-- Dangerous actions are **never** approvable by voice alone.
-
-**Risks.** STT competing for CPU with indexing → priority classes and mutual exclusion. Accuracy on
-mixed-language speech is genuinely hard → push-to-talk is the honest fallback.
-
----
-
-## Phase 11 — Hardening  **[Continuous]**
-
-Not a final phase; a standing workstream that begins at P2.
-
-**Ongoing.** Security suite growth with every new surface · dependency and CVE review · audit-log
-verification in CI · backup/restore procedure for `oracle.db` and secrets · performance budgets as
-tests · crash reporting · **quarterly re-verification of the vendor CLI contracts** (they will drift)
-· the Pascal/CUDA watch item ([OQ-03](OPEN_QUESTIONS.md)).
-
-**Future / explicitly not planned.** Multi-user, cloud sync, plugin marketplace, mobile-native apps,
-model fine-tuning, arbitrary web browsing by the agent. Each would need its own design pass and none
-serves the stated purpose.
+The standing workstream, begun at P2, now including: quarterly re-verification of **both** vendor
+CLI contracts · the MCP 2026-07-28 migration watch ([OQ-21](OPEN_QUESTIONS.md#oq-21)) · the Claude
+Agent SDK re-evaluation trigger ([OQ-19](OPEN_QUESTIONS.md#oq-19)) · cost-per-root-task tracking ·
+the Pascal/CUDA watch (OQ-03) · security-suite growth with every new surface · backup/restore ·
+performance budgets as tests.
 
 ---
 
 ## Idea backlog — three-tier local model stack  *(recorded 2026-08-23, unscheduled)*
 
-> Owner's ideas, captured verbatim so they are not lost. **Not yet a phase.** Each item needs the
-> same treatment every model decision in this repo has had: measured, not assumed, and written into
-> an ADR before code depends on it.
-
-The hardware picture has changed since P1 pinned `qwen3.5:0.8b` on a 3.5 GB card: **LM Studio** now
-runs three local models, and the roadmap should grow toward a tiered stack rather than a single
-router:
+Carried forward unchanged from the previous roadmap; nothing in the replan schedules it, and item
+3 (prompt discipline for small models) is now partially absorbed by the TaskSpec renderer rules.
 
 | Tier | Model | Role |
 |---|---|---|
-| Light | **Qwen 2.5 3B** | The simplest tasks: routing, classification, short deterministic transforms — anything where a wrong answer is cheap and latency matters. |
-| Default | **Qwen3 14B** | ORACLE's main model: drives the turn pipeline, calls tools, and writes the prompts/handoff packets given to other agents. |
-| Heavy | **Qwen3 27B** | Hard work: writing code, complex multi-step tool use, and browser search — ideally through the DeepSeek-style agent harness, if it can be adapted to a local model. |
+| Light | Qwen 2.5 3B | routing, classification, short deterministic transforms |
+| Default | Qwen3 14B | the turn pipeline, tool calls, packet/prompt drafting |
+| Heavy | Qwen3 27B | hard local work; browser search via a DeepSeek-style harness, if adaptable |
 
-What adopting this implies, in order:
-
-1. **An `LMStudioProvider`** beside `OllamaProvider` behind the existing `LLMProvider` protocol —
-   LM Studio speaks the OpenAI-compatible API, so this is a provider, not a rearchitecture.
-2. **Escalation routing**: the router picks the tier per task (light → default → heavy), instead of
-   one resident model doing everything. Revisits [OQ-01](OPEN_QUESTIONS.md#oq-01)'s accuracy fixtures
-   per tier, and the residency/eviction question — three models will not sit in VRAM together.
-3. **Prompt discipline as a requirement, not a style.** Every prompt sent to a local model must be
-   maximally explicit and detailed — exact task, exact output format, exact stop condition — so a
-   small model never has to guess and never spends half an hour on a trivial step. The intent/tool
-   fixture suites are the enforcement: a prompt change that drops accuracy is a regression.
-4. **DeepSeek harness for browser search** on the heavy tier — *if possible*. Needs its own
-   feasibility spike before it appears in any phase; it also touches the P2 policy gate, because
-   browsing is currently on the "explicitly not planned" list and would need a design pass to move
-   off it.
-
-Natural homes when scheduled: item 1–2 amend **Phase 1** (provider + routing), item 3 cuts across
-every phase that writes a prompt, item 4 is a **Phase 6/7**-adjacent spike.
+Implies, when scheduled: `LMStudioProvider` behind `LLMProvider` · escalation routing with
+per-tier fixtures · the residency/eviction question · a feasibility spike for the browser harness
+(touches the P2 gate — browsing is on the not-planned list and needs a design pass to move).
+A 14B default would also make the **local model a planner-ladder candidate** above deterministic
+templates — evaluate with the same ExecutionPlan fixtures, not by impression.
 
 ---
 
 ## Sequencing rules
 
-1. **No phase starts before its predecessor's Definition of Done.** Skipping the DoD is how P4 arrives
-   with three half-finished phases underneath it.
-2. **No write tool before P2.** Non-negotiable.
-3. **Security tests are a merge gate from P2 onward.**
+1. **No phase starts before its predecessor's Definition of Done** — except P7, which does not
+   wait for P6-T5 (they share no code; only P8 needs both).
+2. **No new execution path bypasses the policy gate.** The scheduler is not a second chokepoint;
+   it feeds the only one.
+3. **Security tests remain the merge gate**, growing with every phase.
 4. **Every phase updates `docs/current_task.md` and `docs/current_report.md`.**
-5. **An `EXPERIMENT NEEDED` blocking a phase is resolved *in* that phase, before the code that
-   depends on it.**
+5. **An `EXPERIMENT NEEDED` blocking a phase resolves inside that phase, before dependent code** —
+   which is why P6-T5 exists at all.
+6. **Spike before structure**: no phase builds on a vendor behaviour that has not been recorded
+   into a fixture.

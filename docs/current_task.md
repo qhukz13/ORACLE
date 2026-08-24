@@ -7,134 +7,122 @@
 
 ## Task
 
-**P6-T4 — The capstone: ORACLE decides to delegate, and the reference scenario runs**
+**P7-T1 — The task graph: model, storage, algebra, and a scheduler that runs fake work**
 
-**Phase:** [6 — External agent integration](ROADMAP.md#phase-6--external-agent-integration--post-mvp) · **Scope:** Post-MVP
-**Status:** `IN PROGRESS — requirements 1-4, 6 done 2026-08-24; the live run is the only step left` · **Set:** 2026-08-24
-**Previous task:** P6-T3 — **done** except the live CLI recording; see [current_report.md](current_report.md).
+**Phase:** [7 — task graph & supervisor](ROADMAP.md#phase-7--task-graph--supervisor--supervisor-arc) · **Scope:** Supervisor arc
+**Status:** `SET — not started` · **Set:** 2026-08-24
+**Previous task:** P6-T5 — **done**; report in [`current_report.md`](current_report.md), findings in
+[`logs/development/2026-08-24-p6t5-antigravity-planning.md`](../logs/development/2026-08-24-p6t5-antigravity-planning.md).
 
 ---
 
-## Carry-over
-
-1. ~~**bge-m3**~~ — **DONE 2026-08-24.** The run produced artefacts and resolved
-   [OQ-02](OPEN_QUESTIONS.md#oq-02): `bge-m3` wins, 61% against 55%, but only once the fusion gate
-   stopped admitting BM25 on all 38 queries — measured against the shipped gate it *lost*, 53%. The
-   gate fix shipped with it; `DEFAULT` did not change, because a ~2.5 h rebuild and 3 GB resident is
-   the owner's call. Opened [OQ-18](OPEN_QUESTIONS.md#oq-18): 61% is still nineteen points under the
-   Phase 5 recall gate. [Log](../logs/development/2026-08-24-oq02-bge-m3.md).
-2. **The live MCP recording** from P6-T3 requirement 1 — one supervised run against the real CLI,
-   payload previewed. Folded into this task's requirement 5, because the reference scenario needs a
-   live run anyway and one egress serves both.
-
 ## Why this task exists
 
-The machinery is built and none of it is reachable from a sentence. A delegation today starts only
-from a raw WS command; ORACLE itself never decides that a job is too big for it. That decision is
-what [INTEGRATIONS.md §8](INTEGRATIONS.md#8-reference-scenario) calls the actual intelligence in the
-system:
+Phase 7 is the load-bearing new subsystem, and it is the one part of the supervisor arc that
+carries **no vendor risk at all**: a hand-written graph, deterministic runners, stub CLIs. P6-T5
+just demonstrated why that ordering was right — the planner tier's default vendor failed its gate,
+and Phase 7 did not care, because the graph does not depend on who authors it.
 
-> Step 7 — recognising that this needs a stronger model — is the actual intelligence in the system,
-> and it is a decision a small model can make reliably because it is a classification, not a
-> solution.
+P7-T1 is the first of Phase 7's tasks: the durable task model, its storage, the graph algebra, and
+a scheduler that runs *fake* runners end to end. Real runners (DELEGATION, TOOL), recovery and
+concurrency are P7-T2 and P7-T3 — this task exists so that everything after it has something
+correct to plug into.
 
-This task makes that sentence true, and then proves the whole twelve-step scenario end to end.
+## What P6-T5 hands you (read these before designing)
 
-## The decision this task opens with
+Six findings from the spike change P7's design, not just its context:
 
-**Does ORACLE delegate on its own, or propose and wait?** It delegates — and the egress preview is
-the human gate, which is exactly what P6-T2 built it for. Adding a second "shall I delegate?"
-question before the "here is what would be sent" question is two prompts for one decision, and
-[SECURITY.md §2](SECURITY.md#2-design-principles) says the answer to fatigue is fewer prompts, not
-politer ones. A delegation that is never approved costs a packet render and nothing else.
+1. **A cancelled run can be indistinguishable from a failed one.** `agy` reports an interrupted
+   run as `status: ERROR` / "timeout waiting for response" — never `CANCELED`
+   ([INTEGRATIONS.md §5](INTEGRATIONS.md#5-antigravity--supported-unblocked-2026-08-21)). So the
+   scheduler **records that it cancelled**; it never infers cancellation from a runner's result.
+   Asterim's `SKIPPED ≠ CANCELLED` and `TIMEOUT ≠ FAILED` distinctions are only preservable if the
+   supervisor is the one asserting them.
+2. **Plans arrive with no edges.** Five of twelve valid plans were DAGs with zero dependencies
+   ([OQ-20](OPEN_QUESTIONS.md#oq-20)). A graph of independent tasks is therefore the *common* case,
+   not the degenerate one: the scheduler must be correct and legible when the ready set is
+   "everything", and P8's approval card will need to show a zero-edge plan as the smell it is.
+3. **A task's own acceptance criteria cannot be the verification contract.** Planners write
+   criteria like "pytest tests/test_scheduler.py passes" naming files that do not exist yet. The
+   verification a task's status depends on is ORACLE's — diff plus its own test run — exactly as
+   `DelegationService` already does it.
+4. **`structured_output` can be silently emptied.** Validate every collection for emptiness before
+   trusting a runner's structured result (PLANNER.md §2, check 0).
+5. **Verification is a delta, not a threshold.** A pristine worktree of this repo fails 28 tests
+   for environment reasons (no `.venv`, so suites that spawn a binary die). The delegate's worktree
+   failed the same 28 and passed 5 more. A VERIFY task that reads "failures > 0" as failure would
+   reject every correct delegation — so it baselines the suite once per graph and compares.
+6. **A delegation's result exists only while its worktree does.** Delegates are forbidden git
+   commands, so the diff is uncommitted; `discard()` then deletes it. Fine for one delegation
+   (the diff was evidence), fatal for a graph where task C's output is task D's input. **P7 owes a
+   harvest step**: ORACLE commits the worktree's diff to the task's branch at collect time. See
+   Finding 8 in the dev log — it cost the P6-T5 run its artifact to notice.
 
 ## Requirements
 
-1. ~~**The `delegate` intent stops being a stub.**~~ **DONE 2026-08-24.** Better than planned: the *pre-router* already recognised "ask Claude to …" deterministically and was answering with a Phase-6-not-built stub, so the explicit route now costs ~5 ms and no model call. A project the user named in their own sentence is used; anything else asks. As designed: It already exists in the classifier's vocabulary
-   and its measured accuracy is in the P1 fixtures; today it lands in the "that needs a phase that
-   isn't built yet" branch. Route it into `DelegationService` with the project resolved, and when
-   no project can be resolved, **ask** rather than guessing — a delegation against the wrong
-   repository is expensive in a way a wrong answer is not.
-2. ~~**Escalation: the failure signature.**~~ **DONE 2026-08-24** (`_failure_signature`, narrow by design: a suite that ran and failed, never a tool that could not run). As designed: After an actionable turn that ends in a *reproducible
-   failure* — `dev.run_tests` reporting failures is the case §8 describes — ORACLE escalates the
-   same work to a delegate, carrying what it already learned (the failing tests, the tool it ran)
-   into the packet's ATTEMPTS.md. Deterministic, not a second model call: the signal is "a
-   verification tool reported failure in this turn", which is a fact, not a judgement.
-3. ~~**`delegating` is a real state.**~~ **DONE 2026-08-24**; both routes finish the turn `delegated`, documented in AGENT_RUNTIME.md. As designed: `agent.state: delegating` during the handoff, and the turn
-   finishes with `outcome: "delegated"` while the delegation continues under its own `task.*`
-   stream — a turn that stayed open for a ten-minute delegation would block the session for work
-   the user can already watch in the panel.
-4. ~~**The reference scenario as an executable test.**~~ **DONE 2026-08-24** — `tests/test_reference_scenario.py`, four cases: the full scenario, green-tests-do-not-escalate, the explicit route, and the unresolvable project. As designed: [INTEGRATIONS.md §8](INTEGRATIONS.md#8-reference-scenario)'s
-   twelve steps, driven with `FakeProvider` and the stub CLI: classify → tool → failing tests →
-   **escalate** → packet with the prior attempt → egress approval → run → collect diff +
-   independent tests → report. The test asserts the *sequence*, because the ordering is the design:
-   nothing egresses before the approval, and the evidence at the end is ORACLE's, not the
-   delegate's.
-5. ~~**One supervised live run, closing two open items.**~~ **DONE 2026-08-24** — all five checks
-   green on the third attempt; the two failures were the design working (a token minted outside the
-   daemon is a bad signature; the audit log lives under `log_dir`). Recorded as
-   `tests/fixtures/mcp/live-verify.jsonl`; INTEGRATIONS.md §8 annotated. As designed: The real CLI, the real MCP bridge, a real
-   worktree: prove the delegate can call `mcp__oracle__*` back into the daemon and that the call
-   lands in the audit log. Record the exchange into `tests/fixtures/mcp/` so the transport contract
-   is pinned by evidence like the vendor stream is. Payload previewed before it is sent.
-6. ~~**The UI can start one.**~~ **DONE 2026-08-24** — the palette offers a delegation once the query names a known project, worded so the entry says a human still approves the egress. As designed: A delegation begins from something a person can type — the command
-   palette is the natural home, since it already routes typed intent. The panel from P6-T2 then
-   shows it. Without this the capstone is reachable only from a websocket frame.
+1. **Task model** (`src/oracle/orchestration/`, pydantic): `Task`, `TaskResult`, `TaskKind`
+   (TOOL · DELEGATION · VERIFY · REPORT), and the Asterim status vocabulary — `PENDING`, `READY`,
+   `RUNNING`, `PASSED`, `FAILED`, `TIMEOUT`, `SKIPPED`, `CANCELLED` — with the distinctions in
+   [ORCHESTRATION.md §3](ORCHESTRATION.md#3-the-graph) preserved, not collapsed.
+2. **Migration `0002` — the `tasks` table**, per the schema specified in ORCHESTRATION.md. Durable
+   means: the graph survives a daemon restart with no event gap, and the migration is applied by
+   the existing runner (`storage/db.py`), tested like the others.
+3. **Graph algebra**, ported from Asterim ([ASTERIM_REUSE.md](ASTERIM_REUSE.md) Tier 1) and
+   property-tested: cycle detection that returns the cycle **as a path** (iterative, so adversarial
+   input cannot blow the stack) · `ready_set` (pending ∧ all deps PASSED → fail-closed for free) ·
+   status aggregation with precedence CANCELLED > FAILED > RUNNING > PASSED.
+4. **The scheduler loop** with *fake* runners: batched topological scheduling, a width limit,
+   per-task timeout, cancel-one-branch, and `task.*` events for a graph rather than a single
+   delegation. Deterministic under test — no wall-clock sleeps in the assertions.
+5. **The graph is fed through the existing gate, not beside it.** Every TOOL task is an ordinary
+   `ToolInvocation`; the scheduler feeds the policy engine and is not a second one
+   ([SECURITY.md §10](SECURITY.md#10-the-multi-agent-surface--added-2026-08-24-phases-78) rule 1).
 
 ## Constraints
 
-- **No new prompt before the egress preview.** Escalation proposes by *starting* the delegation;
-  the preview is where a human says no.
-- Escalation is **deterministic**: a fact about the turn's tool outcomes, never a second model call.
-  A model deciding to spend money on a stronger model is a loop nobody asked for.
-- The reference-scenario test uses `FakeProvider` and the stub CLI — it must run in CI, offline,
-  every time. The live run of requirement 5 stays a script, not a test.
-- A delegation started by escalation carries the failure into ATTEMPTS.md. A delegate that repeats
-  the attempt ORACLE just made is the waste the packet format exists to prevent.
-- Tool count unchanged; `ai.delegate` remains a policy entry rather than a registry tool.
+- **No planner, no `ExecutionPlan`, no vendor.** Graphs are hand-written in tests and fixtures.
+  Phase 8 wires plans in; if this task touches a planner, the scope fence failed.
+- No UI beyond what already exists; the execution tree is P11.
+- `DelegationService` is *reused*, not rewritten — P7-T2 renames it to the DELEGATION runner with
+  its lifecycle intact. Do not refactor it in this task.
+- The single-turn pipeline and single-delegation path stay the default and stay untouched.
 
 ## Acceptance criteria
 
-- [x] "ask Claude to fix the auth tests in Asterim" starts a delegation, with the project resolved,
-      and an unresolvable project asks instead of guessing. Asserted with `FakeProvider`.
-- [x] A turn whose `dev.run_tests` reports failures escalates, and the resulting packet's
-      ATTEMPTS.md names what ORACLE already tried. Asserted on the rendered file.
-- [x] `agent.state: delegating` is emitted, and `turn.finished` carries `outcome: "delegated"` while
-      the `task.*` stream continues.
-- [x] The reference scenario passes as one test, asserting the order — in particular that no egress
-      precedes the approval.
-- [x] One live run: the delegate calls back through MCP, the call is in the audit log, and the
-      exchange is recorded as a fixture — 2026-08-24, five checks green.
-- [x] The palette can start a delegation; vitest covers the entry point.
-- [x] The gate green including the security suite — `check: OK` 2026-08-24.
-- [x] *(Carry-over)* bge-m3 recorded in OQ-02 2026-08-24, decision to the owner: the numbers
-      favour switching, `DEFAULT` left unchanged pending it.
+- [ ] A hand-written 4-task graph (tool → delegation → verify → report) runs end to end with fake
+      runners; order, gating and events asserted the way `test_reference_scenario.py` asserts them.
+- [ ] Cycle detection returns the offending cycle as a path, proven on an adversarial fixture.
+- [ ] One task fails mid-graph: dependents become `SKIPPED` (not `CANCELLED`), aggregate status
+      follows the precedence rule, and the reason is recorded.
+- [ ] A cancelled branch is recorded as `CANCELLED` **by the scheduler's own record**, and a
+      runner that reports an ambiguous error does not change that.
+- [ ] The `tasks` migration applies, round-trips a graph, and the graph reloads after a restart.
+- [ ] A task's result survives its workspace: the harvest step commits the diff to the task branch,
+      and a test proves the result is still there after the worktree is discarded.
+- [ ] `make check` green, security suite included.
 
 ## Relevant files
 
-Modify: `src/oracle/router/pipeline.py` (the delegate branch + escalation) ·
-`src/oracle/delegation/service.py` (attempts from the failing turn) ·
-`apps/desktop/src/components/CommandPalette.tsx` · `docs/INTEGRATIONS.md` §8 (mark it as executed) ·
-`docs/AGENT_RUNTIME.md` (the `delegating` state).
-New: `tests/test_reference_scenario.py` · `scripts/verify_mcp_live.py`.
-Read first: [INTEGRATIONS.md §8](INTEGRATIONS.md#8-reference-scenario) · `router/pipeline.py` ·
-[AGENT_RUNTIME.md §3](AGENT_RUNTIME.md#3-state-machine).
+New: `src/oracle/orchestration/{models,graph,scheduler}.py` ·
+`src/oracle/storage/migrations/0002_tasks.sql` · `tests/test_orchestration_graph.py` ·
+`tests/test_orchestration_scheduler.py`.
+Read first: [ORCHESTRATION.md](ORCHESTRATION.md) §3–§4 · [ASTERIM_REUSE.md](ASTERIM_REUSE.md)
+Tier 1 · `src/oracle/delegation/service.py` (the lifecycle a runner will wrap) ·
+`tests/test_reference_scenario.py` (how an end-to-end order assertion is written here).
 
 ## Dependencies
 
-P6-T1..T3, all built. The live run needs the owner's go-ahead, like every egress.
+None. Phase 8 waits on this; nothing waits on Phase 8.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| Escalation fires on every red test and burns quota | It carries the same approval gate as any egress; the preview names the cost before anything is sent |
-| The `delegate` intent misfires on "fix the typo" | The P1 fixture set already measures this label; re-run it, and if it regressed, that is a finding not a footnote |
-| The reference test becomes a mock of itself | It drives the real pipeline, real gate, real packet renderer and real worktree; only the model and the vendor CLI are fakes, and both replay recorded behaviour |
+| Scope creep toward a workflow engine | The litmus is ORCHESTRATION.md §8; fake runners only in this task |
+| Windows asyncio scheduler edge cases | OQ-16's rule (pipes on threads); no new subprocess handling here — runners are fake |
+| The status vocabulary collapsing under implementation pressure | Each distinction gets a test that fails if two states are merged |
 
 ## Definition of done
 
-All acceptance criteria · INTEGRATIONS.md §8 annotated with what actually happened when it ran ·
-the phase's Definition of Done in ROADMAP.md re-read and either met or explicitly amended ·
-the gate green · `current_report.md` overwritten · this file updated to **P7-T1** (Pipelines) or the
-phase's remaining work, whichever the state argues for.
+All acceptance criteria · `make check` green · ORCHESTRATION.md corrected to as-built where it
+guessed · `current_report.md` overwritten · this file set to **P7-T2**.

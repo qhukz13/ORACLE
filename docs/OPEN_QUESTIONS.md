@@ -17,7 +17,7 @@ doc, delete the marker.
 | [OQ-03](#oq-03) | How long will Pascal keep GPU acceleration? | `UNKNOWN` | risk, not a phase | monitoring |
 | [OQ-04](#oq-04) | Does `realpath` resolve Windows junctions? | ~~`TO VERIFY`~~ | Phase 2 | **RESOLVED 2026-08-21 — yes; but `is_symlink()` lies** |
 | [OQ-05](#oq-05) | Does `agy -p` emit stdout when piped? | ~~`EXPERIMENT NEEDED`~~ | Phase 6 (Antigravity only) | **RESOLVED 2026-08-21 — yes, with `--output-format`** |
-| [OQ-06](#oq-06) | Can a PWA install over a self-signed cert? | `TO VERIFY` | Phase 8 (push only) | open |
+| [OQ-06](#oq-06) | Can a PWA install over a self-signed cert? | `TO VERIFY` | Phase 12 (push only) | open |
 | [OQ-07](#oq-07) | Is the memory subsystem dual- or quad-channel? | `UNKNOWN` | CPU-fallback planning | open |
 | [OQ-08](#oq-08) | Does FTS5 `unicode61` handle Russian acceptably? | ~~`TO VERIFY`~~ | Phase 5 | **RESOLVED 2026-08-22 — yes; no stemmer, no camelCase split** |
 | [OQ-09](#oq-09) | `pywinpty` on Python 3.12 + ConPTY behaviour | ~~`TO VERIFY`~~ | Phase 3 | **RESOLVED 2026-08-21 — works; readiness must be measured, not slept** |
@@ -25,11 +25,15 @@ doc, delete the marker.
 | [OQ-11](#oq-11) | Does the Tauri sidecar die with the shell? | ~~`TO VERIFY`~~ | Phase 0 | **RESOLVED 2026-08-21 — yes, via Job Object** |
 | [OQ-12](#oq-12) | Is taint escalation tolerable in daily use? | `ASSUMPTION` | Phase 5+ tuning | open |
 | [OQ-13](#oq-13) | What approval rate causes prompt fatigue? | `ASSUMPTION` | Phase 3+ tuning | open |
-| [OQ-14](#oq-14) | Does the orbital view earn its place? | `UNKNOWN` | Phase 9 go/no-go | open |
+| [OQ-14](#oq-14) | Does the orbital view earn its place? | `UNKNOWN` | Phase 11 go/no-go | open |
 | [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | `EXPERIMENT NEEDED` | UX quality, not a phase | open |
 | [OQ-16](#oq-16) | Does `connect_read_pipe` work anywhere on Windows? | `UNKNOWN` | none — worked around | monitoring |
 | [OQ-17](#oq-17) | Is a ~43 min **cold** reindex acceptable? | `ASSUMPTION` | Phase 5 tuning | narrowed 2026-08-22 — warm rebuilds are 37 s |
 | [OQ-18](#oq-18) | Can Russian questions reach an English corpus at all? | `EXPERIMENT NEEDED` | Phase 5 gate | **opened 2026-08-24 — best measured recall is 61%; the gate is 80%** |
+| [OQ-19](#oq-19) | Should the Claude integration move to the Claude Agent SDK? | `TO VERIFY` (on trigger) | none — trigger-based | open |
+| [OQ-20](#oq-20) | Can `agy --json-schema` reliably return a valid ExecutionPlan? | measured 2026-08-24 | P6-T5 / Phase 8 | **answered NO — 75% vs a 90% gate; the ladder promoted Claude** |
+| [OQ-21](#oq-21) | When does ORACLE's MCP server need the 2026-07-28 spec? | `UNKNOWN` | none — watch item | monitoring |
+| [OQ-22](#oq-22) | Does the knowledge graph hold its budgets at corpus scale? | `EXPERIMENT NEEDED` | Phase 11 (graph view only) | open |
 
 ---
 
@@ -318,7 +322,7 @@ tokens** to answer "say hello" (large injected system prompt), so it is a poor c
 ---
 
 ### OQ-06
-**Can a PWA install and receive push over a self-signed certificate?** `TO VERIFY` · bounds **Phase 8**
+**Can a PWA install and receive push over a self-signed certificate?** `TO VERIFY` · bounds **Phase 12**
 
 Browsers require a secure context for service workers. A self-signed cert is untrusted by default,
 which likely blocks PWA installation and Web Push.
@@ -326,7 +330,7 @@ which likely blocks PWA installation and Web Push.
 **Check.** Serve the PWA over the self-signed cert; attempt install and service-worker registration on
 the actual phone. Then repeat with a locally-installed CA.
 
-**Does not block Phase 8** — v1 ships in-app WS notifications only, and says so plainly
+**Does not block Phase 12** — v1 ships in-app WS notifications only, and says so plainly
 ([MOBILE.md §5](MOBILE.md#the-open-problem--oq-06)). It only decides whether background push is
 achievable later.
 
@@ -465,13 +469,13 @@ should move to "auto + undo" instead.
 ---
 
 ### OQ-14
-**Does the orbital view earn its place?** `UNKNOWN` · Phase 9 go/no-go
+**Does the orbital view earn its place?** `UNKNOWN` · Phase 11 go/no-go
 
 The design commits to a test rather than to the feature: cover every label and it must still be
 possible to say what ORACLE is doing
-([UI.md §3](UI.md#3-the-core-orbital-view--phase-9), [ROADMAP P9](ROADMAP.md#phase-9--advanced-ui--post-mvp)).
+([UI.md §3](UI.md#3-the-core-orbital-view--phase-11), [ROADMAP P11](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc)).
 
-**Resolve at Phase 9.** If it fails, delete it and record an ADR saying so. Deleting a centrepiece
+**Resolve at Phase 11.** If it fails, delete it and record an ADR saying so. Deleting a centrepiece
 that does not work is a success, not a failure — and deciding this *after* months of real event data
 is exactly why it is scheduled late.
 
@@ -550,6 +554,114 @@ building anything, and it would change what the first experiment means.
 
 **Until this resolves, the Phase 5 recall criterion is not met**, and saying so is more
 useful than moving the gate to where the numbers already are.
+
+---
+
+### OQ-19
+**Should the Claude integration move from the pinned CLI contract to the Claude Agent SDK?**
+`TO VERIFY` · trigger-based, blocks nothing
+
+The Python Claude Agent SDK (0.x as of 2026-08) wraps the same `claude` subprocess with typed
+streaming events, lifecycle hooks (PreToolUse can *block* a tool — which could enforce the policy
+gate in-process rather than via `--allowedTools` + MCP), in-process MCP servers, and session
+management. That is genuinely better than parsing stream-json by hand. It is also a moving 0.x
+API replacing a contract that is **working, recorded into fixtures, and tested** — and it would
+shift the pinned surface in INTEGRATIONS.md §3 from CLI flags to an SDK version.
+
+**Decision recorded in [ADR-0022](DECISIONS.md#adr-0022--external-agent-frameworks-evaluated-not-adopted):**
+keep the hand-rolled contract. **Trigger to re-open:** the next breaking drift of the CLI stream
+contract (quarterly re-verification will catch it) — at that point the migration cost is paid
+either way, and the SDK should win. Check then: SDK maturity (out of 0.x?), whether hooks can
+express the gate's decisions, dependency weight, and whether `--setting-sources`/scrub isolation
+survives the SDK path.
+
+---
+
+### OQ-20
+**Can `agy --json-schema` reliably return a valid `ExecutionPlan`, at what cost and latency?**
+**Answered `NO` at the stated gate — 2026-08-24, P6-T5.** The ladder has promoted; Phase 8's
+default planner is **Claude**, not Antigravity.
+
+Measured over 16 supervised calls (4 real objectives × `--effort low|high` × 2 repeats), driving
+the real adapter against a schema generated from PLANNER.md §2. Full analysis and every call:
+[`logs/development/2026-08-24-p6t5-antigravity-planning.md`](../logs/development/2026-08-24-p6t5-antigravity-planning.md).
+
+| | result | gate |
+|---|---|---|
+| valid on first attempt | **12/16 = 75%** | ≥ 90% — **missed** |
+| …at `--effort low` alone | 7/8 = 87.5% | still short, on 8 samples |
+| median latency | 27.1 s (low) · 42.9 s (high) | — |
+| median cost | ~55k tokens per plan (955k across the run) | — |
+
+**The failure shapes matter more than the rate.** None of them was the truncation or
+prose-wrapping the question anticipated:
+
+* **3 × the planner went browsing.** All at `--effort high`. Given an empty temp workspace, it
+  tried to `read_file("C:\Users\qhukz")` — the owner's home directory — and once a named personal
+  file. The vendor's permission gate denied it, which ended the run. That gate exists here only
+  because ORACLE refuses `--dangerously-skip-permissions`; under that flag those calls would have
+  read the owner's home directory and sent what they found to the vendor. **The strongest result
+  of the spike is a security one, and it is not about planning.**
+* **1 × `structured_output` returned `tasks: []`** while the raw `response` beside it held a
+  complete six-task plan. The vendor's schema filter drops non-conforming items **silently**.
+  A schema-shaped answer is not a validated answer.
+* **Valid ≠ schedulable.** Only 7 of 12 valid plans declared *any* dependency; five were DAGs with
+  no edges — tasks a scheduler would fire simultaneously that must plainly be sequential.
+  `project`, `context_hints` and `agent_hint` were filled on 45 of 72 tasks.
+
+**Sample size, stated plainly:** 16 calls, not the ≥ 20 the task specified. The pilot measured
+55.6k tokens per plan — 4× the pre-run estimate — and the owner trimmed the grid. OQ-20 is
+therefore **narrowed with numbers rather than closed at the stated power**, and re-opening it
+costs another ~1M tokens.
+
+**What follows** (PLANNER.md §5–§6): Claude authors plans against the same schema and the same
+validation; Antigravity keeps `reviewer` and `researcher`. If it is ever reconsidered for
+`planner`: pin `--effort low`, add the repair round trip, add a tolerant parse of the raw
+`response` as a second source, and demand dependencies explicitly in the prompt.
+
+---
+
+### OQ-21
+**When does ORACLE's hand-rolled MCP server need the 2026-07-28 spec revision?**
+`UNKNOWN` · watch item, blocks nothing
+
+ORACLE speaks protocol `2025-06-18` — four JSON-RPC methods, pinned by tests, zero dependencies
+(INTEGRATIONS.md §4). The 2026-07-28 revision makes the core stateless, replaces server-initiated
+requests with MRTR, and adds a Tasks extension for long-running operations — the last being
+genuinely relevant to exposing delegations over MCP someday.
+
+**The standing rule already covers this:** take the SDK (now v2) the day a client rejects the
+hand-rolled surface. **Watch:** Claude CLI release notes for a minimum-protocol-version bump;
+re-check quarterly with the vendor-contract re-verification. Do not migrate pre-emptively — the
+current surface works and the SDK costs 24 packages in the trusted base (measured, P6-T3).
+
+---
+
+### OQ-22
+**Does the knowledge-graph view hold its layout, rendering and quality budgets at corpus scale?**
+`EXPERIMENT NEEDED` · blocks the Phase 11 graph view (nothing else); design in
+[UI.md §11b](UI.md#11b-the-knowledge-graph--phase-11), decision in
+[ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered)
+
+The design commits to numbers nobody has measured on this corpus (~1,330 documents, ceiling 10k)
+and this machine. Four measurements, run at the start of Phase 11 before the view is built:
+
+1. **Offline layout cost.** A force layout of the full document graph in the indexing worker —
+   wall-clock and peak memory, cold and incremental. Gate: fits inside the incremental-index
+   budget for the add-one-document case; a full re-layout may cost minutes because it is explicit.
+2. **Rendering.** Canvas pan/zoom over the full corpus at 60 fps on this GPU/WebView2, idle
+   < 5% CPU, first paint < 1 s from cached positions. Compare an SVG control run to keep ADR-0023
+   honest — if SVG survives at this node count, the canvas complexity is unjustified.
+3. **Semantic-edge quality.** Embedding-kNN thresholds/caps that produce readable clusters rather
+   than a hairball, judged against the four questions the view exists to answer (shape, neglect,
+   reach, use) on the real corpus. If no threshold reads well, semantic edges ship off and stay a
+   toggle-nothing — the explicit link graph alone may be the honest product.
+4. **Incremental placement.** New documents placed at neighbour centroids: does the map stay
+   recognisable after a week of real edits, without a re-layout?
+
+Failure of 1 or 2 changes the mechanism (coarser graph: one node per note/section, or
+level-of-detail culling), not the goal. Record results in `logs/development/` and fold the
+numbers into TESTING.md's performance table when the view lands.
 
 ---
 

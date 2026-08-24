@@ -158,6 +158,14 @@ per-file, byte for byte, in `tests/test_rag_treesitter.py`.
 **Obsidian specifics:** front-matter becomes metadata (tags, aliases); `[[wikilinks]]` are extracted
 into a link table so retrieval can expand one hop to directly linked notes; `#tags` become filters.
 
+The link table gained a second consumer in the 2026-08-24 replan: it is the explicit-edge source
+for the Phase 11 **knowledge graph view** ([UI.md §11b](UI.md#11b-the-knowledge-graph--phase-11)),
+which also derives optional semantic edges from the document embeddings (computed offline with
+the index, [OQ-22](OPEN_QUESTIONS.md#oq-22)) and will persist layout positions in `knowledge.db`
+([ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered)).
+Nothing about indexing or retrieval changes; the graph is a read-only projection of what this
+document already specifies.
+
 ---
 
 ## 4. Embeddings

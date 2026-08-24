@@ -13,7 +13,7 @@ Jarvis influence is in the *language* — a luminous core, orbiting contexts, st
 | **Every pixel reports state** | If an element doesn't answer a question I actually have, it's deleted. |
 | **Calm by default** | Idle = still and dim. Motion means something happened. An interface that is always animating can't signal anything. |
 | **Density over spaciousness** | This is a tool for someone reading logs and diffs, not a landing page. Tight leading, small type, real information per screen. |
-| **The centre earns its place** | The orbital view ships in P9 with an explicit test: cover every label and you must still be able to say what ORACLE is doing. If it fails, it gets cut. |
+| **The centre earns its place** | The orbital view ships in P11 with an explicit test: cover every label and you must still be able to say what ORACLE is doing. If it fails, it gets cut. |
 | **Never colour alone** | Every status carries icon + label + colour. Required for accessibility and for glanceability. |
 | **The terminal is first-class** | Not a hidden debug panel. It's where trust is built: I can see the actual commands. |
 
@@ -64,14 +64,15 @@ telemetry · a spinning globe · progress bars that don't map to real progress.
 | Inspector | 300–420 px, resizable | `Ctrl+I` | context-sensitive; auto-opens on selection |
 | Dock | 4 states | `Ctrl+\`` | terminal / logs / problems |
 
-**Center stage is switchable, not fixed.** `Ctrl+1..4` → Orbit · Chat · Timeline · Tasks. When a
+**Center stage is switchable, not fixed.** `Ctrl+1..4` → Orbit · Chat · Timeline · Tasks; from
+Phase 11, `Ctrl+5` → Knowledge graph (§11b). When a
 conversation starts, ORACLE **auto-switches to Chat** and the orbit demotes to a 40 px core indicator
 in the command bar. This is the resolution of "beautiful centrepiece vs. useful interface": the orbit
 is the ambient/idle view, chat is the working view, and the transition is automatic.
 
 ---
 
-## 3. The core (orbital view) — **Phase 9**
+## 3. The core (orbital view) — **Phase 11**
 
 ### What it must communicate
 
@@ -239,6 +240,46 @@ retrying is safe.
 
 ---
 
+## 6b. The execution tree — **Phase 11**
+
+The supervisor architecture's primary new surface: one root task, its plan, its tasks, their
+attempts, and the evidence for each — as a tree, because that is what it is
+([ORCHESTRATION.md §6](ORCHESTRATION.md#6-observability)). The tree **is a query** over the
+`tasks` table and the event log; it maintains no state of its own.
+
+```
+▾ ⚙ continue development on Asterim              running · 12m · $0.14
+  ✓ plan        antigravity · planner            4 tasks · [view plan] [egress #1]
+  ✓ A implement retry logic   claude · coder     diff +214/−36 · tests 41/41 · [worktree]
+  ▾ ✗ B cover the 401 case    claude · tester    tests 40/41 — FAILED       [evidence]
+      ✗ attempt 1                                the failing case · [diff] [logs]
+      ◆ B′ (replan 1/2)       claude · tester    running 2m
+  ○ C review                  antigravity        waiting on B′
+  ○ D digest                  local              waiting on C
+```
+
+Rules, inherited and extended:
+
+- **Every row links to evidence** — ORACLE's measurements (diff stat, test counts, scope check),
+  with the worker's own claim shown separately and labelled as a claim. Same rule as the Task
+  Inspector: dead-end numbers are a bug.
+- **Superseded tasks stay visible**, collapsed under their replacement — the lineage is the
+  explanation of what the graph cost. Nothing is erased, because the event log doesn't erase.
+- Status vocabulary matches [ORCHESTRATION.md §2](ORCHESTRATION.md#2-task-model) exactly —
+  `skipped` renders differently from `cancelled`, `timeout` differently from `failed`, and each
+  says why in one word.
+- Layout uses a topological rank with **longest-path** column assignment (ported from Asterim's
+  `dagColumns` — drawing a node next to the root would claim a parallelism the graph does not
+  have), plain SVG/DOM, keyboard-navigable, no graph library — the ADR-0013 philosophy applied
+  to a tree.
+- Per-row cancel for anything running; the graph card's approve/deny state mirrors into the
+  Confirmation Center like every approval.
+
+In the **orbital view**, a root task is one node on the tasks ring; its workers appear as child
+glyphs while running (`ORACLE → Asterim → Claude·coder / Claude·tester / AGY·review`, the
+replan brief's picture). Selecting any of them opens this tree in the inspector. The orbit still
+answers "what is ORACLE doing"; the tree answers "how, and with what evidence".
+
 ## 7. Activity timeline
 
 The event log, rendered. A vertical chronological stream, grouped by turn, filterable by
@@ -381,6 +422,122 @@ Backed by hybrid retrieval (P5) for notes/files and direct queries for the rest.
 `Tab` cycles source groups; `Enter` opens; `Ctrl+Enter` sends the result to the agent as context.
 
 ---
+
+## 11b. The knowledge graph — **Phase 11**
+
+> Added 2026-08-24 from the owner's design references: film-HUD radial consoles (layered
+> translucent rings, a luminous focused core, everything else receding into depth) and
+> Obsidian-style cluster graphs (collection-coloured constellations, hub-and-spoke stars, orphans
+> drifting at the rim). The brief: *see everything ORACLE knows — Obsidian vaults, project docs,
+> PDFs — as one interactive map.* The data layer mostly exists: `knowledge.db` already holds
+> every document, its collection, its embeddings, and a `links` table of extracted `[[wikilinks]]`
+> ([RAG.md §3](RAG.md#3-chunking), `rag/store.py`). This section is the view over it.
+>
+> Layout and rendering decisions are recorded as
+> [ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered);
+> the open measurements are [OQ-22](OPEN_QUESTIONS.md#oq-22).
+
+### What it must answer
+
+The graph earns its place the same way the orbit does — by answering questions the list view
+cannot. The four it exists for:
+
+1. **Shape** — how is my knowledge actually organised? Where are the hubs, the clusters, the
+   bridges between a vault and a project?
+2. **Neglect** — what is orphaned, stale, or was never indexed?
+3. **Reach** — starting from this note, what is connected, one and two hops out?
+4. **Use** — what did ORACLE just retrieve to answer me, and from where?
+
+If, after real use, it answers none of these better than search does, it gets cut and an ADR
+records that — the same honesty gate as the orbit ([OQ-14](OPEN_QUESTIONS.md#oq-14) applies to
+both, per view).
+
+### Nodes and edges
+
+| Element | Source | Encoding |
+|---|---|---|
+| **Node = document** | `knowledge.db` documents (~1,330 today; design ceiling 10k) | colour = **collection** (each vault/project/doc-set gets a stable token-derived hue) · size = link degree · opacity = staleness (same semantics as the orbit) |
+| **Explicit edge** | the `links` table (`[[wikilinks]]`, already extracted at index time) | solid, dim by default |
+| **Semantic edge** | k-nearest-neighbour over document embeddings, thresholded, capped per node — computed offline with the index, never live | fainter, dashed; **off by default**, a toggle — inferred similarity is a suggestion, and drawing it like a fact would lie |
+| **Retrieval edge** | episodic: documents co-cited in one answer (event log) | appears only in trace mode, below |
+| **Collection hull** | derived | a barely-visible tinted region behind each cluster, so colour is not the only carrier (accessibility rule) |
+
+**Orphans are shown honestly**: documents with no edges sit on an outer arc at the rim — the
+reference images' peripheral ring, kept because it *is* the honest rendering of disconnection.
+Finding them is question 2; hiding them would delete the answer. Documents that **failed to
+index** appear hollow with an error affordance; collections that are registered but unindexed
+appear as a single ghosted hull with a "index this" action. No decorative nodes, ever.
+
+### Layout — simulated, then frozen
+
+The stability principle from [ADR-0013](DECISIONS.md#adr-0013--deterministic-svg-orbit-no-force-simulation)
+holds — a map you cannot memorise is decoration — but its mechanism (hash-angle polar layout)
+cannot scale to a thousand nodes where *cluster adjacency is the information*. The resolution
+(ADR-0023):
+
+- A force-directed layout runs **offline** — in the indexing worker, alongside a reindex — and
+  the resulting positions are **persisted in `knowledge.db`** next to the documents they place.
+- The live view **never simulates**. It renders frozen positions; the vault sits where it sat
+  last month. No jitter, no per-frame physics cost, idle CPU stays under the 5% budget.
+- New documents are placed incrementally at the centroid of their neighbours (or the collection
+  hull's edge when unlinked) without moving anything else.
+- **Re-layout is an explicit action** on the index health view, like reindexing — with a
+  before/after preview, because it destroys spatial memory and should be chosen, not suffered.
+
+### Visual language
+
+The reference material's *language*, filtered through this document's anti-goals (no gratuitous
+glow, no fake telemetry, nothing animates without meaning):
+
+- **Idle**: a dim constellation on `--bg-0`. Labels appear only above a zoom threshold and for
+  hubs; the map reads as shape first, names second.
+- **Focus mode** (click a node, or arrive from search): the selected node and its 1–2-hop
+  neighbourhood come to full luminance; everything else recedes to near-black rather than
+  disappearing — depth, not deletion. This is the gold-hologram reference as an interaction
+  state, not a permanent style. `Esc` releases it.
+- A focused node gets a **radial metadata ring** — the HUD language — showing collection, age,
+  degree, and tags as labelled arcs. Every arc is real data with a real click-through; the moment
+  one is decorative it is removed.
+- **Motion means something happened**: a node being reindexed pulses once; a retrieval trace
+  animates once, then stays lit until dismissed. Nothing loops. `prefers-reduced-motion` replaces
+  all of it with instant state changes, fully usable.
+
+### Interaction
+
+| Gesture | Effect |
+|---|---|
+| pan / zoom | free navigation; labels density scales with zoom |
+| hover | tooltip: title · collection · modified · links in/out |
+| click | Inspector: metadata, outlinks/backlinks (each a jump), chunk list, **Open** (via `app.launch` alias — Obsidian for notes, editor for code), **Ask ORACLE about this** (pre-fills chat with the doc pinned as context) |
+| double-click | focus mode on that node's neighbourhood |
+| `Ctrl+F` in view | search-to-locate: matches glow, view flies to the best hit; wired to the same hybrid search as everything else |
+| filter chips | collection · project · type (note/doc/pdf/code) · touched-within time slider · edge-type toggles |
+| lasso / shift-click | **select-as-context**: the selection becomes a context package — pin it to the next turn, or hand it to the packet builder. Local, T0; if it later feeds a delegation, the ordinary egress preview prices it like any other context |
+| from a chat citation | **"show on graph"**: trace mode — the answer's cited documents light up with their retrieval edges, and the graph becomes the explanation surface for *why those sources*. The timeline's `[inspect]` and this view are two renderings of the same events |
+
+### Rendering and budgets
+
+SVG struggles past a few hundred nodes (ADR-0013 said so itself, back when it was irrelevant), so
+this view renders on **canvas**, with a DOM overlay for the focused node, its ring, labels and
+the inspector — keeping text selectable and focusable where it matters.
+Measured, not hoped ([OQ-22](OPEN_QUESTIONS.md#oq-22)): pan/zoom at 60 fps on the full corpus ·
+idle < 5% CPU and full pause when the view is hidden or the window unfocused · offline layout of
+the full corpus within the incremental-index budget · first paint < 1 s from cached positions.
+
+### Accessibility
+
+The orbit's rule, unchanged: **a full list-view equivalent**, not alt text — a searchable,
+sortable table (document · collection · in/out links · modified · staleness) with the same
+filters and the same actions, toggled by a control and default for screen readers. Focus mode's
+neighbourhood is enumerable from the inspector as a list. Colour never carries meaning alone:
+collections get hulls and labels, staleness gets a badge.
+
+### Explicitly not
+
+No live physics in the viewport · no 3D · no edge bundling until a measured hairball demands it ·
+no automatic "AI insights" overlaid on the map (the graph shows what *is*; analysis happens in
+chat where it can cite) · no second data pipeline — every node, edge and failure state comes from
+`knowledge.db` and the event log, or it does not appear.
 
 ## 12. Notifications
 
@@ -536,7 +693,10 @@ AppShell
 │   └── TreeSection ×4 (Projects · Tasks · Agents · Knowledge) → TreeNode
 ├── CenterStage
 │   ├── ViewTabs
-│   ├── OrbitView      → CoreVisual · OrbitRing ×4 → OrbitNode · FlowEdge   [P9]
+│   ├── OrbitView      → CoreVisual · OrbitRing ×4 → OrbitNode · FlowEdge   [P11]
+│   ├── ExecutionTree  → TaskNode (tree) · AttemptRow · EvidenceLink        [P11]
+│   ├── KnowledgeGraph → GraphCanvas · FocusRing · CollectionHull           [P11]
+│   │                    · GraphListView (a11y equivalent) · TraceOverlay
 │   ├── ChatView       → MessageList → MessageBubble · ToolCallCard · PlanCard
 │   │                                 · CitationChip · StreamingIndicator
 │   ├── TimelineView   → TimelineGroup → TimelineEvent

@@ -395,18 +395,24 @@ channel), raw TCP (rebuilding HTTP badly).
 | **Claude Code** | `claude -p --bare --output-format stream-json` + `--json-schema`, `--resume`, `--allowedTools`; installed here (v2.1.234) | **Supported** |
 | **Anthropic API** | Messages API via `anthropic` SDK, for cheap non-agentic calls | **Supported** |
 | **MCP (inbound)** | ORACLE exposes its guarded tools as an MCP server so delegated agents call back in instead of running raw shell. **Built P6-T3 with no new dependency**: four JSON-RPC methods over stdio, pinned by tests that drive raw frames. `mcp==2.0.0` was installed and verified working first — it costs **24 packages** (`cryptography`, `pywin32`, `opentelemetry-api`, `jsonschema`…) in the daemon's trusted base, which is not a trade worth making for a wire format this small. Take the SDK if a client ever rejects the hand-rolled surface; that measurement is the justification ([INTEGRATIONS.md §4](INTEGRATIONS.md#4-oracle-as-an-mcp-server)) | **Supported** |
-| **Antigravity** | `agy -p --output-format stream-json` (CLI v1.1.x, SDK v0.1.x) — but see the open non-TTY stdout bug | **Potential** — blocked on [OQ-05](OPEN_QUESTIONS.md) |
+| **Antigravity** | `agy -p --output-format stream-json` (+ `--json-schema` for planning) — the non-TTY stdout bug is default-text-mode only, resolved by always passing `--output-format` ([OQ-05](OPEN_QUESTIONS.md#oq-05), resolved) | **Supported** — adapter is P6-T5; planner role pending [OQ-20](OPEN_QUESTIONS.md#oq-20) |
 | **Handoff Packet** | Write a self-contained task to disk; collect results via git diff | **Fallback** — works with any agent, including ones that don't exist yet |
+
+**The supervisor arc adds zero dependencies.** The task graph is in-house pure functions (partly
+ported from Asterim, [ASTERIM_REUSE.md](ASTERIM_REUSE.md)); LangGraph, CrewAI, ACP adapters and
+the Claude Agent SDK were evaluated and not adopted — reasons and revisit-triggers in
+[ADR-0022](DECISIONS.md#adr-0022--external-agent-frameworks-evaluated-not-adopted) and
+[INTEGRATIONS.md §9](INTEGRATIONS.md#9-the-external-landscape--surveyed-2026-08-24-decisions-in-adr-0022).
 
 ---
 
-## 10. Voice (Phase 10 — deliberately unresolved)
+## 10. Voice (Phase 13 — deliberately unresolved)
 
 The landscape moved: `VERIFIED 2026-08-21` **Piper TTS was archived in October 2025**, so the obvious
 default is gone. Recommending it now would be exactly the stale assumption this document exists to
 prevent.
 
-Current shape of the decision, to be made at Phase 10, not before:
+Current shape of the decision, to be made at Phase 13, not before:
 
 - **STT**: `faster-whisper` (CTranslate2, int8, CPU) or `whisper.cpp`. Russian needs `small` or better;
   `tiny/base` are inadequate for it. 24 threads should manage near real-time at `small`.
