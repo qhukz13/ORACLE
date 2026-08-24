@@ -13,7 +13,7 @@ doc, delete the marker.
 | # | Question | Marker | Blocks | Status |
 |---|---|---|---|---|
 | [OQ-01](#oq-01) | Which router model actually fits and performs? | ~~`EXPERIMENT NEEDED`~~ | Phase 1 | **RESOLVED 2026-08-21 — 0.8b, 93.3% accuracy** |
-| [OQ-02](#oq-02) | Which embedding model for mixed RU/EN? | `EXPERIMENT NEEDED` | Phase 5 | **REOPENED 2026-08-22 — 25 Russian fixtures put e5-base at 36%, not 62%; `bge-m3` run pending** |
+| [OQ-02](#oq-02) | Which embedding model for mixed RU/EN? | ~~`EXPERIMENT NEEDED`~~ | Phase 5 | **RESOLVED 2026-08-24 — `bge-m3`, but only with the fusion gate fixed; unfixed it loses** |
 | [OQ-03](#oq-03) | How long will Pascal keep GPU acceleration? | `UNKNOWN` | risk, not a phase | monitoring |
 | [OQ-04](#oq-04) | Does `realpath` resolve Windows junctions? | ~~`TO VERIFY`~~ | Phase 2 | **RESOLVED 2026-08-21 — yes; but `is_symlink()` lies** |
 | [OQ-05](#oq-05) | Does `agy -p` emit stdout when piped? | ~~`EXPERIMENT NEEDED`~~ | Phase 6 (Antigravity only) | **RESOLVED 2026-08-21 — yes, with `--output-format`** |
@@ -29,6 +29,7 @@ doc, delete the marker.
 | [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | `EXPERIMENT NEEDED` | UX quality, not a phase | open |
 | [OQ-16](#oq-16) | Does `connect_read_pipe` work anywhere on Windows? | `UNKNOWN` | none — worked around | monitoring |
 | [OQ-17](#oq-17) | Is a ~43 min **cold** reindex acceptable? | `ASSUMPTION` | Phase 5 tuning | narrowed 2026-08-22 — warm rebuilds are 37 s |
+| [OQ-18](#oq-18) | Can Russian questions reach an English corpus at all? | `EXPERIMENT NEEDED` | Phase 5 gate | **opened 2026-08-24 — best measured recall is 61%; the gate is 80%** |
 
 ---
 
@@ -84,7 +85,48 @@ runtime rather than of the model.
 
 ### OQ-02
 **Which embedding model for a mixed Russian/English corpus of prose and code?**
-**REOPENED 2026-08-22, the same day it was resolved.**
+**RESOLVED 2026-08-24 — `bge-m3` at 1024d, conditional on the fusion-gate fix that landed
+with it. Not switched by default; see below.**
+
+Full write-up: [`logs/development/2026-08-24-oq02-bge-m3.md`](../logs/development/2026-08-24-oq02-bge-m3.md).
+
+The decisive run finally happened: both candidates built over the same full corpus on the
+same day and measured by the same code, 38 fixtures of which 25 are Russian.
+
+| embedding | fusion gate | recall@5 | crosslang | p95 |
+|---|---|---:|---:|---:|
+| `e5-base` | as shipped | 55% | 36% | 271 ms |
+| `e5-base` | fixed | 55% | 36% | 260 ms |
+| `bge-m3` | as shipped | 53% | 32% | 401 ms (fails) |
+| **`bge-m3`** | **fixed** | **61%** | **44%** | 332 ms |
+
+**Measured against the retrieval code as it shipped, `bge-m3` loses.** The fusion gate was
+admitting BM25's thirty results on 38 questions out of 38 — including all 25 Russian ones,
+for which BM25 returned the corpus's one Russian-documented project whatever the question
+was about. Fusion can only displace a correct dense hit that exists, so the damage scaled
+with how good the dense half was: it cost `bge-m3` twelve points of cross-language recall
+and `e5-base` nothing. **The comparison was measuring the gate, not the model** — and the
+2026-08-22 conclusion that "the Russian failures are the embedding" was drawn through the
+same instrument.
+
+The gate now drops terms in a script the corpus is not written in, and requires the
+survivors to cover 40% of the question. No configuration regresses; `bge-m3` gains eight
+points on the column this question exists to decide.
+
+**`DEFAULT` is still `multilingual-e5-base`.** The switch is one line (`DEFAULT = BGE_M3`)
+and one ~50-minute rebuild, and it doubles resident memory from ~1.5 GB to ~3 GB — a
+resource decision for the owner rather than a measurement. The measurement says take it.
+
+**What this question no longer answers.** At 61% the system is nineteen points under its
+own 80% recall gate, and 7 of 25 Russian cases never enter the candidate set at all. That
+is not an embedding choice; the untried levers are query translation and the ~20% of
+chunks silently truncated at 512 tokens (`TO VERIFY` in `rag/chunking.py`). See
+[OQ-18](#oq-18).
+
+---
+
+**REOPENED 2026-08-22, the same day it was resolved** — retained below, because the
+reasoning it records is what the 2026-08-24 run corrected.
 
 The answer below — `multilingual-e5-base` at 768d — was chosen on a Russian sample of **eight**
 questions. Expanding that set to 25 (P5-T2 requirement 6, ground truth read from the files rather
@@ -191,9 +233,9 @@ a developer cost, not a user one — but "warm rebuild = 37 s" was the best case
 model change, is tolerable. Everything else is now fast enough not to be a design concern.
 
 It also removes indexing cost as an argument against `bge-m3` — its ~2.5 h is paid once,
-after which its rebuilds are as cheap as e5-base's. The recall question in
-[OQ-02](#oq-02) has since been reopened: the expanded Russian fixtures put `e5-base` far lower
-than the eight-question sample did.
+after which its rebuilds are as cheap as e5-base's. That argument has since been settled:
+[OQ-02](#oq-02) resolved on 2026-08-24 in `bge-m3`'s favour, and the cost this entry
+measures is the price of the switch.
 
 **Resolve by using it.** If a cold rebuild ever becomes frequent, the remaining levers are
 to embed only changed collections, or to accept `e5-small` for a first pass and upgrade in
@@ -474,6 +516,40 @@ adapter streaming stdout.
 
 **Rule for this codebase:** on Windows, read pipes on a thread. Do not reach for
 `connect_read_pipe`.
+
+### OQ-18
+**Can a Russian question reach an English codebase well enough to meet the 80% gate?**
+`EXPERIMENT NEEDED` · Phase 5 gate · **opened 2026-08-24 by [OQ-02](#oq-02)'s resolution**
+
+OQ-02 asked which embedding model, got a decisive answer, and the answer is not enough.
+The best configuration this system has produced — `bge-m3` with the fixed fusion gate —
+scores **61% recall@5 against a gate of 80%**, and **44% on the 25 Russian fixtures**
+([log](../logs/development/2026-08-24-oq02-bge-m3.md)).
+
+The shape of the remaining failure says it is not a ranking problem. Seven of the 25
+Russian cases never enter the thirty candidates at all, so no reranker, no wider top-k and
+no further fusion work can reach them. Their English neighbours in the same collections do
+land, so nothing is unindexed.
+
+Two levers, neither measured:
+
+1. **Query translation.** Embed an English translation of the Russian question as a second
+   dense probe and fuse the two candidate lists. The router model is already resident and
+   already sees every query, so the marginal cost is one short generation — but it puts a
+   model call on the retrieval path, which [RAG.md §5](RAG.md#5-hybrid-retrieval) has so
+   far avoided, and the latency budget has ~70 ms of headroom at `bge-m3`'s p95.
+2. **The 512-token truncation.** ~20% of chunks exceed the model limit and are silently
+   truncated (`TO VERIFY` in `rag/chunking.py`, open since 2026-08-22). If the answer
+   sentence is routinely past the cut, this is a chunking bug being read as a retrieval
+   one, and it is much cheaper to fix.
+
+**Measure the second first** — it is a property of the corpus that can be counted without
+building anything, and it would change what the first experiment means.
+
+**Until this resolves, the Phase 5 recall criterion is not met**, and saying so is more
+useful than moving the gate to where the numbers already are.
+
+---
 
 ## Standing assumptions
 

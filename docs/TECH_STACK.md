@@ -263,9 +263,13 @@ and an embedding model causes constant load/unload thrash that costs far more th
 compute saves. Meanwhile 24 idle threads sit next to it. Indexing is a background batch job; latency
 does not matter, and the GPU staying warm does.
 
-`EXPERIMENT NEEDED` — [OQ-02](OPEN_QUESTIONS.md): compare `multilingual-e5-base` against `bge-m3` on
-mixed Russian/English notes and code identifiers; measure CPU throughput and quality. Also evaluate
-Matryoshka truncation to 384d — halves storage and scan time, usually at little cost.
+**RESOLVED 2026-08-24** — [OQ-02](OPEN_QUESTIONS.md#oq-02): `bge-m3` wins on the full corpus, 61%
+recall@5 against `multilingual-e5-base`'s 55% and 44% against 36% on Russian questions — but only
+once the fusion gate stopped admitting BM25 on every query. Measured with the old gate it *lost*, at
+53%. `DEFAULT` is still `e5-base`; the switch is one line and a ~2.5 h cold rebuild, and doubles
+resident memory to ~3 GB. Matryoshka truncation to 384d was evaluated and **rejected** — it costs 9
+points here, not "little", because E5 is not Matryoshka-trained
+([log](../logs/development/2026-08-24-oq02-bge-m3.md)).
 
 No reranker in v1. Post-MVP: ONNX `bge-reranker-base` on CPU, top-30 → top-8, only if measured
 retrieval quality demands it.

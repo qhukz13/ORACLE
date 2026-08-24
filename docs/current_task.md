@@ -10,15 +10,19 @@
 **P6-T4 — The capstone: ORACLE decides to delegate, and the reference scenario runs**
 
 **Phase:** [6 — External agent integration](ROADMAP.md#phase-6--external-agent-integration--post-mvp) · **Scope:** Post-MVP
-**Status:** `IN PROGRESS — requirements 1-4, 6 done 2026-08-24; the live run is the last step` · **Set:** 2026-08-24
+**Status:** `IN PROGRESS — requirements 1-4, 6 done 2026-08-24; the live run is the only step left` · **Set:** 2026-08-24
 **Previous task:** P6-T3 — **done** except the live CLI recording; see [current_report.md](current_report.md).
 
 ---
 
 ## Carry-over
 
-1. **bge-m3** — the scheduled run has still not produced artefacts; it fires on next app launch.
-   Its OQ-02 edits stay in their own commits.
+1. ~~**bge-m3**~~ — **DONE 2026-08-24.** The run produced artefacts and resolved
+   [OQ-02](OPEN_QUESTIONS.md#oq-02): `bge-m3` wins, 61% against 55%, but only once the fusion gate
+   stopped admitting BM25 on all 38 queries — measured against the shipped gate it *lost*, 53%. The
+   gate fix shipped with it; `DEFAULT` did not change, because a ~2.5 h rebuild and 3 GB resident is
+   the owner's call. Opened [OQ-18](OPEN_QUESTIONS.md#oq-18): 61% is still nineteen points under the
+   Phase 5 recall gate. [Log](../logs/development/2026-08-24-oq02-bge-m3.md).
 2. **The live MCP recording** from P6-T3 requirement 1 — one supervised run against the real CLI,
    payload previewed. Folded into this task's requirement 5, because the reference scenario needs a
    live run anyway and one egress serves both.
@@ -100,7 +104,8 @@ politer ones. A delegation that is never approved costs a packet render and noth
       exchange is recorded as a fixture.
 - [x] The palette can start a delegation; vitest covers the entry point.
 - [x] The gate green including the security suite — `check: OK` 2026-08-24.
-- [ ] *(Carry-over)* bge-m3 recorded in OQ-02, decision to the owner.
+- [x] *(Carry-over)* bge-m3 recorded in OQ-02 2026-08-24, decision to the owner: the numbers
+      favour switching, `DEFAULT` left unchanged pending it.
 
 ## Relevant files
 

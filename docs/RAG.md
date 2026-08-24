@@ -186,20 +186,40 @@ overstated the winner's margin:
 
 **On the full corpus, `e5-base` scores 81% — one point over the gate — and 62% on the
 Russian questions.** The sample overstated it by 9 points overall and 13 on the
-cross-language column. `bge-m3` is the likely fix at 3.4x the indexing cost, and the
-comparison that would settle it has not been run.
+cross-language column. `bge-m3` is the likely fix at 3.4x the indexing cost — the
+comparison that settles it was run on 2026-08-24 and is below.
 
-**Corrected again, 2026-08-22, and this one matters more.** Every Russian figure on this
-page comes from a set of **eight** questions. Expanding it to 25 puts `e5-base` at
-**36% on Russian and 55% overall** — the small set overstated it by 26 points, on top of
-the 13 the sample had already overstated. The English and lexical columns are unaffected.
+**Corrected again, 2026-08-22.** Every Russian figure in the table above comes from a set
+of **eight** questions. Expanding it to 25 put `e5-base` at **36% on Russian and 55%
+overall** — the small set overstated it by 26 points, on top of the 13 the sample had
+already overstated. The English and lexical columns are unaffected.
 
-Two explanations were eliminated before blaming the model: the fusion gate had a genuine
-denominator bug (Russian stopwords read as discriminating because they are rare in a mostly
-English corpus) which is fixed and **moved recall not at all**, and the failures are not
-near-misses — of 25 Russian cases, 9 land in the top 5, **zero in ranks 6-10**, and 12 never
-enter the candidate set. See [OQ-02](OPEN_QUESTIONS.md#oq-02), now reopened, and the
-[log](../logs/development/2026-08-22-fusion-denominator.md).
+### Settled 2026-08-24: `bge-m3`, and the gate was scoring it wrong
+
+Both candidates built over the same full corpus on the same day, measured by the same code
+over all 38 fixtures ([log](../logs/development/2026-08-24-oq02-bge-m3.md)):
+
+| embedding | fusion gate | recall@5 | crosslang | p95 | full rebuild |
+|---|---|---:|---:|---:|---:|
+| `e5-base` | as shipped | 55% | 36% | 271 ms | 42.8 min cold |
+| `e5-base` | fixed | 55% | 36% | 260 ms | 42.8 min cold |
+| `bge-m3` | as shipped | 53% | 32% | 401 ms ✗ | ~2.5 h cold |
+| **`bge-m3`** | **fixed** | **61%** | **44%** | 332 ms | ~2.5 h cold |
+
+**Against the retrieval code as it shipped, `bge-m3` loses.** The lexical gate below was
+admitting BM25 on 38 questions out of 38, and fusion can only displace a correct dense hit
+that exists — so an unfiltered lexical list cost `bge-m3` twelve points of cross-language
+recall and `e5-base` nothing. The 2026-08-22 conclusion that the Russian failures *are* the
+embedding was read through that same instrument.
+
+**`DEFAULT` remains `multilingual-e5-base`.** The evidence favours `bge-m3`; the switch is
+`DEFAULT = BGE_M3` plus one rebuild, and it commits the machine to ~3 GB resident instead
+of ~1.5 GB. That is the owner's call, and [OQ-02](OPEN_QUESTIONS.md#oq-02) records it as
+one.
+
+**None of this reaches the gate.** 61% against 80%, with 7 of 25 Russian cases never
+entering the candidate set at all — a shape no reranker can fix. That is now
+[OQ-18](OPEN_QUESTIONS.md#oq-18).
 
 * **Do not truncate.** Matryoshka truncation costs 9 points here, not "minimal": `multilingual-e5-base`
   is *not* Matryoshka-trained, so its first 384 dimensions are half an embedding rather than a
@@ -247,27 +267,51 @@ tuned weights — it is robust by construction. Metadata pre-filtering (project,
 path prefix) happens **before** the KNN scan, which is what keeps brute force cheap — in sqlite-vec
 that means vec0 partition keys, so the predicate is pushed into the scan rather than applied after it.
 
-### Fusion is conditional  `MEASURED 2026-08-22`
+### Fusion is conditional  `MEASURED 2026-08-24`
 
 Robust by construction is not the same as harmless. Measured on the fixture set during
 [OQ-02](OPEN_QUESTIONS.md#oq-02):
 
 | dense model | dense only | + BM25 via RRF |
 |---|---:|---:|
-| `e5-base` | 81% | **90%** (+9) |
 | `e5-small` | 76% | **71%** (−5) |
+| `e5-base` | 81% | **90%** (+9) |
+| `bge-m3` (full corpus, crosslang) | 44% | **32%** (−12) |
 
 A Russian question against an English codebase shares no meaningful term with any document, so BM25
 has nothing to say — **and says it in thirty ranked results anyway**. Unweighted RRF treats that as a
 second opinion of equal standing, and it displaces correct dense hits out of the top 5. Fusion is not
 free when one retriever is systematically blind to a query class.
 
-The fix keeps RRF unweighted and gates its *input* instead: the lexical list is admitted only when
-the query has some lexical purchase on the corpus — at least one term appearing in fewer than 10% of
-chunks (with a floor, so a small index does not gate everything out). Tuning RRF's weights would have
-forfeited the property the algorithm was chosen for; dropping a list that is provably noise does not.
+**The cost scales with how good the dense half is**, which is the rule the three rows above spell
+out and which took two attempts to read. Fusion can only displace a correct dense hit that exists;
+`e5-small` had few, `e5-base` more, `bge-m3` many. So the fusion policy cannot be measured
+independently of the embedding, and a model comparison run through a leaky gate measures the gate.
 
-Implemented as `rag.retrieval.has_lexical_purchase`.
+So the fix keeps RRF unweighted and gates its *input* instead. Three conditions, each measured, all
+in `rag.retrieval.discriminating_terms` (`has_lexical_purchase` is the boolean form):
+
+1. **The term appears in fewer than 10% of chunks** (with a `MIN_DF_CEILING` floor, so a small index
+   does not gate everything out). A term in every document discriminates nothing, and OR-ing `the`,
+   `we` and `is` is what made the lexical half cost 150 ms p50 — twice the brute-force vector scan.
+2. **The term is in the script the corpus is written in.**  `MEASURED 2026-08-24`  Document frequency
+   measures rarity in the corpus, not uninformativeness in the language: in a corpus that is 6%
+   Cyrillic, `если` sits at 4% of the Russian and survives, and the genuinely rare Russian words
+   match whichever unrelated project happens to be documented in Russian. Either way BM25 answers
+   from the wrong neighbourhood. The rule is *minority*, not Cyrillic — a Russian-majority corpus
+   gates out Latin. This supersedes the per-script denominator of 2026-08-22, which dropped the
+   stopwords and moved recall not at all.
+3. **The survivors cover at least 40% of the question's answerable terms.**  `MEASURED 2026-08-24`
+   One Latin word inside a Russian sentence passed rule 2 alone and opened the gate, costing that
+   fixture its top-5 slot under both embeddings — a one-term OR query ranked by BM25 is close to a
+   document-frequency ordering. It is a *share*, not a count, so a bare `PairingService` lookup is
+   100% of its question and still fuses. Terms absent from the corpus are excluded from the
+   denominator: a word BM25 cannot answer is not a word BM25 declined to answer.
+
+Tuning RRF's weights would have forfeited the property the algorithm was chosen for; dropping a list
+that is provably noise does not. Rules 2 and 3 together are worth **+8 points of recall@5 and +12 on
+the cross-language column** to `bge-m3`, cost `e5-base` nothing, and take the gate from opening on
+38 queries out of 38 to 11 — which is also 69 ms off `bge-m3`'s p95.
 
 **No reranker in v1.** Post-MVP, if the fixture set shows a gap: ONNX `bge-reranker-base` on CPU,
 top-30 → top-8.
