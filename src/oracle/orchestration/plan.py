@@ -45,6 +45,9 @@ Outcome = Literal["diff", "report", "answer", "verdict"]
 #: Which kind of task each outcome becomes. A plan describes *what it wants back*; the
 #: supervisor decides *how* that is produced, which is why `expected_outcome` maps to a
 #: `TaskKind` here and not in the plan.
+#:
+#: `report`/`answer` are the *default* for their outcome, not the whole rule: a role only
+#: local agents hold runs on the local model instead (see `task_kind`).
 OUTCOME_KIND: dict[str, TaskKind] = {
     "diff": TaskKind.DELEGATION,
     "report": TaskKind.DELEGATION,
@@ -241,8 +244,8 @@ def compile_plan(
     ids = {task.id: f"{prefix}-{task.id}".lower() for task in plan.tasks}
     tasks: list[Task] = []
     for planned in plan.tasks:
-        kind = OUTCOME_KIND.get(planned.expected_outcome, TaskKind.DELEGATION)
-        agent = _resolve_agent(planned, registry)
+        kind = task_kind(planned, registry)
+        agent = resolve_agent(planned, registry, kind)
         tasks.append(
             Task(
                 id=ids[planned.id],
@@ -270,13 +273,48 @@ def compile_plan(
     return TaskGraph(tasks)
 
 
-def _resolve_agent(planned: PlannedTask, registry: Registry) -> str | None:
-    """Deterministic rules first, the hint only as a tiebreak, and never a name the
-    registry does not hold."""
+def task_kind(planned: PlannedTask, registry: Registry) -> TaskKind:
+    """How this task is produced. The plan says what it wants back; this decides how.
+
+    `verdict` is a `VERIFY` task because where code can judge, no model is asked
+    (PLANNER.md §4). Everything else is a delegation **unless the role is one only local
+    agents hold** — `summarizer` is the case that exists, and PLANNER.md §4 has always
+    said a summarizer is never routed to a cloud agent. Reading that off the registry
+    rather than off a hard-coded role name means adding a local-only role is a YAML edit,
+    which is what the registry is for.
+
+    `REPORT` therefore stops being "a delegation with a read-only role until the local
+    model owns it" — the admission P8-T1 left in `runners/__init__.py`."""
+    if planned.expected_outcome == "verdict":
+        return TaskKind.VERIFY
     holders = registry.holders_of(planned.role)
+    if holders and all(agent.locality == "local" for agent in holders):
+        return TaskKind.REPORT
+    return OUTCOME_KIND.get(planned.expected_outcome, TaskKind.DELEGATION)
+
+
+def resolve_agent(planned: PlannedTask, registry: Registry, kind: TaskKind) -> str | None:
+    """Deterministic rules first, the hint only as a tiebreak, and never a name the
+    registry does not hold.
+
+    `kind` narrows the field before cost order is consulted: **a local model is not a
+    delegation target.** Without that, `holders_of` — which sorts free before
+    subscription — hands a `researcher` delegation to `local`, and the row then says one
+    thing while the Claude adapter does another. A row that misdescribes its own executor
+    is worse than no row."""
+    holders = registry.holders_of(planned.role)
+    if kind is TaskKind.DELEGATION:
+        holders = [agent for agent in holders if agent.locality != "local"]
+    elif kind is TaskKind.REPORT:
+        holders = [agent for agent in holders if agent.locality == "local"]
     if not holders:
         return None
-    if planned.agent_hint and registry.role_can_be_held_by(planned.role, planned.agent_hint):
+    eligible = {agent.id for agent in holders}
+    if (
+        planned.agent_hint
+        and planned.agent_hint in eligible
+        and registry.role_can_be_held_by(planned.role, planned.agent_hint)
+    ):
         return planned.agent_hint
     return holders[0].id
 

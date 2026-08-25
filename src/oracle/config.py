@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     #: and the same reason: a plan must not be able to give itself an executor, so the
     #: list of executors is versioned data a human edits.
     registry_path: Path = Path("config/agents.yaml")
+    #: Rung 2 of the planner ladder (PLANNER.md §6). Data, beside the registry and
+    #: policy, and read the same way: an unreadable file means no templates, which the
+    #: ladder already knows how to handle.
+    plan_templates_path: Path = Path("config/plan_templates.yaml")
 
     #: Start the tool host at boot so the first tool call does not pay ~1.2 s of
     #: process startup. Tests disable it to stay hermetic and fast.

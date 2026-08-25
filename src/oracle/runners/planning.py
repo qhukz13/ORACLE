@@ -20,6 +20,17 @@ things it does, in order, and none of them may be skipped:
 The repair attempt is inside the *same* approval, and the preview says so ("up to 2
 calls"). Stating the bound up front is the pipeline rule; asking again for a retry the
 person already sanctioned is how approval fatigue is manufactured.
+
+**And when no plan can be had, ORACLE descends rather than stops** (PLANNER.md §6). The
+ladder — planner, deterministic template, single task, and a plan the person supplies —
+lives in `plan_with_ladder()` at the bottom of this file. Every rung produces the *same*
+`ExecutionPlan`, checked by the *same* validator, shown on the *same* card. A degraded
+mode that skipped a check would not be a degraded mode; it would be a hole with a reason
+attached.
+
+One rung is not a rung: **a refusal ends the ladder.** If the owner declined the planning
+egress, running a template plan instead would be routing around a decision — the rule
+P8-T2 established for replanning, and it does not weaken here.
 """
 
 from __future__ import annotations
@@ -27,11 +38,12 @@ from __future__ import annotations
 import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from oracle.core.approvals import ApprovalStore, Resolution
-from oracle.core.events import new_id
+from oracle.core.events import Event, new_id
 from oracle.integrations.adapter import ExternalAgentAdapter
 from oracle.integrations.types import HandoffPacket, Workspace
 from oracle.logsink import get_logger
@@ -55,6 +67,12 @@ from oracle.orchestration.replan import (
     attempts_report,
     consider,
 )
+from oracle.orchestration.templates import (
+    Override,
+    Templates,
+    overridden_hints,
+    single_task_plan,
+)
 from oracle.policy.engine import PolicyEngine
 from oracle.policy.model import Capability, Decision, Provenance, Tier
 
@@ -69,6 +87,40 @@ GRAPH_TOOL = "ai.graph"
 DESTINATION = "the planner's vendor"
 #: One call, plus at most one repair. The bound is in the preview a person approves.
 MAX_CALLS = 2
+
+
+class PlanSource(StrEnum):
+    """Who authored the plan on the card. Not a quality rating — a fact a person needs
+    before they decide, because "a model decomposed this" and "this is ORACLE's default
+    shape" deserve different amounts of reading."""
+
+    PLANNER = "planner"
+    TEMPLATE = "template"
+    SINGLE_TASK = "single_task"
+    #: Not descended to: a person supplies one. See `graph.submit_plan`.
+    HUMAN = "human"
+
+
+#: PLANNER.md §6's ladder, numbered as that table numbers it.
+RUNG: dict[PlanSource, int] = {
+    PlanSource.PLANNER: 1,
+    PlanSource.TEMPLATE: 2,
+    PlanSource.SINGLE_TASK: 3,
+    PlanSource.HUMAN: 4,
+}
+
+PROVENANCE_NOTE: dict[PlanSource, str] = {
+    PlanSource.PLANNER: "A planner authored this.",
+    PlanSource.TEMPLATE: (
+        "NO PLANNER WAS AVAILABLE. This is a deterministic template — ORACLE's default "
+        "shape for this kind of objective, not a decomposition of yours."
+    ),
+    PlanSource.SINGLE_TASK: (
+        "NO PLANNER AND NO TEMPLATE WERE AVAILABLE. This is one delegation carrying your "
+        "objective unchanged — nothing decomposed it."
+    ),
+    PlanSource.HUMAN: "You wrote this plan. It was validated exactly like a planner's.",
+}
 
 
 @dataclass
@@ -321,13 +373,24 @@ async def approve_graph(
     *,
     trace_id: str,
     session_id: str | None = None,
+    source: PlanSource = PlanSource.PLANNER,
+    descents: list[dict[str, Any]] | None = None,
 ) -> bool:
     """The graph approval card: one decision over the whole shape (SECURITY.md §10).
 
     The plan arrives as `external` provenance — it is a vendor's text — so the gate
     escalates the tier before anyone is asked. Approving this authorises the graph to
     *exist and run*; it authorises no egress, and every delegation inside it still asks
-    its own question with its rendered bytes attached."""
+    its own question with its rendered bytes attached.
+
+    **`source` is on the card because a person approving a template plan must not think
+    they are approving a planner's.** The provenance is the difference between "something
+    decomposed this" and "this is the shape ORACLE uses when it cannot ask", and it
+    changes what the risks line is worth. `descents` says how it got here.
+
+    The tier does *not* soften for a template. A plan ORACLE wrote is still a plan, and
+    the tasks in it still egress; pricing it lower because we trust the author would make
+    the author the control, which is the thing the gate exists not to be."""
     verdict = engine.evaluate(
         GRAPH_TOOL,
         capabilities=frozenset({Capability.AGENT_DELEGATE}),
@@ -352,9 +415,13 @@ async def approve_graph(
             "risks": list(plan.risks),
             "tasks": elevated_summary(graph.tasks),
             "addition": False,
+            # Provenance, always present and never inferred from a missing key.
+            "authored_by": str(source),
+            "rung": RUNG[source],
+            "descents": list(descents or []),
             "note": (
-                "approving runs the graph; each delegation still asks separately before "
-                "anything leaves this machine"
+                f"{PROVENANCE_NOTE[source]} approving runs the graph; each delegation "
+                "still asks separately before anything leaves this machine"
             ),
         },
     )
@@ -422,6 +489,158 @@ def compile_and_approve(plan: ExecutionPlan, registry: Registry, *, plan_id: str
     `approve_graph` so a caller can inspect the graph — or a test can — before anybody is
     asked to approve it."""
     return compile_plan(plan, registry, plan_id=plan_id)
+
+
+# -- the ladder ----------------------------------------------------------------
+
+
+@dataclass
+class LadderResult:
+    """What the ladder produced, and the walk it took to get there."""
+
+    plan: ExecutionPlan | None = None
+    source: PlanSource | None = None
+    #: One entry per descent: `{"from": …, "to": …, "why": …}`. Shown on the card, so a
+    #: graph that ran on rung 3 is readable as such afterwards rather than inferred from
+    #: how thin it looks.
+    descents: list[dict[str, Any]] = field(default_factory=list)
+    problems: list[str] = field(default_factory=list)
+    #: The owner declined the planning egress. **Not** a reason to descend.
+    refused: bool = False
+    attempts: int = 0
+
+    @property
+    def ok(self) -> bool:
+        return self.plan is not None
+
+    @property
+    def rung(self) -> int:
+        return RUNG[self.source] if self.source else 0
+
+
+async def plan_with_ladder(
+    planner: Planner | None,
+    templates: Templates,
+    registry: Registry,
+    projects: set[str],
+    objective: str,
+    *,
+    trace_id: str,
+    intent: str | None = None,
+    project: str | None = None,
+    eventlog: Any = None,
+    session_id: str | None = None,
+) -> LadderResult:
+    """Walk PLANNER.md §6's ladder until something validates.
+
+    Descending happens when a rung cannot produce a **validated** plan — never because
+    the plan looked unambitious. There is no quality judgement anywhere in here, because
+    a supervisor that could reject a plan for being disappointing is a supervisor with an
+    opinion nobody can review.
+
+    Rung 4 (a plan the person writes) is not descended to: it is a path a person takes,
+    not one ORACLE takes for them."""
+    result = LadderResult()
+
+    # Rung 1 — a planner.
+    if planner is not None and registry.usable:
+        outcome = await planner.plan(objective, trace_id=trace_id)
+        result.attempts = outcome.attempts
+        if outcome.refused:
+            # A full stop, not a rung. Routing around a refusal is the thing this whole
+            # design says never happens.
+            result.refused = True
+            result.problems = outcome.problems
+            return result
+        if outcome.plan is not None:
+            result.plan, result.source = outcome.plan, PlanSource.PLANNER
+            return result
+        why = "; ".join(outcome.problems[:3]) or "the planner returned no usable plan"
+    else:
+        why = registry.problem or "no planner is available"
+
+    await _descend(
+        eventlog, result, PlanSource.PLANNER, PlanSource.TEMPLATE, why, trace_id, session_id
+    )
+
+    # Rung 2 — a deterministic template, validated like anything else.
+    candidate = templates.plan_for(objective, intent=intent, project=project)
+    if candidate is not None:
+        problems = validate(candidate, registry, projects)
+        if not problems:
+            result.plan, result.source = candidate, PlanSource.TEMPLATE
+            return result
+        why = "the template did not validate: " + "; ".join(problems[:3])
+    else:
+        why = templates.problem or "no template matches this objective"
+
+    await _descend(
+        eventlog, result, PlanSource.TEMPLATE, PlanSource.SINGLE_TASK, why, trace_id, session_id
+    )
+
+    # Rung 3 — one task. Phase 6's behaviour, as a defined state.
+    candidate = single_task_plan(objective, project=project)
+    problems = validate(candidate, registry, projects)
+    if not problems:
+        result.plan, result.source = candidate, PlanSource.SINGLE_TASK
+        return result
+
+    # Nothing schedulable at all — which means the registry itself cannot hold `coder`.
+    # Rung 4 is a person, and a person is not something this function can call.
+    result.problems = problems
+    log.warning("plan.ladder_exhausted", problems=problems[:3])
+    return result
+
+
+async def _descend(
+    eventlog: Any,
+    result: LadderResult,
+    frm: PlanSource,
+    to: PlanSource,
+    why: str,
+    trace_id: str,
+    session_id: str | None,
+) -> None:
+    """Record one step down. Loudly: a graph running on a degraded rung must be readable
+    as such months later, and "it looked a bit thin" is not a record."""
+    step = {"from": str(frm), "to": str(to), "why": why}
+    result.descents.append(step)
+    log.warning("plan.descended", **step)
+    if eventlog is not None:
+        await eventlog.append(
+            Event(
+                type="plan.descended",
+                trace_id=trace_id,
+                session_id=session_id,
+                actor="system",
+                payload={**step, "rung": RUNG[to]},
+            )
+        )
+
+
+def audit_overrides(
+    audit: Any, plan: ExecutionPlan, registry: Registry, *, trace_id: str
+) -> list[Override]:
+    """Write one audit entry per `agent_hint` the registry refused, and return them.
+
+    Selection has always dropped these; until now it dropped them *silently*, which made
+    "a planner recommending an agent the policy forbids is overridden" a true statement
+    nobody could check afterwards. The audit log is the place that answers "which agent
+    did this, authorised by whom" (ORCHESTRATION.md §5), so an override that never
+    reaches it is an override that did not happen as far as a reviewer is concerned."""
+    overrides = overridden_hints(plan, registry)
+    for override in overrides:
+        # `reason` rides inside `as_audit()`, which is the shape the override itself
+        # states; naming it twice here is how this call raised the first time.
+        audit.append(
+            actor="planner",
+            tool=GRAPH_TOOL,
+            decision="override",
+            trace_id=trace_id,
+            **override.as_audit(),
+        )
+        log.info("plan.agent_override", **override.as_audit())
+    return overrides
 
 
 # -- composition ---------------------------------------------------------------
@@ -503,12 +722,18 @@ __all__ = [
     "EGRESS_TOOL",
     "GRAPH_TOOL",
     "MAX_CALLS",
+    "PROVENANCE_NOTE",
     "REPLAN_BUDGET",
+    "RUNG",
+    "LadderResult",
     "PlanOutcome",
+    "PlanSource",
     "Planner",
     "approve_additions",
     "approve_graph",
+    "audit_overrides",
     "compile_and_approve",
     "failure_context",
     "make_replanner",
+    "plan_with_ladder",
 ]

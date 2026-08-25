@@ -34,18 +34,27 @@ from oracle.llm.types import ProviderUnavailable
 from oracle.logsink import bind_trace, configure, get_logger
 from oracle.mcp.calls import McpCallHandler
 from oracle.mcp.tokens import TokenStore
-from oracle.orchestration.plan import compile_plan
+from oracle.orchestration.plan import ExecutionPlan, compile_plan, parse
+from oracle.orchestration.plan import validate as plan_validate
 from oracle.orchestration.recovery import recover
 from oracle.orchestration.registry import Registry, load_registry
 from oracle.orchestration.service import GraphService
 from oracle.orchestration.store import TaskStore
+from oracle.orchestration.templates import Templates, load_templates
 from oracle.policy.audit import AuditLog
 from oracle.policy.engine import PolicyEngine, load_policy
 from oracle.router.intent import IntentClassifier
 from oracle.router.pipeline import TurnPipeline
 from oracle.router.selection import ToolSelector
 from oracle.runners import build_runners
-from oracle.runners.planning import Planner, approve_graph, make_replanner
+from oracle.runners.planning import (
+    Planner,
+    PlanSource,
+    approve_graph,
+    audit_overrides,
+    make_replanner,
+    plan_with_ladder,
+)
 from oracle.storage.db import connect, migrate
 from oracle.toolhost import ToolHost
 from oracle.tools import ToolExecutor, ToolRegistry, build_registry, git_undo_runner
@@ -82,6 +91,9 @@ class AppState:
     #: `agents` because `registry` is the tool registry — two different things, and one
     #: of them decides who may execute.
     agents: Registry
+    #: Rung 2 of the planner ladder: the shapes ORACLE uses when no model will produce a
+    #: plan (PLANNER.md §6). Data, loaded beside the registry.
+    templates: Templates
     #: Delegation capabilities and the inbound MCP call path (INTEGRATIONS.md §4).
     tokens: TokenStore
     mcp: McpCallHandler
@@ -221,6 +233,7 @@ async def _build_state(settings: Settings) -> AppState:
 
     task_store = TaskStore(conn)
     agent_registry = load_registry(settings.registry_path)
+    plan_templates = load_templates(settings.plan_templates_path)
     if not agent_registry.usable:
         # Same instinct as policy's read-only lockdown: a registry that failed open would
         # let a plan pick its own executor. Planning simply becomes unavailable.
@@ -259,6 +272,7 @@ async def _build_state(settings: Settings) -> AppState:
         task_store=task_store,
         graphs=GraphService(eventlog, task_store),
         agents=agent_registry,
+        templates=plan_templates,
         tokens=tokens,
         mcp=mcp,
         schema_version=version,
@@ -518,7 +532,15 @@ def _register_routes(app: FastAPI) -> None:
         await _ws_handler(app, ws, since_seq)
 
 
-async def _plan_and_run(st: AppState, objective: str, session_id: str | None, trace: str) -> None:
+async def _plan_and_run(
+    st: AppState,
+    objective: str,
+    session_id: str | None,
+    trace: str,
+    *,
+    intent: str | None = None,
+    project: str | None = None,
+) -> None:
     """Plan, ask, compile, ask again, run — and, if something fails, ask once more.
 
     Each step's refusal is a full stop, not a fallback to doing it anyway. The replanner
@@ -532,21 +554,81 @@ async def _plan_and_run(st: AppState, objective: str, session_id: str | None, tr
         projects=set(st.projects),
         session_id=session_id,
     )
-    outcome = await planner.plan(objective, trace_id=trace)
-    if outcome.plan is None:
+    ladder = await plan_with_ladder(
+        planner,
+        st.templates,
+        st.agents,
+        set(st.projects),
+        objective,
+        trace_id=trace,
+        intent=intent,
+        project=project,
+        eventlog=st.eventlog,
+        session_id=session_id,
+    )
+    if ladder.plan is None:
         log.info(
             "graph.not_planned",
-            refused=outcome.refused,
-            attempts=outcome.attempts,
-            problems=outcome.problems[:3],
+            refused=ladder.refused,
+            attempts=ladder.attempts,
+            descents=len(ladder.descents),
+            problems=ladder.problems[:3],
         )
         return
+    await _run_plan(
+        st,
+        ladder.plan,
+        objective,
+        session_id,
+        trace,
+        source=ladder.source or PlanSource.PLANNER,
+        descents=ladder.descents,
+        planner=planner,
+    )
+
+
+async def _run_plan(
+    st: AppState,
+    plan: ExecutionPlan,
+    objective: str,
+    session_id: str | None,
+    trace: str,
+    *,
+    source: PlanSource,
+    descents: list[dict[str, Any]] | None = None,
+    planner: Planner | None = None,
+) -> None:
+    """Compile, ask, run — identical for every rung of the ladder and for a plan a person
+    wrote. That sameness is the point: a degraded mode with its own path is a degraded
+    mode nobody has tested.
+
+    A replan needs a planner whatever authored the *first* plan, so one is built here when
+    the caller has none. If none is reachable, replanning simply produces nothing — the
+    same answer the ladder already gave, one level down."""
+    planner = planner or Planner(
+        ClaudeCodeAdapter(),
+        st.approvals,
+        st.policy,
+        st.agents,
+        projects=set(st.projects),
+        session_id=session_id,
+    )
     plan_id = new_id("pl")
-    graph = compile_plan(outcome.plan, st.agents, plan_id=plan_id)
+    # Every hint the registry refused, on the audit chain before anybody is asked to
+    # approve the graph those hints were trying to steer.
+    audit_overrides(st.audit, plan, st.agents, trace_id=trace)
+    graph = compile_plan(plan, st.agents, plan_id=plan_id)
     if not await approve_graph(
-        st.approvals, st.policy, graph, outcome.plan, trace_id=trace, session_id=session_id
+        st.approvals,
+        st.policy,
+        graph,
+        plan,
+        trace_id=trace,
+        session_id=session_id,
+        source=source,
+        descents=descents,
     ):
-        log.info("graph.not_approved", root_id=graph.root_id, plan_id=plan_id)
+        log.info("graph.not_approved", root_id=graph.root_id, plan_id=plan_id, source=str(source))
         return
 
     async def exhausted(report: dict[str, Any]) -> None:
@@ -636,6 +718,13 @@ async def _ws_handler(app: FastAPI, ws: WebSocket, since_seq: int) -> None:
         with contextlib.suppress(asyncio.CancelledError):
             await pump_task
         log.info("ws.disconnected")
+
+
+def _optional(value: Any) -> str | None:
+    """A payload field that may be absent, null, or empty - all three meaning "not
+    stated" rather than "stated as empty"."""
+    text = str(value or "").strip()
+    return text or None
 
 
 def session_of(cmd: ClientCommand) -> str | None:
@@ -758,15 +847,56 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
         # An objective in, a graph out — with two questions in between, both the owner's:
         # the planning egress, and the shape of what came back (PLANNER.md, ORCHESTRATION
         # §5). Spawned so HALT reaches it like everything else.
+        #
+        # No registry check here any more: the ladder is the check. An unusable registry
+        # means rung 1 is skipped and rungs 2 and 3 fail validation, which produces a
+        # reason in the log instead of a silent refusal - and, importantly, no egress.
         objective = str(cmd.payload.get("objective") or "").strip()
-        if objective and st.agents.usable:
-            st.spawn(_plan_and_run(st, objective, session_of(cmd), bind_trace()))
-        else:
-            log.warning(
-                "graph.plan_refused",
-                has_objective=bool(objective),
-                registry=st.agents.problem or "ok",
+        if objective:
+            st.spawn(
+                _plan_and_run(
+                    st,
+                    objective,
+                    session_of(cmd),
+                    bind_trace(),
+                    intent=_optional(cmd.payload.get("intent")),
+                    project=_optional(cmd.payload.get("project")),
+                )
             )
+        else:
+            log.warning("graph.plan_refused", reason="no objective")
+
+    elif cmd.type == "graph.submit_plan":
+        # Rung 4: the person writes the plan (PLANNER.md §6). It is parsed and validated
+        # by exactly the same functions a vendor's plan is - there is no privileged path
+        # for a plan a human typed, because "the author is trusted" is precisely the
+        # control ADR-0021 says never to build.
+        objective = str(cmd.payload.get("objective") or "").strip()
+        plan, problems = parse(cmd.payload.get("plan"))
+        if plan is not None:
+            problems = plan_validate(plan, st.agents, set(st.projects))
+        if plan is None or problems:
+            log.warning("graph.submitted_plan_invalid", problems=problems[:5])
+            await st.eventlog.append(
+                Event(
+                    type="plan.rejected",
+                    session_id=session_of(cmd),
+                    trace_id=bind_trace(),
+                    actor="user",
+                    payload={"authored_by": str(PlanSource.HUMAN), "problems": problems[:10]},
+                )
+            )
+            return
+        st.spawn(
+            _run_plan(
+                st,
+                plan,
+                objective or plan.objective,
+                session_of(cmd),
+                bind_trace(),
+                source=PlanSource.HUMAN,
+            )
+        )
 
     elif cmd.type == "graph.cancel":
         # One task, or the whole graph. Not HALT: HALT is above this and stops

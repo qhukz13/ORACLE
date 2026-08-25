@@ -16,6 +16,7 @@ from typing import Any
 
 from oracle.runners.delegation import make_delegation_runner
 from oracle.runners.planning import Planner, approve_graph, make_replanner
+from oracle.runners.report import make_report_runner
 from oracle.runners.tool import make_tool_runner
 from oracle.runners.verify import BaselineCache, make_verify_runner
 
@@ -26,6 +27,7 @@ __all__ = [
     "build_runners",
     "make_delegation_runner",
     "make_replanner",
+    "make_report_runner",
     "make_tool_runner",
     "make_verify_runner",
 ]
@@ -64,9 +66,10 @@ def build_runners(state: Any) -> dict[Any, Any]:
         TaskKind.VERIFY: make_verify_runner(
             state.task_store, run_tests, BaselineCache(repo, run_tests)
         ),
-        # A REPORT task is a delegation with a read-only role until the local model owns
-        # it (PLANNER.md §4: summarizer is never routed to a cloud agent — that is a
-        # Phase 9 correction, and pretending otherwise here would hide it).
-        TaskKind.REPORT: delegation,
+        # The local model owns REPORT now (P8-T3), which is what PLANNER.md §4 always
+        # said: a summarizer is never routed to a cloud agent. `compile_plan` routes a
+        # role only local agents hold to this kind, so the two halves of that rule are
+        # the same decision read off the same registry.
+        TaskKind.REPORT: make_report_runner(state.provider, state.task_store),
         TaskKind.PLANNING: delegation,
     }

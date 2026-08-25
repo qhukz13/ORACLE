@@ -318,3 +318,74 @@ def test_the_task_graph_endpoint_is_a_projection_of_the_table(client: TestClient
 
 async def _save(st: object, task: object) -> None:
     await st.task_store.save(task)  # type: ignore[attr-defined]
+
+
+# -- rung 4: a plan a person wrote  (P8-T3) ------------------------------------
+
+
+def _typed_plan(**overrides: object) -> dict:
+    body: dict = {
+        "objective": "tidy the docs",
+        "summary": "one pass",
+        "tasks": [
+            {
+                "id": "A",
+                "role": "coder",
+                "objective": "tidy the docs",
+                "acceptance": ["the suite still passes"],
+                "expected_outcome": "diff",
+            }
+        ],
+        "risks": [],
+    }
+    body.update(overrides)
+    return body
+
+
+def test_a_submitted_plan_that_names_a_tool_is_rejected_like_any_other(
+    client: TestClient,
+) -> None:
+    """Rung 4 of the ladder (docs/PLANNER.md §6) is a path, not a privilege. "The author
+    is trusted" is exactly the control ADR-0021 says never to build, so a plan a person
+    typed meets the same parser a vendor's does."""
+    hostile = _typed_plan()
+    hostile["tasks"][0]["tool"] = "fs.write"
+    with client.websocket_connect("/api/v1/stream?since_seq=0") as ws:
+        ws.send_json({"type": "graph.submit_plan", "payload": {"plan": hostile}})
+        problems: list[str] = []
+        for _ in range(40):
+            ev = ws.receive_json()
+            if ev["type"] == "plan.rejected":
+                problems = list(ev["payload"]["problems"])
+                assert ev["payload"]["authored_by"] == "human"
+                break
+    assert problems and any("tool" in p for p in problems), problems
+
+
+def test_a_submitted_plan_still_has_to_be_approved(client: TestClient) -> None:
+    """It reaches the same card, priced the same way. Denying it is a full stop."""
+    with client.websocket_connect("/api/v1/stream?since_seq=0") as ws:
+        ws.send_json({"type": "graph.submit_plan", "payload": {"plan": _typed_plan()}})
+        asked = None
+        for _ in range(60):
+            ev = ws.receive_json()
+            if ev["type"] == "approval.requested":
+                asked = ev["payload"]
+                break
+        assert asked is not None, "a plan a person typed ran without being approved"
+        assert asked["tool"] == "ai.graph"
+        assert asked["preview"]["authored_by"] == "human"
+        assert asked["preview"]["rung"] == 4
+        ws.send_json(
+            {
+                "type": "approval.respond",
+                "payload": {"approval_id": asked["approval_id"], "decision": "deny"},
+            }
+        )
+        for _ in range(40):
+            ev = ws.receive_json()
+            if ev["type"] == "approval.resolved":
+                assert ev["payload"]["resolution"] == "refused"
+                break
+        else:  # pragma: no cover - the loop above always finds it
+            raise AssertionError("the refusal was never recorded")

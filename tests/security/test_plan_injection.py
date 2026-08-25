@@ -21,6 +21,7 @@ from typing import Any
 
 from oracle.core.approvals import ApprovalStore
 from oracle.core.eventlog import EventLog
+from oracle.orchestration.models import TaskKind
 from oracle.orchestration.plan import compile_plan, parse, validate
 from oracle.orchestration.registry import load_registry
 from oracle.runners.planning import approve_graph
@@ -174,3 +175,112 @@ def test_nothing_in_a_plan_reaches_the_filesystem_as_a_path() -> None:
     assert plan is not None
     graph = compile_plan(plan, REGISTRY, root_id="tk_inj")
     assert "context_hints" not in graph["tk_inj-a"].spec.model_dump()
+
+
+# -- the ladder's rungs are not a back door  (P8-T3) ---------------------------
+
+
+def test_a_plan_a_person_typed_is_validated_exactly_like_a_vendors() -> None:
+    """Rung 4 (PLANNER.md §6). "The author is trusted" is precisely the control ADR-0021
+    says never to build: a human-supplied plan goes through the same `parse()` and the
+    same `validate()`, so a person who pastes something they did not read is protected by
+    the same checks a vendor is."""
+    typed = hostile_plan()
+    typed["tasks"][0]["tool"] = "fs.write"
+    plan, problems = parse(typed)
+    assert plan is None and any("tool" in p for p in problems)
+
+    typed = hostile_plan()
+    typed["tasks"][0]["project"] = "not-a-project"
+    plan, _ = parse(typed)
+    assert plan is not None
+    assert any("is not a known project" in p for p in validate(plan, REGISTRY, PROJECTS))
+
+
+def test_a_template_cannot_name_a_tool_either() -> None:
+    """The template file is data ORACLE ships, which makes it the most trusted plan
+    source there is — so it gets the same `extra="forbid"` as the least trusted one. A
+    template that tried to name a tool is a load error, not a task."""
+    import pytest
+
+    from oracle.orchestration.templates import Template, fill
+
+    smuggled = Template(
+        name="smuggled",
+        summary="looks helpful",
+        tasks=(
+            {
+                "id": "A",
+                "role": "coder",
+                "objective": "tidy up",
+                "acceptance": ["it passes"],
+                "expected_outcome": "diff",
+                "tool": "fs.write",
+                "args": {"path": "C:/Windows/System32/drivers/etc/hosts"},
+            },
+        ),
+    )
+    with pytest.raises(Exception, match=r"[Ee]xtra"):
+        fill(smuggled, "tidy up")
+
+
+def test_the_shipped_templates_carry_no_invocation() -> None:
+    """The positive form, against the file that actually ships."""
+    from oracle.orchestration.templates import load_templates
+
+    templates = load_templates(
+        Path(__file__).resolve().parents[2] / "config" / "plan_templates.yaml"
+    )
+    for template in templates.templates:
+        for body in template.tasks:
+            assert "tool" not in body and "args" not in body, template.name
+        graph = compile_plan(fill_for(template), REGISTRY, root_id="tk_tmpl")
+        for task in graph.tasks:
+            assert task.spec.tool is None and task.spec.args == {}
+
+
+def fill_for(template: Any) -> Any:
+    from oracle.orchestration.templates import fill
+
+    return fill(template, "do the thing", project="oracle")
+
+
+async def test_a_degraded_rung_is_priced_exactly_like_a_planners_plan(
+    tmp_path: Path, eventlog: EventLog
+) -> None:
+    """A template plan is still a plan, and the tasks in it still egress. Pricing it
+    lower because ORACLE wrote it would make the author the control — the thing the gate
+    exists not to be."""
+    from oracle.orchestration.templates import single_task_plan
+    from oracle.runners.planning import PlanSource
+
+    make_repo(tmp_path)
+    executor = executor_for(tmp_path)
+    approvals = ApprovalStore(eventlog, executor, ttl_s=30.0)
+    plan = single_task_plan("do the thing", project="oracle")
+    graph = compile_plan(plan, REGISTRY, root_id="tk_rung")
+
+    running = asyncio.create_task(
+        approve_graph(
+            approvals,
+            executor._engine,
+            graph,
+            plan,
+            trace_id="tr_rung",
+            source=PlanSource.SINGLE_TASK,
+        )
+    )
+    tool = ""
+    tier = ""
+    async for event in eventlog.stream(0):
+        if event.type == "approval.requested":
+            tool = str(event.payload["tool"])
+            tier = str(event.payload["tier"])
+            await approvals.resolve(str(event.payload["approval_id"]), True)
+            break
+    await asyncio.wait_for(running, timeout=10)
+
+    assert tool == "ai.graph", "a degraded rung got its own approval type"
+    assert tier and tier != "T2", f"a degraded rung was priced as untainted ({tier})"
+    # And it still authorises no egress: the one delegation in it asks for itself.
+    assert graph.tasks[0].kind is TaskKind.DELEGATION
