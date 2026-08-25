@@ -97,10 +97,8 @@ class Task(BaseModel):
     parent_id: str | None          # replanning lineage, not execution order
     plan_id: str | None            # the ExecutionPlan that authored it, if any
     kind: TaskKind
-    role: str                      # from the role registry (PLANNER.md §4)
     agent: str | None              # resolved executor id; None until assignment
-    project: str | None            # validated against the project registry
-    spec: TaskSpec                 # PLANNER.md §3 — the vendor-neutral specification
+    spec: TaskSpec                 # PLANNER.md §3 — carries role and project (as built)
     depends_on: list[str] = []
     status: TaskStatus
     attempt: int = 1
@@ -115,7 +113,7 @@ class TaskResult(BaseModel):
     evidence: dict[str, Any]       # diff stat, test counts, artifact hashes — ORACLE's measurements
     claim: str | None              # what the worker said — kept separate from evidence, always
     cost: Cost | None              # tokens / USD where known
-    error: ToolError | None
+    error: TaskError | None        # mirrors ToolError's fields; see the layer note below
 ```
 
 `evidence` vs `claim` is the load-bearing distinction, inherited from
@@ -199,7 +197,67 @@ Ported from `asterim-pipeline`'s tested rules, because they are the ones that su
 3. `WAITING` (approval-parked) tasks re-emit their `approval.requested` with the original
    timestamps, riding the existing expired-approval handling.
 
+### As built  `P7-T1, 2026-08-25`
+
+`src/oracle/orchestration/` — `models.py`, `graph.py`, `store.py`, `scheduler.py` — plus migration
+`0002_tasks.sql`. 29 tests across `tests/test_orchestration_graph.py`,
+`tests/test_orchestration_scheduler.py` and `tests/security/test_orchestration_boundary.py`, all
+offline and deterministic: **every runner in them is a coroutine the test wrote.** That is the
+claim P7-T1 exists to make good on — the supervisor's correctness is decidable without running
+anything real.
+
+**What matches this document.** The status vocabulary, including both distinctions
+(`TIMEOUT ≠ FAILED`, `SKIPPED ≠ CANCELLED`); ready = `PENDING` ∧ every dependency `SUCCEEDED`;
+the cycle reported as a path; the graph size cap; the aggregate precedence; batched topological
+dispatch with per-slot concurrency limits (delegation 2, tool 4, local 1); retry within
+`max_attempts` for retryable errors only.
+
+**What this document underspecified, now decided:**
+
+| Question | As built | Why |
+|---|---|---|
+| Precedence among non-terminal states | `CANCELLED > FAILED > TIMEOUT > RUNNING > WAITING > READY > PENDING > SKIPPED > SUCCEEDED` | The doc gave the head of the order; the tail matters for the UI's "what is this graph doing" line |
+| Aggregate of an empty graph | `SUCCEEDED`, by vacuity | Validation already rejects empty graphs; inventing a tenth state for an unreachable case is worse |
+| Who asserts `TIMEOUT` and `CANCELLED` | **The scheduler, never the runner** | A cancelled `agy` run reports `status: ERROR` / "timeout waiting for response" ([OQ-20](OPEN_QUESTIONS.md#oq-20)). If a runner's answer could set these, both distinctions die in practice while surviving in the enum |
+| A task whose `kind` has no runner | `FAILED`, visibly, having run nothing | The alternative — falling through to some default — is precisely the second execution path SECURITY.md §10 rule 1 forbids |
+| `max_attempts` for `PLANNING`/`REPORT` | 1 / 2 | The doc named TOOL, VERIFY and DELEGATION; a planning call costs ~55k tokens, so it gets a delegation's budget, not a tool's |
+| `role` and `project` on `Task` | Moved **into `TaskSpec`** | They describe the work, not the scheduling of it. The sketch above had them in both places; one home each |
+| `TaskResult.error` type | `TaskError`, not `ToolError` | The orchestration layer must not import the tool-execution layer (ARCHITECTURE.md). A runner adapts its own errors into this shape; a security test enforces the import ban |
+
+**What is deliberately not built yet**, so nobody reads this section as more than it is:
+
+- **Real runners.** `TOOL`, `DELEGATION`, `VERIFY` and `REPORT` runners are P7-T2; the scheduler
+  takes them by injection and imports none of the layers they live in — enforced by a security
+  test over the source, not by convention.
+- **Startup recovery.** `TaskStore.unfinished()` exists and is tested; the gating rules built on it
+  (never auto-restart an interrupted agent) arrive with P7-T2, where there is a child process to
+  have an opinion about.
+- **`WAITING`.** The state exists in the vocabulary and no task enters it: approval-parking lands
+  with the runners that request approvals.
+- **Replanning.** `supersedes` and `plan_id` are carried on `Task` and written by the store so the
+  audit chain needs no migration later. Nothing populates them until P8.
+
+### Harvest: a result must outlive its workspace  `added P7-T1`
+
+`Worktree.harvest(message)` commits the worker's diff onto the task's own branch, and
+`discard(keep_branch=True)` then removes the checkout without removing the work.
+
+This closes a hole that was invisible while there was only ever one delegation: delegates are
+forbidden git commands (a delegate that commits has hidden its own diff), so a result lived only
+in the working tree — and `discard()` deleted it. Fine when the diff is *evidence to be read*;
+fatal in a graph, where task C's output is task D's input, and unhelpful the moment anyone wants
+to review or merge a result after the fact.
+
+**ORACLE commits; the delegate still may not.** The commit is made after `diff()` has been read,
+so what is recorded is exactly what was judged, under this machine's git identity — a commit
+attributed to an agent would be a provenance lie in the one place provenance is checkable, and a
+security test asserts the author.
+
+Found the hard way: the P6-T5 spike lost its own plan-authored artifact to this
+([dev log](../logs/development/2026-08-24-p6t5-antigravity-planning.md), finding 8).
+
 ## 4. Failure and replanning
+
 
 What happens when things fail, per failure class:
 

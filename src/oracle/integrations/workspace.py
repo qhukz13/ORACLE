@@ -91,12 +91,52 @@ class Worktree:
         out = _git(self.ws.path, "ls-files", "--others", "--exclude-standard")
         return [line for line in out.splitlines() if line]
 
-    def discard(self) -> None:
+    def harvest(self, message: str) -> str | None:
+        """Commit whatever the worker produced onto this worktree's own branch, and
+        return the commit sha — or `None` if there was nothing to keep.
+
+        **ORACLE commits; the delegate still may not.** The ban stands (a delegate that
+        commits has hidden its own diff), and this runs *after* `diff()` has been read as
+        evidence, so what is committed is exactly what was judged.
+
+        Added in P7-T1 because a delegation's result used to exist only as long as its
+        worktree did: delegates cannot commit, `discard()` deletes the checkout, and the
+        change is gone. Harmless when a result is only evidence for one delegation; fatal
+        for a graph, where task C's output is task D's input. Learned the hard way — the
+        P6-T5 run lost its own artifact to exactly this
+        (`logs/development/2026-08-24-p6t5-antigravity-planning.md`, finding 8).
+
+        The scrub is *not* re-added: its deletions are ORACLE's doing, so committing them
+        would put a vendor-config deletion in the worker's change set.
+        """
+        _git(self.ws.path, "add", "--all", "--", ".", *(f":(exclude){e}" for e in SCRUB_ENTRIES))
+        staged = _git(self.ws.path, "diff", "--cached", "--name-only").strip()
+        if not staged:
+            log.info("workspace.harvest_empty", branch=self.branch)
+            return None
+        # `--no-verify`: hooks belong to the developer's own checkout, and this commit is
+        # a record of what a worker produced, not a change anyone is proposing yet.
+        _git(self.ws.path, "commit", "--no-verify", "-m", message)
+        sha = _git(self.ws.path, "rev-parse", "HEAD").strip()
+        log.info(
+            "workspace.harvested",
+            branch=self.branch,
+            commit=sha[:12],
+            files=len(staged.splitlines()),
+        )
+        return sha
+
+    def discard(self, *, keep_branch: bool = False) -> None:
         """Remove the worktree and its branch. The real tree was never touched, so a
-        bad run costs nothing — the property the whole design leans on."""
+        bad run costs nothing — the property the whole design leans on.
+
+        `keep_branch` is what makes `harvest()` worth anything: the checkout goes, the
+        commit stays reachable. Deleting a branch that holds a harvested result would
+        throw away the only copy."""
         _git(self.repo, "worktree", "remove", "--force", str(self.ws.path))
-        _git(self.repo, "branch", "-D", self.branch)
-        log.info("workspace.discarded", branch=self.branch)
+        if not keep_branch:
+            _git(self.repo, "branch", "-D", self.branch)
+        log.info("workspace.discarded", branch=self.branch, kept=keep_branch)
 
 
 def create_worktree(repo: Path, task_id: str) -> Worktree:
