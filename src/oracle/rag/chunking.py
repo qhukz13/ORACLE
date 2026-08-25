@@ -30,12 +30,25 @@ from oracle.rag.collections import ContentKind, Document
 from oracle.rag.pdf import PAGE_BREAK
 from oracle.rag.treesitter import blocks_for
 
-#: ~500 tokens of English prose. Deliberately below the 512-token limit of the E5
-#: family, though not reliably so: identifier-dense code tokenizes at closer to one
-#: token per three characters, so a minority of code chunks still truncate. A
-#: token-aware splitter would fix that and would also make chunking depend on the
-#: tokenizer — which is a trade worth making only once the model is fixed, and it now is.
-#: `TO VERIFY` — measure what truncation costs recall before spending that complexity.
+#: ~500 tokens of English prose, chosen to sit under the 512-token model window.
+#:
+#: MEASURED 2026-08-25 (`scripts/measure_truncation.py`, P9-T1): it does not.
+#: **20.1% of the corpus's 12,648 chunks exceed 512 bge-m3 tokens** and are silently
+#: truncated at embedding time, taking **10.1% of all corpus tokens** with them. Two
+#: causes, and the second was a surprise:
+#:
+#:   * ~3.6 chars/token is an English-prose average. `config` chunks tokenize far denser
+#:     — 88% of them (826/940) overflow — and code is worse than prose too.
+#:   * **this cap is not actually enforced.** 17% of chunks are longer than 1800
+#:     characters and the longest is 3687, because `_pack` and `_window` treat it as a
+#:     target rather than a bound. A token-aware splitter would fix the first cause; the
+#:     second is a plain bug in the splitter that already exists.
+#:
+#: Not fixed here, and the reason is what the measurement was for: truncation is
+#: **marginal on the retrieval fixtures** (worst case 11% of one file's tokens, and 0%
+#: for every one of the seven Russian cases that never reach the candidate list), so it
+#: is not what [OQ-18](../../../docs/OPEN_QUESTIONS.md#oq-18)'s recall gap is made of.
+#: It is a real corpus repair worth doing on its own terms, not a fix for that gate.
 MAX_CHARS = 1800
 
 #: Below this, a block is not a chunk. Forty tokens of `export const X = 1` carries no

@@ -34,6 +34,9 @@ from oracle.llm.types import ProviderUnavailable
 from oracle.logsink import bind_trace, configure, get_logger
 from oracle.mcp.calls import McpCallHandler
 from oracle.mcp.tokens import TokenStore
+from oracle.memory import FactKind, FactScope, FactSource, MemoryStore, WriteContext, rows_of
+from oracle.memory.attempts import from_task
+from oracle.orchestration.models import TaskKind
 from oracle.orchestration.plan import ExecutionPlan, compile_plan, parse
 from oracle.orchestration.plan import validate as plan_validate
 from oracle.orchestration.recovery import recover
@@ -94,6 +97,10 @@ class AppState:
     #: Rung 2 of the planner ladder: the shapes ORACLE uses when no model will produce a
     #: plan (PLANNER.md §6). Data, loaded beside the registry.
     templates: Templates
+    #: What ORACLE learned, as opposed to what it can look up (MEMORY.md). Facts,
+    #: preferences and prior attempts — the last of which is what stops a delegate
+    #: repeating last week's dead end.
+    memory: MemoryStore
     #: Delegation capabilities and the inbound MCP call path (INTEGRATIONS.md §4).
     tokens: TokenStore
     mcp: McpCallHandler
@@ -232,6 +239,7 @@ async def _build_state(settings: Settings) -> AppState:
             log.warning("llm.unavailable", reason=exc.reason, remedy=exc.remedy)
 
     task_store = TaskStore(conn)
+    memory = MemoryStore(conn, eventlog)
     agent_registry = load_registry(settings.registry_path)
     plan_templates = load_templates(settings.plan_templates_path)
     if not agent_registry.usable:
@@ -258,6 +266,9 @@ async def _build_state(settings: Settings) -> AppState:
             # The `delegate` intent and the escalation signal both need this; without
             # it the pipeline still routes and simply says delegation is not wired.
             delegations=delegations,
+            # Band 5. Without it every answer is assembled exactly as it was before
+            # Phase 9 — the rollback MEMORY.md promises, and a test asserts it.
+            memory=memory,
         ),
         provider=provider,
         policy=engine,
@@ -273,6 +284,7 @@ async def _build_state(settings: Settings) -> AppState:
         graphs=GraphService(eventlog, task_store),
         agents=agent_registry,
         templates=plan_templates,
+        memory=memory,
         tokens=tokens,
         mcp=mcp,
         schema_version=version,
@@ -527,6 +539,41 @@ def _register_routes(app: FastAPI) -> None:
         st = state_of(app)
         return await st.graphs.tree(root_id)
 
+    @app.get("/api/v1/memory")
+    async def memory_view(
+        project: str = Query("", description="scope_ref for project facts"),
+        include_superseded: bool = Query(True),
+    ) -> dict[str, Any]:
+        """The Memory view's query (MEMORY.md §6).
+
+        Superseded rows are included **by default**: a person auditing what ORACLE
+        believes needs to see what it stopped believing, and "why does it think that?"
+        is only answerable if the chain is visible."""
+        st = state_of(app)
+        facts = await st.memory.all_facts()
+        if not include_superseded:
+            facts = [f for f in facts if f.live]
+        if project:
+            facts = [f for f in facts if f.scope_ref in (project, None)]
+        return {"facts": rows_of(facts)}
+
+    @app.get("/api/v1/memory/attempts")
+    async def memory_attempts(
+        goal: str = Query("", min_length=0), project: str = Query("")
+    ) -> dict[str, Any]:
+        """What has been tried, for a goal or for a project. The same lookup the packet
+        renderer uses, exposed so a person can see what a worker will be told."""
+        from oracle.memory.attempts import DEFAULT_LIMIT, match, signature
+
+        st = state_of(app)
+        if goal:
+            found = await st.memory.attempts_for(signature(goal, project), project=project)
+            if not found:
+                found = match(goal, await st.memory.attempts_in(project), limit=DEFAULT_LIMIT)
+        else:
+            found = await st.memory.attempts_in(project, limit=50)
+        return {"attempts": [a.model_dump() for a in found]}
+
     @app.websocket("/api/v1/stream")
     async def stream(ws: WebSocket, since_seq: int = Query(0, ge=0)) -> None:
         await _ws_handler(app, ws, since_seq)
@@ -662,6 +709,26 @@ async def _run_plan(
     await st.graphs.run(
         graph, build_runners(st), replan=replan, session_id=session_id, trace_id=trace
     )
+    await _record_attempts(st, graph.root_id, trace)
+
+
+async def _record_attempts(st: AppState, root_id: str, trace: str) -> None:
+    """Every task that ran becomes a durable attempt (MEMORY.md §4).
+
+    **After the graph, not during it.** An attempt is a record rather than a belief, so
+    the write policy does not gate it — but recording mid-run would mean a task could
+    read a record of itself, and "what has been tried" is a question about finished work.
+    The rows are read back from the store rather than from the scheduler's memory,
+    because the row is the record (ORCHESTRATION.md §2).
+
+    A failure here loses a memory, not a result: the graph has already finished and its
+    evidence is in the task table either way."""
+    try:
+        for task in await st.task_store.load_graph(root_id):
+            if task.terminal and task.kind is not TaskKind.PLANNING:
+                await st.memory.record_attempt(from_task(task), trace_id=trace)
+    except Exception:
+        log.warning("memory.attempts_not_recorded", root_id=root_id, exc_info=True)
 
 
 # ----------------------------------------------------------------------------- WS
@@ -897,6 +964,44 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
                 source=PlanSource.HUMAN,
             )
         )
+
+    elif cmd.type == "memory.remember":
+        # The owner stating a fact, which is rule 1 of MEMORY.md §3's write policy and
+        # the only source that needs no corroboration. `plan_active` is read from the
+        # daemon rather than from the payload: a client cannot talk its way past the
+        # mid-plan rule by omitting a flag.
+        key = str(cmd.payload.get("key") or "").strip()
+        value = str(cmd.payload.get("value") or "").strip()
+        if not key or not value:
+            log.warning("memory.remember_refused", reason="key and value are both required")
+            return
+        correcting = bool(cmd.payload.get("correcting"))
+        # Not `project`: that name is already bound in this handler by `delegate.start`,
+        # and a rebind here would be a scope bug wearing a readable name.
+        scope_ref = _optional(cmd.payload.get("project"))
+        outcome = await st.memory.remember(
+            key,
+            value,
+            context=WriteContext(
+                source=FactSource.USER_CORRECTED if correcting else FactSource.USER_STATED,
+                plan_active=bool(st.graphs.running),
+            ),
+            kind=FactKind.PREFERENCE if cmd.payload.get("preference") else FactKind.FACT,
+            scope=FactScope.PROJECT if scope_ref else FactScope.GLOBAL,
+            scope_ref=scope_ref,
+            origin=session_of(cmd) or "",
+            trace_id=bind_trace(),
+        )
+        log.info("memory.remember", key=key, outcome=type(outcome).__name__)
+
+    elif cmd.type == "memory.forget":
+        # The undo button (MEMORY.md §6). The only deletion in the subsystem, and always
+        # a person's: nothing inside ORACLE calls it.
+        fact_id = str(cmd.payload.get("fact_id") or "")
+        if fact_id:
+            await st.memory.forget(
+                fact_id, reason=str(cmd.payload.get("reason") or ""), trace_id=bind_trace()
+            )
 
     elif cmd.type == "graph.cancel":
         # One task, or the whole graph. Not HALT: HALT is above this and stops

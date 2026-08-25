@@ -65,12 +65,20 @@ def make_delegation_runner(
     *,
     allowed_tools: tuple[str, ...] = ("Read",),
     harvest: bool = True,
+    inputs_for: Any = None,
 ) -> Any:
-    """Bind the delegation lifecycle into a `Runner`."""
+    """Bind the delegation lifecycle into a `Runner`.
+
+    `inputs_for` is an optional `async (Task) -> PacketInputs`. Without it a graph task's
+    packet is the objective and nothing else, which is what P7-T2 shipped; with it the
+    packet carries **prior attempts at this task** (MEMORY.md §4), which is the whole
+    reason memory exists for a delegation-oriented agent. Injected rather than imported
+    because this file must not know what a `MemoryStore` is."""
 
     async def run(task: Task) -> TaskResult:
         packet = packet_from(task, allowed_tools=allowed_tools)
-        active = await service.run(packet, source_repo, PacketInputs())
+        inputs = await inputs_for(task) if inputs_for is not None else PacketInputs()
+        active = await service.run(packet, source_repo, inputs)
         raw: dict[str, Any] = dict(active.result or {})
         claim = str(raw.get("result_text") or "") or None
         evidence = {key: raw[key] for key in EVIDENCE_KEYS if key in raw}

@@ -26,6 +26,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from oracle.context.budget import Band, ContextAssembler, Item
 from oracle.core.approvals import ApprovalStore, Resolution
 from oracle.core.eventlog import EventLog
 from oracle.core.events import Event, new_id
@@ -44,6 +45,14 @@ from oracle.router.selection import Selection, ToolSelector
 from oracle.tools.executor import ToolExecutor, ToolOutcome
 
 log = get_logger(__name__)
+
+#: Band 7's depth. Three exchanges is what MEMORY.md §5 assumes when it talks about
+#: "the last 3 turns", and it is small enough that the band loses to memory and
+#: retrieval under pressure, which is the priority order the bands encode.
+HISTORY_TURNS = 3
+#: How far back to look for them. The log carries every event, not just messages, so
+#: a bounded scan is the difference between a cheap band and a table scan per turn.
+HISTORY_SCAN = 200
 
 #: Intents where the user wants something DONE. Everything else is answered or asked
 #: about; only these reach tool selection.
@@ -152,6 +161,7 @@ class TurnPipeline:
         approvals: ApprovalStore | None = None,
         projects_root: Path | None = None,
         delegations: DelegationService | None = None,
+        memory: Any = None,
         spawn: Callable[[Any], None] | None = None,
     ) -> None:
         self._log = eventlog
@@ -168,6 +178,11 @@ class TurnPipeline:
         #: Delegation. Absent means the `delegate` intent still says "not built" —
         #: which is what P1 through P5 saw, and is a legitimate configuration.
         self._delegations = delegations
+        #: `MemoryStore`, taken loosely so the router does not depend on the memory
+        #: package's imports. Absent means band 5 is empty and every answer is assembled
+        #: exactly as it was before Phase 9 — which is the rollback MEMORY.md promises
+        #: and `test_memory_can_be_switched_off` asserts.
+        self._memory = memory
         #: How a delegation outlives the turn that started it. Public, because the
         #: daemon assigns `AppState.spawn` here after building the state — which is
         #: what puts a turn-started delegation under HALT like every other task.
@@ -178,6 +193,10 @@ class TurnPipeline:
         #: Set when the provider is unreachable. Deterministic paths keep working
         #: (ADR-0011); the UI shows a degraded banner rather than looking broken.
         self.degraded: str | None = None
+        #: One assembler for the pipeline's own calls. The router and the selector
+        #: hold their own; sharing one would make a band allowance change in one
+        #: place surprise the other two.
+        self._assembler = ContextAssembler()
         #: Set by HALT. The pipeline refuses to start a turn while true.
         self.halted = False
         #: Delegations spawned by turns, held so they are neither garbage-collected
@@ -744,13 +763,79 @@ class TurnPipeline:
             return "(the view is cleared client-side; history is kept in the event log)"
         return f"/{command} is recognised but not implemented yet."
 
+    async def _answer_messages(self, text: str, session_id: str) -> list[Message]:
+        """The ANSWER call's context, assembled under the same budget every other call
+        uses (AGENT_RUNTIME.md §5).
+
+        Before Phase 9 this was two hand-built messages, which is why bands 5-7 were
+        declared and unfed. Now band 5 carries what ORACLE has recorded and band 7 the
+        recent turn, both through `ContextAssembler` so they are budgeted, truncated and
+        provenance-labelled like everything else.
+
+        **Band 6 (retrieval) is deliberately still empty here.** Filling it means putting
+        the embedder on the interactive answer path, which costs seconds against a latency
+        budget with ~70 ms of headroom (OQ-15, OQ-18). Retrieval already runs where those
+        seconds are free: the Handoff Packet, where a delegation takes minutes. Wiring it
+        here without measuring first would trade a known-good latency for an unmeasured
+        recall gain."""
+        items = [
+            Item(Band.SYSTEM, _ANSWER_SYSTEM, role="system", provenance="system"),
+            Item(Band.TASK, f"Request: {text}", role="user", provenance="user"),
+        ]
+        if self._memory is not None:
+            from oracle.memory import memory_items
+
+            try:
+                items.extend(await memory_items(self._memory, goal=text, project=None))
+            except Exception:
+                # A memory outage is not an answer outage. The turn proceeds with an
+                # empty band 5, which is exactly the pre-Phase-9 behaviour.
+                log.warning("memory.band_unavailable", exc_info=True)
+        items.extend(await self._history_items(session_id))
+        return self._assembler.assemble(CallType.ANSWER, items).messages
+
+    async def _history_items(self, session_id: str, turns: int = HISTORY_TURNS) -> list[Item]:
+        """Band 7: what was just said, read off the event log.
+
+        No summariser and no second store — the event log is episodic memory
+        (MEMORY.md §2) and it is already durable, ordered and queryable. Summarising
+        history into "insights about the user" is explicitly not done (§7); this is the
+        last few exchanges, verbatim, and the assembler truncates it first when the
+        budget bites because band 7 is the most evictable one there is.
+
+        `provenance="user"` on what the person said, `"system"` on what ORACLE said. That
+        is not decoration: a turn is tainted by what it was built from, and a previous
+        answer is ORACLE's own text while a previous request is not."""
+        if session_id == "":
+            return []
+        head = self._log.last_seq
+        recent = await self._log.read_range(max(0, head - HISTORY_SCAN), head, HISTORY_SCAN)
+        lines: list[str] = []
+        for event in reversed(recent):
+            if event.session_id != session_id:
+                continue
+            if event.type == "turn.started":
+                lines.append(f"me: {event.payload.get('text', '')}")
+            elif event.type == "message.completed":
+                lines.append(f"you: {event.payload.get('text', '')}")
+            if len(lines) >= turns * 2:
+                break
+        if not lines:
+            return []
+        return [
+            Item(
+                Band.HISTORY,
+                "Recently in this session:\n" + "\n".join(reversed(lines)),
+                role="user",
+                provenance="user",
+                source="history",
+            )
+        ]
+
     async def _stream_answer(self, text: str, session_id: str, turn_id: str, trace: str) -> None:
         assert self._provider is not None
         req = CompletionRequest(
-            messages=[
-                Message(role="system", content=_ANSWER_SYSTEM),
-                Message(role="user", content=text),
-            ],
+            messages=await self._answer_messages(text, session_id),
             call_type=CallType.ANSWER,
             think=False,
             temperature=0.3,
