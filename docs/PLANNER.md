@@ -305,10 +305,27 @@ validator returns every problem rather than the first precisely so that one roun
 fix a plan with three mistakes in it. A second attempt would be an agentic loop wearing a
 budget's clothes.
 
+### Replanning, as built  `P8-T2, 2026-08-25`
+
+The planner is now called a second way: `Planner.replan(request)`, which is `plan()` with a
+failure attached. Deliberately the *same method* — a second, nearly-identical planning route is
+how one of them quietly stops validating. The same schema, the same validator, the same one repair
+attempt, the same registry and the same project set; the only difference is what the prompt
+carries and what the preview says.
+
+What the prompt carries is ORACLE's own record: the original objective, the failed task with its
+evidence, everything else that already failed under this root, and what never ran because of it —
+with an instruction that the skipped work is **not** resumed and must be asked for again. The
+worker's claim is not in it and cannot be: the carrier has no field for it.
+
+The decision to call at all is not the planner's. `orchestration/replan.py` owns the budget (≤ 2
+per root, one per failure, counted from the rows) and the rule that a refusal, a denial or a HALT
+is a decision rather than a problem to route around. Mechanics, the exhaustion report, and every
+question the design left open are in
+[ORCHESTRATION.md §4](ORCHESTRATION.md#as-built--replanning--p8-t2-2026-08-25).
+
 ### Still not built
 
-- **Replanning.** `supersedes` and `plan_id` are written; nothing populates `supersedes`
-  until P8-T2.
 - **Context.** `context_hints` survive as text and nothing fetches them; the context
   engine is Phase 9. A plan therefore describes what it *wants* looked at and cannot
   cause a read.

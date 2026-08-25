@@ -440,6 +440,69 @@ Escalation order for a failed worker task, cheapest first: retry (if retryable) 
 fallback agent (capability registry, [PLANNER.md §5](PLANNER.md#5-agent-selection)) → human. Every
 rung is visible in the task lineage.
 
+### As built — replanning  `P8-T2, 2026-08-25`
+
+`src/oracle/orchestration/replan.py` (the decision), a `replan` hook on the scheduler (the
+trigger), `Planner.replan` + `approve_additions` in `runners/planning.py` (the spending), and
+`TaskGraph.extend`. 45 tests across `tests/test_replanning.py` and
+`tests/security/test_replan_authority.py`; no vendor in any of them except the stub CLI in the
+concurrency test.
+
+**Three layers, and the seam between them is the point.** The scheduler hands a failed *task* to
+an injected hook and takes back a list of tasks to append. It does not know what a planner is,
+what a budget is, or that anybody was asked to approve anything — so `scheduler.py` still imports
+neither `plan.py` nor `replan.py`, and a security test asserts that against the source. The
+decision lives in `replan.py` (pure, no I/O, reaches nothing); the money is spent in
+`runners/planning.py`, which is already the layer allowed to see both sides.
+
+| Question the design left open | As built | Why |
+|---|---|---|
+| Where the budget is counted | `budget_used(tasks)` = **distinct superseded task ids**, read from the rows | One replan authoring three tasks is one replan. Reading it from the table means a restarted daemon, a reconnecting client and the scheduler all agree, and there is no counter to forget to increment |
+| Which failures are "a decision, not a problem" | error kind in `denied · refused · expired · halted · cancelled · approval_required · approval_invalid · interrupted` | The first five are a person (or a policy a person wrote) saying no. `interrupted` is on the list because recovery has already gated it: a supervisor that cannot prove what a child did while it was dead does not get to author its replacement |
+| What `supersedes` means when a replan returns several tasks | **all of them** carry it, plus `parent_id` | A replan may answer one bad task with a research step and a narrower coding step. Nominating one of them as "the" replacement would be a lineage that reads well and is false |
+| Whether a replan blocks the loop | No — it runs as a tracked child of the scheduler, like a parked task | A replan is a vendor call *and* a human decision. Inline, a graph would go silent for the length of an approval and its concurrency limit would be a lie. `graph.done()` is therefore `no active tasks **and** no replan outstanding` |
+| Id collisions with the graph being joined | `compile_plan(..., id_prefix=f"{root}-r{n}")` → `tk_x-r1-a` | Same `root_id`, new namespace. The root is what makes the replacement visible in the same tree; only the name has to be new |
+| The ceiling on a replanned graph | `MAX_GRAPH_TOTAL = 3 × MAX_GRAPH_SIZE` | Every plan, first or replacement, is still capped at 12. The total is what the per-plan cap and the ≤2 budget already imply, written down so nothing has to multiply it in its head |
+| `PLANNING` tasks | Never replanned | A failed planning call answered by another planning call is the loop the budget exists to prevent |
+
+**`extend()` is all-or-nothing and fully re-validated.** A replacement batch is checked as one
+graph with everything already there: no duplicate ids, no dangling dependency, no cycle, one root,
+under the ceiling. A batch that fails is refused whole and the failed task simply stays failed —
+half a replan is a graph nobody designed.
+
+**Evidence goes out; the claim does not, and cannot.** The planner is told the objective, what
+failed, ORACLE's measurements of it, what never ran, and what else has already failed under this
+root. The worker's `claim` is absent from the carrier — `Attempt` has no field for it — so the
+separation is a missing field rather than a filter somebody has to remember to apply. Two tests
+check it: one on the model, one on the bytes the adapter actually received.
+
+**A `SKIPPED` dependent is named, never resurrected.** The failure context lists what did not run
+and says in as many words that the plan must ask for it again if it is still wanted. Nothing flips
+a terminal status back to eligible.
+
+**Two questions, reusing both existing cards.** The replan egress is `ai.delegate` with the same
+"up to 2 calls" bound and the same `sends_repo_contents: false`; its preview names which task is
+being replaced and which of the two budgeted attempts this is. The additions card is `ai.graph`,
+same tier, same `external` provenance — with `addition: true` and **only the new tasks** on it.
+Re-showing the whole graph for two new rows is how a person is trained to click through a card
+without reading it.
+
+**An exhausted budget reports rather than shrugs.** `attempts_report()` names every attempt with
+ORACLE's evidence, everything that was skipped, and the **branches and workspaces** the partial
+work was harvested onto — `graph.replan_exhausted` on the event log. Worktrees are still not
+cleaned up, so the keep/discard decision the delegation flow already offers has something to point
+at. A report that says "it failed three times" without saying where the work went is a report that
+throws the work away.
+
+**Two workers, for real.** A plan authoring three independent `coder` tasks now runs two
+delegations concurrently against real worktrees, each harvested to its own branch with a distinct
+commit, while the third queues on the limit of 2 — the P7-T2 property re-proved on a graph nobody
+hand-wrote.
+
+**Not measured, and marked as such:** whether a real planner given the failure produces a
+*materially different* plan rather than a rephrased one ([OQ-23](OPEN_QUESTIONS.md#oq-23)). The
+prompt is a design decision; the budget makes a bad one cheap rather than correct.
+
 ## 5. Security posture of the graph
 
 The graph adds surface; the controls extend rather than bend

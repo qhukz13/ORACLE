@@ -34,6 +34,7 @@ doc, delete the marker.
 | [OQ-20](#oq-20) | Can `agy --json-schema` reliably return a valid ExecutionPlan? | measured 2026-08-24 | P6-T5 / Phase 8 | **answered NO — 75% vs a 90% gate; the ladder promoted Claude** |
 | [OQ-21](#oq-21) | When does ORACLE's MCP server need the 2026-07-28 spec? | `UNKNOWN` | none — watch item | monitoring |
 | [OQ-22](#oq-22) | Does the knowledge graph hold its budgets at corpus scale? | `EXPERIMENT NEEDED` | Phase 11 (graph view only) | open |
+| [OQ-23](#oq-23) | Does a failure-carrying prompt produce a *different* plan? | `EXPERIMENT NEEDED` | nothing — replanning ships bounded | opened 2026-08-25 |
 
 ---
 
@@ -664,6 +665,32 @@ level-of-detail culling), not the goal. Record results in `logs/development/` an
 numbers into TESTING.md's performance table when the view lands.
 
 ---
+
+### OQ-23
+**Given a failure, does a real planner produce a materially different plan — or a rephrased one?**
+`EXPERIMENT NEEDED` · blocks nothing; replanning shipped in P8-T2 with the budget that makes a bad
+answer cheap. Design in
+[ORCHESTRATION.md §4](ORCHESTRATION.md#as-built--replanning--p8-t2-2026-08-25).
+
+The replan prompt states what failed, ORACLE's measurements of it, what never ran, and that the
+failed approach must not be repeated. Every one of those sentences is a *design decision*: nobody
+has checked that a vendor given them changes its mind rather than restating its first plan with
+new wording. The P6-T5 spike measured plan validity, not plan *difference*, and the two are not
+the same property.
+
+**The measurement**, when a real objective has failed at least twice in normal use (a synthetic
+failure would answer a synthetic question):
+
+1. Capture the first plan, the failure, and the replan for ≥ 10 real replans.
+2. Score each pair: same tasks reworded · same decomposition with different targets · genuinely
+   different approach. A useful replanner should mostly land in the third bucket; mostly landing
+   in the first means the prompt is decoration and the budget is spending money for nothing.
+3. Separately: does naming the skipped work cause the replan to re-author it, or to forget it?
+   That sentence exists to prevent silent loss of scope and has never been checked.
+
+Failure of (2) changes the prompt, not the mechanism — the append-only lineage, the budget and the
+approvals are correct regardless of whether the planner has a second idea worth having. Failure of
+(3) is a scope bug and is worth fixing immediately.
 
 ## Standing assumptions
 

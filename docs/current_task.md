@@ -7,107 +7,116 @@
 
 ## Task
 
-**P8-T2 — Replanning: a failure buys one more idea, not an afternoon**
+**P8-T3 — The ladder, and the scenario Phase 8 was written against**
 
 **Phase:** [8 — planner integration & multi-worker](ROADMAP.md#phase-8--planner-integration--multi-worker--supervisor-arc) · **Scope:** Supervisor arc
 **Status:** `SET — not started` · **Set:** 2026-08-25
-**Previous task:** P8-T1 — **done**; see [`current_report.md`](current_report.md) and
-[PLANNER.md §8](PLANNER.md#8-as-built--p8-t1-2026-08-25).
+**Previous task:** P8-T2 — **done**; see [`current_report.md`](current_report.md),
+[ORCHESTRATION.md §4](ORCHESTRATION.md#as-built--replanning--p8-t2-2026-08-25) and the
+[dev log](../logs/development/2026-08-25-p8t2-replanning.md).
 
 ---
 
 ## Why this task exists
 
-A graph now runs a plan, and a failed task stops its branch dead. That is correct and it is not
-enough: the single most common real failure — "the worker misunderstood, or the context was
-wrong" — is one a supervisor can act on, once, without a human.
+Three of Phase 8's six acceptance criteria are still open, and they are the ones that decide
+whether the planner tier is a feature or a demo.
 
-`supersedes` is written by the store and populated by nothing. This task populates it, under a
-budget, and makes the lineage visible. It is also where a graph first runs **two workers at
-once** against real worktrees rather than in a test's imagination.
+Today, a planner that cannot produce a valid plan **logs and stops**. `PLANNER.md §6` describes a
+four-rung ladder; one rung is built (Claude is the default, because the ladder already promoted
+once). Rungs 2–4 are prose. "No single vendor is load-bearing" is currently a claim about a vendor
+that happens to be working.
+
+And the scenario the whole phase was specified against — context → planning egress → validation →
+graph approval → per-task gating → verification → report — exists as five separate tests that each
+prove one link. Nobody has run the chain.
 
 ## What the earlier phases hand you
 
-1. **Replanning is append-only** (ADR-0020). Nothing is rewritten: the failed task keeps its row,
-   its evidence and its place; the replacement points at it with `supersedes`.
-2. **The budget is ≤ 2 replans per root** ([ORCHESTRATION.md §4](ORCHESTRATION.md#4-failure-and-replanning)).
-   Unbounded replanning is how an agent burns an afternoon achieving nothing.
-3. **The planner is invoked with the failure**, never a blank slate: the original objective, the
-   failed task's spec, **ORACLE's evidence** (not the worker's claim), and prior attempts.
-4. **Evidence gates, claims do not.** A worker saying "I fixed it" is not a reason to skip the
-   VERIFY task that says otherwise.
-5. **Escalation order, cheapest first**: retry (if retryable) → replan → fallback agent → human.
-   Every rung must be visible in the lineage, not inferred from logs.
+1. **Everything below the planner is real and tested.** Runners, scheduler, recovery, replanning,
+   the two approval cards, `GraphService`, the tree projection, the UI.
+2. **The ladder's shape is already designed** ([PLANNER.md §6](PLANNER.md#6-fallbacks)) and has
+   already been *used* once, at the registry level, when OQ-20 came back negative.
+3. **`build_runners` and `_plan_and_run` are the composition point.** A ladder belongs beside
+   them, not inside `Planner`.
+4. **Degrading is cheap because the degraded modes are the old modes**: ORACLE without a planner
+   is ORACLE as shipped on 2026-08-24, which works.
+5. **The fake-planner harness exists** (`ScriptedPlanner`, `answer_approvals`), and the reference
+   scenario has a precedent in `test_reference_scenario.py` for the single-turn pipeline.
 
 ## Requirements
 
-1. **The replan decision**, in the scheduler or beside it: a `FAILED`/`TIMEOUT` task whose root has
-   budget left triggers one planning call carrying the failure. A task that failed because a human
-   refused something is **not** replanned — that is a decision, not a problem to route around.
-2. **Append, never rewrite**: new tasks arrive with `supersedes` set and `parent_id` recording
-   lineage; the failed task stays `FAILED`; dependents that were `SKIPPED` become eligible again
-   only through the replacement, never by resurrection.
-3. **Re-validation and re-approval**: a replan's tasks are validated exactly like a first plan, and
-   the graph card is shown again for the *added* tasks. A replan is new work and gets a new
-   decision — but the card must show it as an addition, not as the whole graph again.
-4. **The budget, enforced and visible**: ≤ 2 per root, counted on the root task, reported in the
-   tree. Exhausted budget → the root fails with a report of everything tried, and the keep/discard
-   decision the delegation flow already offers for a partial result.
-5. **Two workers, concurrently, for real**: a graph with two independent `coder` tasks runs both
-   delegations at once in separate worktrees, each harvested to its own branch, and the third
-   queues (the limit is 2). P7-T2 proved this with the stub CLI; do it with a graph a plan
-   authored.
-6. **The lineage in the API and the UI**: `GET /api/v1/tasks?root_id=` already returns
-   `supersedes`; the `TaskTree` shows a superseded attempt collapsed under its replacement rather
-   than hiding it. Nothing is erased, because the event log does not erase.
+1. **The ladder, rungs 2–4**, walked when a plan cannot be produced — not when one is merely
+   disliked:
+   - **template plans**: a small set of known shapes (investigate→fix→test→review) filled from the
+     intent, deterministic, no model. They are data, loaded like the registry, and validated by
+     exactly the same validator a vendor's plan is.
+   - **single-task plan**: one delegation or one tool — Phase 6's behaviour, reached as a
+     *defined state* rather than as a crash.
+   - **human-provided plan**: the person edits the task list on the graph approval card, and the
+     result is validated identically. No privileged path for a plan a human typed.
+2. **Which rung, and why, is visible.** Each descent is an event and appears on the graph card, so
+   approving a template plan is never mistaken for approving a planner's.
+3. **The reference multi-task scenario as one deterministic test**, asserting the order named in
+   the ROADMAP, with FakeProvider + stub CLIs and no vendor. This is the acceptance criterion, and
+   it is also the regression test for every seam Phase 8 built.
+4. **A planner recommending an agent the policy forbids is overridden, and the audit shows the
+   rule.** `agent_hint` is already dropped for selection; what is missing is the *audit entry* that
+   makes the override reviewable.
+5. **`REPORT` stops being a delegation** if the local model can hold `summarizer`
+   ([PLANNER.md §4](PLANNER.md#4-roles)). If it cannot yet, say so where it happens and leave the
+   admission — but decide, rather than inheriting the shrug.
+6. **One supervised live run** of the full scenario on a real project, every preview
+   human-approved, recorded in a dev log with what it cost.
 
 ## Constraints
 
-- **One replan per failure, two per root.** If a third appears, the budget was a suggestion.
-- No new approval *types* — the graph card is reused for additions.
-- The scheduler's import ban stands; replanning composes, it does not reach.
+- **A ladder is not a retry.** Descending happens when a rung cannot produce a *validated* plan,
+  never because the plan looked unambitious. One repair per rung, then down.
+- Template plans get **no privilege a vendor plan does not have**: same validator, same registry,
+  same card, same per-delegation egress questions.
+- The scheduler's import ban stands. So does the replan budget: a template plan that fails is a
+  failure like any other.
 - Do not touch the single-delegation path or the single-turn pipeline.
 
 ## Acceptance criteria
 
-- [ ] A failed task with budget produces exactly one planning call carrying ORACLE's evidence, and
-      the new tasks arrive with `supersedes` set.
-- [ ] A refused approval does **not** trigger a replan; a test says so.
-- [ ] The budget holds: a graph that keeps failing stops after 2 replans and reports what was
-      tried, with every attempt still readable in the tree.
-- [ ] A replan's added tasks are validated like any plan and approved on a card that shows them as
-      additions.
-- [ ] Two delegations from one plan run concurrently in separate worktrees, both harvested; a
-      third queues.
-- [ ] The tree shows a superseded attempt beside its replacement; a vitest covers the rendering.
-- [ ] `make check` green, security suite extended: a replan cannot widen what the original graph
-      was allowed to do.
+- [ ] A planner that returns nothing usable descends to a template plan, and a test asserts the
+      rung, the event and the card's provenance line.
+- [ ] A machine with no planner at all reaches the single-task plan and runs it; a test says so.
+- [ ] A human-edited plan is validated by the same validator, and a security test shows it buys no
+      privilege a vendor's plan would not have.
+- [ ] The reference multi-task scenario runs as one deterministic test in the ROADMAP's asserted
+      order.
+- [ ] A forbidden agent recommendation is overridden **and audited**, with the rule in the entry.
+- [ ] `REPORT`'s routing is decided rather than inherited.
+- [ ] One supervised live run, recorded with its cost.
+- [ ] `make check` green.
 
 ## Relevant files
 
-New: `src/oracle/orchestration/replan.py` · `tests/test_replanning.py` ·
-`tests/security/test_replan_authority.py`.
-Modify: `src/oracle/orchestration/scheduler.py` (the trigger — keep it small) ·
-`src/oracle/runners/planning.py` (the failure-carrying prompt) · `apps/desktop/.../TaskTree.tsx` ·
-`docs/ORCHESTRATION.md`, `docs/PLANNER.md` (as-built).
-Read first: [ORCHESTRATION.md §4](ORCHESTRATION.md#4-failure-and-replanning) ·
-[PLANNER.md §8](PLANNER.md#8-as-built--p8-t1-2026-08-25) · `src/oracle/orchestration/plan.py`.
+New: `src/oracle/orchestration/templates.py` · `config/plan_templates.yaml` ·
+`tests/test_plan_ladder.py` · `tests/test_reference_graph.py`.
+Modify: `src/oracle/runners/planning.py` (the descent, beside the existing egress) ·
+`src/oracle/api/app.py` (`_plan_and_run` walks the ladder) · `apps/desktop/.../` (the card's
+provenance line) · `docs/PLANNER.md` §6 as-built.
+Read first: [PLANNER.md §6](PLANNER.md#6-fallbacks) · [ROADMAP.md Phase 8 acceptance](ROADMAP.md#phase-8--planner-integration--multi-worker--supervisor-arc) ·
+`tests/test_reference_scenario.py` (the single-turn precedent).
 
 ## Dependencies
 
-P8-T1 (done). P9 (memory) wants the attempt records this produces.
+P8-T1, P8-T2 (both done). Phase 9 (memory/context) is the next arc and does not block this.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| Replanning becomes an agentic loop | The budget is on the root and counted in one place; a test drives a graph that always fails and asserts it stops |
-| The scheduler grows a planner-shaped hole in it | The trigger emits a *request*; the composition layer decides. If `scheduler.py` starts importing `plan.py`, stop |
-| A replan quietly widens scope | Re-validated against the same registry and projects, and the security test asserts the added tasks cannot reach what the original could not |
+| Template plans become a second planner with its own quirks | They are *data*, validated by the same function; a test feeds a template through the vendor plan's validator |
+| The ladder hides a broken vendor | Every descent is an event and a line on the card; a graph that ran on rung 3 must be readable as such afterwards |
+| The reference test becomes a slow, flaky monolith | It uses the stub CLI and fake providers like every other Phase 7–8 test; if it needs a real vendor it is measuring the wrong thing |
 
 ## Definition of done
 
-All acceptance criteria · `make check` green · ORCHESTRATION.md and PLANNER.md corrected to
-as-built · a dev log if the replan prompt needs real measurement to be useful ·
-`current_report.md` overwritten · this file set to **P8-T3** or **P9-T1**, whichever the state of
-Phase 8 warrants.
+All acceptance criteria · `make check` green · PLANNER.md §6 corrected to as-built · a dev log for
+the live run · `current_report.md` overwritten · this file set to **P9-T1**, which closes the
+supervisor arc's planner tier and opens memory.
