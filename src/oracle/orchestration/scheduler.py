@@ -28,6 +28,13 @@ measurement rather than taste (`logs/development/2026-08-24-p6t5-antigravity-pla
 Runners are injected, one per `TaskKind`. This module knows nothing about tools, agents
 or worktrees — which is why the whole scheduler is testable with fakes and no vendor, and
 why P7-T2 can wrap `DelegationService` without touching a line of it.
+
+**Replanning is the same seam.** A failed task hands the injected `replan` hook a *task*
+and takes back a list of tasks to append. The scheduler does not know what a planner is,
+what a budget is, or that anybody was asked to approve anything: it knows how to append
+rows and re-derive a ready set. The decision lives in `orchestration/replan.py`, the
+spending in `runners/planning.py`, and if this file ever imports either of them the
+separation has already failed.
 """
 
 from __future__ import annotations
@@ -41,7 +48,7 @@ from typing import Any
 from oracle.core.eventlog import EventLog
 from oracle.core.events import Event, new_id
 from oracle.logsink import get_logger
-from oracle.orchestration.graph import TaskGraph
+from oracle.orchestration.graph import GraphError, TaskGraph
 from oracle.orchestration.models import (
     Task,
     TaskError,
@@ -74,6 +81,11 @@ class Parked:
 
 
 Runner = Callable[[Task], Awaitable["TaskResult | Parked"]]
+
+#: A failed task in, replacement tasks out — or an empty list, which is the answer
+#: whenever there is no replan to be had (budget spent, a human refused, the planner said
+#: nothing usable, the card was declined). The scheduler asks; something else decides.
+Replanner = Callable[[Task], Awaitable[list[Task]]]
 
 
 @dataclass(frozen=True)
@@ -121,11 +133,15 @@ class Scheduler:
         store: TaskStore | None = None,
         eventlog: EventLog | None = None,
         limits: Limits | None = None,
+        replan: Replanner | None = None,
         session_id: str | None = None,
         trace_id: str | None = None,
     ) -> None:
         self.graph = graph
         self.runners = runners
+        #: Optional, and absent in every test that is about scheduling rather than about
+        #: replanning: a graph with no replanner behaves exactly as it did in P7.
+        self._replan = replan
         #: Both optional so the algebra can be tested without a database or a log; in the
         #: daemon both are always present, and `save()` runs before every announcement.
         self._store = store
@@ -141,6 +157,14 @@ class Scheduler:
         #: Ids this scheduler cancelled. Consulted *before* a runner's own answer,
         #: because a cancelled run and a failed one look identical from the outside.
         self._cancelled: set[str] = set()
+        #: Replans in flight, keyed by the failed task. Held like `_parked` rather than
+        #: like `_running`: a replan holds no slot (nothing is executing) but the graph is
+        #: emphatically not finished while one is outstanding.
+        self._replanning: dict[str, asyncio.Task[None]] = {}
+        #: Failures already handed to the hook. One request per failure — the *decision*
+        #: about budget belongs to the hook, but asking twice for the same row would be
+        #: this loop's own bug.
+        self._replan_asked: set[str] = set()
         self._done = asyncio.Event()
 
     # -- the loop ------------------------------------------------------------
@@ -164,12 +188,16 @@ class Scheduler:
         return status
 
     async def _loop(self) -> None:
-        while not self.graph.done():
+        while True:
             await self._cascade_skips()
-            if self.graph.done():
+            # A graph with a replan outstanding is not finished, however terminal every
+            # row currently looks: the whole point of a replan is that more rows are
+            # coming. Without this the loop would exit between the failure and the
+            # replacement, and the replacement would be appended to nothing.
+            if self.graph.done() and not self._replanning:
                 break
             dispatched = await self._dispatch()
-            if not self._running and not self._parked:
+            if not self._running and not self._parked and not self._replanning:
                 if dispatched:
                     continue
                 # Nothing running, nothing ready, nothing skippable, and tasks remain.
@@ -229,7 +257,7 @@ class Scheduler:
     async def _collect_one(self) -> None:
         """Wait for the next thing to happen — a runner finishing, or a parked task's
         wait ending. Both are progress; only one of them holds a slot."""
-        watching = {*self._running.values(), *self._parked.values()}
+        watching = {*self._running.values(), *self._parked.values(), *self._replanning.values()}
         done, _ = await asyncio.wait(watching, return_when=asyncio.FIRST_COMPLETED)
         for finished in done:
             running_id = next((tid for tid, t in self._running.items() if t is finished), None)
@@ -242,6 +270,12 @@ class Scheduler:
                 # The watcher has already returned the task to PENDING; dropping it here
                 # is what lets the next loop pass dispatch it again.
                 del self._parked[parked_id]
+                continue
+            replan_id = next((tid for tid, t in self._replanning.items() if t is finished), None)
+            if replan_id is not None:
+                # The replan has already appended whatever it produced, or nothing.
+                # Dropping the handle is what lets the loop re-derive the ready set.
+                del self._replanning[replan_id]
 
     async def _record(self, task: Task, finished: asyncio.Task[TaskResult]) -> None:
         """Turn one completed coroutine into one task transition.
@@ -358,6 +392,10 @@ class Scheduler:
             self._cancelled.add(task_id)
         for watcher in list(self._parked.values()):
             watcher.cancel()
+        # A replan outstanding when the supervisor is stopped is a vendor call nobody is
+        # waiting for any more, and rows nobody would schedule.
+        for replanning in list(self._replanning.values()):
+            replanning.cancel()
         for task in self.graph.active():
             cancelled = task.with_status(
                 TaskStatus.CANCELLED,
@@ -419,6 +457,11 @@ class Scheduler:
         watcher = self._parked.pop(task_id, None)
         if watcher is not None:
             watcher.cancel()
+        replanning = self._replanning.pop(task_id, None)
+        if replanning is not None:
+            # Somebody stopped this task. Authoring its replacement anyway would be the
+            # supervisor arguing with them.
+            replanning.cancel()
         task = self.graph[task_id]
         if not task.terminal:
             await self._finish(
@@ -450,6 +493,70 @@ class Scheduler:
                 "claim": result.claim,
             },
         )
+        # Every failure is *offered*; nothing here decides whether it is answered. Note
+        # that SKIPPED and CANCELLED never reach this branch, which is exactly why those
+        # distinctions are kept in the vocabulary.
+        if status in (TaskStatus.FAILED, TaskStatus.TIMEOUT):
+            self._request_replan(finished)
+
+    # -- replanning ----------------------------------------------------------
+
+    def _request_replan(self, task: Task) -> None:
+        """Hand one failure to the hook, in the background.
+
+        Background because a replan is a vendor call and a human decision, and doing it
+        inline would stop this loop from collecting the *other* delegations that are
+        still running. A graph that goes quiet for the length of an approval is a graph
+        whose concurrency limit was a lie."""
+        if self._replan is None or task.id in self._replan_asked:
+            return
+        self._replan_asked.add(task.id)
+        self._replanning[task.id] = asyncio.create_task(
+            self._run_replan(task), name=f"replan:{task.id}"
+        )
+
+    async def _run_replan(self, task: Task) -> None:
+        try:
+            added = await self._replan(task)  # type: ignore[misc]
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # A replan that raised changes nothing: the failure stands, the graph is
+            # exactly as it was, and the exception is on the record rather than in the
+            # graph's status.
+            log.exception("replan.failed", root=self.graph.root_id, task_id=task.id)
+            return
+        if not added:
+            return
+        try:
+            self.graph.extend(added)
+        except GraphError as exc:
+            # Re-validated like a first plan (ADR-0020). A replacement that would have
+            # made the graph invalid is refused whole, and the failed task simply stays
+            # failed - which is the answer that was already true.
+            log.warning("replan.rejected", root=self.graph.root_id, problem=str(exc))
+            return
+        await self._store_all(added)
+        for arrival in added:
+            await self._emit(
+                "task.created",
+                arrival,
+                {
+                    "kind": str(arrival.kind),
+                    "root": arrival.root_id,
+                    # The lineage, on the wire from the first event about this row, so a
+                    # client never has to re-query to find out what it replaces.
+                    "supersedes": arrival.supersedes,
+                    "parent_id": arrival.parent_id,
+                    "plan_id": arrival.plan_id,
+                },
+            )
+        log.info(
+            "replan.applied",
+            root=self.graph.root_id,
+            replaces=task.id,
+            tasks=[t.id for t in added],
+        )
 
     async def _persist(self, task: Task) -> None:
         if self._store is not None:
@@ -458,6 +565,12 @@ class Scheduler:
     async def _persist_all(self) -> None:
         if self._store is not None:
             await self._store.save_all(self.graph.tasks)
+
+    async def _store_all(self, tasks: list[Task]) -> None:
+        """Write before announcing, the same ordering as everywhere else: a client that
+        heard about a task the table does not hold is one that can out-run recovery."""
+        if self._store is not None:
+            await self._store.save_all(tasks)
 
     async def _emit(self, event_type: str, task: Task, payload: dict[str, object]) -> None:
         if self._log is None:

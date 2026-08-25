@@ -44,6 +44,9 @@ scopes:
       - {{ path: "{root}", mode: rw }}
 tools:
   ai.delegate: {{ tier: T2 }}
+  # Declared because the shipped `config/policy.yaml` declares it: a graph card is a
+  # real approval in this harness, not an absence that reads as a denial.
+  ai.graph: {{ tier: T2 }}
 """
 
 

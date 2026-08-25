@@ -45,7 +45,7 @@ from oracle.router.intent import IntentClassifier
 from oracle.router.pipeline import TurnPipeline
 from oracle.router.selection import ToolSelector
 from oracle.runners import build_runners
-from oracle.runners.planning import Planner, approve_graph
+from oracle.runners.planning import Planner, approve_graph, make_replanner
 from oracle.storage.db import connect, migrate
 from oracle.toolhost import ToolHost
 from oracle.tools import ToolExecutor, ToolRegistry, build_registry, git_undo_runner
@@ -519,8 +519,11 @@ def _register_routes(app: FastAPI) -> None:
 
 
 async def _plan_and_run(st: AppState, objective: str, session_id: str | None, trace: str) -> None:
-    """Plan, ask, compile, ask again, run. Each step's refusal is a full stop, not a
-    fallback to doing it anyway."""
+    """Plan, ask, compile, ask again, run — and, if something fails, ask once more.
+
+    Each step's refusal is a full stop, not a fallback to doing it anyway. The replanner
+    is built here, beside the runners, for the same reason they are: this is the one place
+    allowed to see both the supervisor and the things that spend money."""
     planner = Planner(
         ClaudeCodeAdapter(),
         st.approvals,
@@ -545,7 +548,38 @@ async def _plan_and_run(st: AppState, objective: str, session_id: str | None, tr
     ):
         log.info("graph.not_approved", root_id=graph.root_id, plan_id=plan_id)
         return
-    await st.graphs.run(graph, build_runners(st), session_id=session_id, trace_id=trace)
+
+    async def exhausted(report: dict[str, Any]) -> None:
+        """The budget ran out. ORCHESTRATION.md §4: the root fails with a report of
+        everything tried — including the branches the partial work was harvested onto, so
+        the keep/discard decision has something to point at rather than a shrug."""
+        await st.eventlog.append(
+            Event(
+                type="graph.replan_exhausted",
+                session_id=session_id,
+                task_id=graph.root_id,
+                trace_id=trace,
+                payload={"root_id": graph.root_id, "source": "graph", **report},
+            )
+        )
+
+    replan = make_replanner(
+        planner,
+        st.approvals,
+        st.policy,
+        st.agents,
+        # From the table, not from the scheduler's memory: the budget is counted off the
+        # durable record, which is the one both a restarted daemon and a reconnecting
+        # client can also read.
+        lambda: st.task_store.load_graph(graph.root_id),
+        objective=objective,
+        trace_id=trace,
+        session_id=session_id,
+        on_exhausted=exhausted,
+    )
+    await st.graphs.run(
+        graph, build_runners(st), replan=replan, session_id=session_id, trace_id=trace
+    )
 
 
 # ----------------------------------------------------------------------------- WS

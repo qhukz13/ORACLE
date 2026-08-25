@@ -268,7 +268,7 @@ def test_an_agent_hint_breaks_ties_and_nothing_more(registry: Registry) -> None:
 def test_the_approval_card_lists_what_will_egress(registry: Registry) -> None:
     """The pipeline rule: the shape of the whole thing up front, so a person is not asked
     twelve questions they cannot compare."""
-    rows = elevated_summary(compile_plan(plan_of(), registry))
+    rows = elevated_summary(compile_plan(plan_of(), registry).tasks)
     assert len(rows) == 2
     assert [r["egresses"] for r in rows] == [True, False]
     assert rows[0]["agent"] == "claude" and rows[0]["role"] == "coder"

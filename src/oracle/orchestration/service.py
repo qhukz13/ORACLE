@@ -28,7 +28,7 @@ from oracle.core.eventlog import EventLog
 from oracle.logsink import get_logger
 from oracle.orchestration.graph import TaskGraph
 from oracle.orchestration.models import TaskKind, TaskStatus
-from oracle.orchestration.scheduler import Limits, Runner, Scheduler
+from oracle.orchestration.scheduler import Limits, Replanner, Runner, Scheduler
 from oracle.orchestration.store import TaskStore
 
 log = get_logger(__name__)
@@ -61,10 +61,15 @@ class GraphService:
         graph: TaskGraph,
         runners: dict[TaskKind, Runner],
         *,
+        replan: Replanner | None = None,
         session_id: str | None = None,
         trace_id: str | None = None,
     ) -> TaskStatus:
-        """Run a graph to completion, holding it addressable while it lasts."""
+        """Run a graph to completion, holding it addressable while it lasts.
+
+        `replan` is passed through untouched, for the same reason the runners are: this
+        object is an address, not an authority, and a service that decided when to replan
+        would be a third place the budget lives."""
         root_id = graph.root_id
         if root_id in self._running:
             raise ValueError(f"graph {root_id} is already running")
@@ -74,6 +79,7 @@ class GraphService:
             store=self._store,
             eventlog=self._log,
             limits=self._limits,
+            replan=replan,
             session_id=session_id,
             trace_id=trace_id,
         )
@@ -91,13 +97,16 @@ class GraphService:
         graph: TaskGraph,
         runners: dict[TaskKind, Runner],
         *,
+        replan: Replanner | None = None,
         session_id: str | None = None,
         trace_id: str | None = None,
     ) -> None:
         """Fire-and-forget, through the daemon's tracked-task spawner."""
         if self._spawn is None:
             raise RuntimeError("this GraphService has no spawner; await run() instead")
-        self._spawn(self.run(graph, runners, session_id=session_id, trace_id=trace_id))
+        self._spawn(
+            self.run(graph, runners, replan=replan, session_id=session_id, trace_id=trace_id)
+        )
 
     # -- reaching it ---------------------------------------------------------
 
@@ -154,7 +163,13 @@ class GraphService:
                     "role": task.spec.role,
                     "agent": task.agent,
                     "attempt": task.attempt,
+                    # Replanning lineage. `supersedes` names the failed attempt this row
+                    # replaces; `parent_id` records where it came from. Neither is ever
+                    # rewritten and neither hides the other - the tree shows both rows
+                    # (ORCHESTRATION.md §4).
                     "supersedes": task.supersedes,
+                    "parent_id": task.parent_id,
+                    "plan_id": task.plan_id,
                     "started_at": task.started_at,
                     "finished_at": task.finished_at,
                     # Evidence and claim stay apart all the way to the client: a UI that

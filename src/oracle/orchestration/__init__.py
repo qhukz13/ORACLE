@@ -17,17 +17,30 @@ from oracle.orchestration.models import (
     aggregate,
 )
 from oracle.orchestration.recovery import Recovered, recover
-from oracle.orchestration.scheduler import Limits, Parked, Runner, Scheduler
+from oracle.orchestration.replan import (
+    REPLAN_BUDGET,
+    Attempt,
+    ReplanRequest,
+    attach,
+    attempts_report,
+    budget_used,
+    consider,
+)
+from oracle.orchestration.scheduler import Limits, Parked, Replanner, Runner, Scheduler
 from oracle.orchestration.service import GraphService
 from oracle.orchestration.store import TaskStore
 
 __all__ = [
+    "REPLAN_BUDGET",
+    "Attempt",
     "Cost",
     "GraphError",
     "GraphService",
     "Limits",
     "Parked",
     "Recovered",
+    "ReplanRequest",
+    "Replanner",
     "Runner",
     "Scheduler",
     "Task",
@@ -39,6 +52,10 @@ __all__ = [
     "TaskStatus",
     "TaskStore",
     "aggregate",
+    "attach",
+    "attempts_report",
+    "budget_used",
+    "consider",
     "find_cycle",
     "recover",
     "validate",

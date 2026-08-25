@@ -26,6 +26,12 @@ from oracle.orchestration.models import Task, TaskStatus, aggregate
 #: ORCHESTRATION.md §3: a plan larger than this is a planner losing the thread, and the
 #: cap is the same instinct as the old 8-step pipeline limit.
 MAX_GRAPH_SIZE = 12
+#: The ceiling a graph may reach by *replanning*. It is not a second opinion about how
+#: big a plan may be — every plan, first or replacement, is still capped at
+#: `MAX_GRAPH_SIZE` — it is what the replan budget (2 per root, ORCHESTRATION.md §4)
+#: already implies, written down so nothing has to multiply it in its head. A graph that
+#: would exceed it is a graph whose budget was not being counted.
+MAX_GRAPH_TOTAL = MAX_GRAPH_SIZE * 3
 
 
 class GraphError(ValueError):
@@ -71,18 +77,22 @@ def find_cycle(tasks: Iterable[Task]) -> tuple[str, ...]:
     return ()
 
 
-def validate(tasks: list[Task]) -> None:
+def validate(tasks: list[Task], *, limit: int = MAX_GRAPH_SIZE) -> None:
     """Raises `GraphError` on the first structural problem. Order matters: a duplicate id
     makes every later check meaningless, and a dangling dependency makes the cycle walk
-    lie about which edges exist."""
+    lie about which edges exist.
+
+    `limit` is a parameter only because a replanned graph is checked against
+    `MAX_GRAPH_TOTAL` while every individual plan is still checked against
+    `MAX_GRAPH_SIZE`. Both are ceilings; neither is negotiable at the call site."""
     if not tasks:
         raise GraphError("the graph has no tasks")
     ids = [task.id for task in tasks]
     if len(ids) != len(set(ids)):
         duplicates = sorted({i for i in ids if ids.count(i) > 1})
         raise GraphError(f"duplicate task ids: {', '.join(duplicates)}")
-    if len(tasks) > MAX_GRAPH_SIZE:
-        raise GraphError(f"{len(tasks)} tasks exceeds the graph limit of {MAX_GRAPH_SIZE}")
+    if len(tasks) > limit:
+        raise GraphError(f"{len(tasks)} tasks exceeds the graph limit of {limit}")
     known = set(ids)
     for task in tasks:
         for dep in task.depends_on:
@@ -99,9 +109,9 @@ def validate(tasks: list[Task]) -> None:
 
 
 class TaskGraph:
-    """A validated set of tasks, addressable by id. Immutable in shape — tasks are
-    replaced as they transition, never added — because adding is *replanning*, which is
-    P8's append-only operation and needs re-validation of its own."""
+    """A validated set of tasks, addressable by id. Tasks are replaced as they transition;
+    the only way the *shape* changes is `extend()`, which is replanning — append-only, and
+    re-validated as a whole (ORCHESTRATION.md §3)."""
 
     def __init__(self, tasks: list[Task]) -> None:
         validate(tasks)
@@ -125,6 +135,24 @@ class TaskGraph:
         if task.id not in self._tasks:
             raise GraphError(f"{task.id} is not in this graph")
         self._tasks[task.id] = task
+
+    def extend(self, tasks: list[Task]) -> None:
+        """Append new tasks — the one dynamic operation the graph has (ADR-0020).
+
+        **Nothing is rewritten.** The failed task keeps its row, its evidence and its
+        place; the arrivals point at it with `supersedes`. Everything is re-validated as
+        one graph, so a replacement cannot introduce a cycle, re-use an existing id, or
+        depend on a task that is not there — a replan is new work and gets a first plan's
+        scrutiny, not a grandfathered pass.
+
+        Applied all-or-nothing: a batch that fails validation leaves the graph exactly as
+        it was, because half a replan is a graph nobody designed."""
+        if not tasks:
+            return
+        combined = [*self._tasks.values(), *tasks]
+        validate(combined, limit=MAX_GRAPH_TOTAL)
+        for task in tasks:
+            self._tasks[task.id] = task
 
     # -- the algebra ---------------------------------------------------------
 

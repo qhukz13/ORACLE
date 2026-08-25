@@ -15,13 +15,17 @@ from pathlib import Path
 from typing import Any
 
 from oracle.runners.delegation import make_delegation_runner
+from oracle.runners.planning import Planner, approve_graph, make_replanner
 from oracle.runners.tool import make_tool_runner
 from oracle.runners.verify import BaselineCache, make_verify_runner
 
 __all__ = [
     "BaselineCache",
+    "Planner",
+    "approve_graph",
     "build_runners",
     "make_delegation_runner",
+    "make_replanner",
     "make_tool_runner",
     "make_verify_runner",
 ]

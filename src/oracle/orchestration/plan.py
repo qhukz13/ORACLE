@@ -27,6 +27,7 @@ errors, and one error per round trip would cost a round trip per typo.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -218,6 +219,7 @@ def compile_plan(
     *,
     root_id: str | None = None,
     plan_id: str | None = None,
+    id_prefix: str | None = None,
 ) -> TaskGraph:
     """A validated plan becomes rows. Call `validate()` first — this assumes it passed.
 
@@ -225,12 +227,18 @@ def compile_plan(
     them: the plan's namespace is the plan's, and letting it leak into the task table
     would make two plans' `"A"` the same row.
 
+    `id_prefix` exists for exactly one caller: a **replan**, whose tasks join a graph that
+    already holds `{root}-a`. It changes the id namespace without changing `root_id`,
+    because the replacement belongs to the same root — that is what makes it visible in
+    the same tree — and only its *name* has to be new.
+
     The agent is **resolved here, by the registry**, not taken from the plan. `agent_hint`
     breaks ties and nothing more (PLANNER.md §5): a plan that could choose its executor
     would be choosing its own permissions.
     """
     root = root_id or new_id("tk")
-    ids = {task.id: f"{root}-{task.id}".lower() for task in plan.tasks}
+    prefix = id_prefix or root
+    ids = {task.id: f"{prefix}-{task.id}".lower() for task in plan.tasks}
     tasks: list[Task] = []
     for planned in plan.tasks:
         kind = OUTCOME_KIND.get(planned.expected_outcome, TaskKind.DELEGATION)
@@ -273,13 +281,17 @@ def _resolve_agent(planned: PlannedTask, registry: Registry) -> str | None:
     return holders[0].id
 
 
-def elevated_summary(graph: TaskGraph) -> list[dict[str, Any]]:
+def elevated_summary(tasks: Iterable[Task]) -> list[dict[str, Any]]:
     """What the graph approval card lists: every task whose tier is knowable *now*.
 
     Delegations are the interesting entry — each is an egress, and each still asks its own
     question later, because an egress approval binds to rendered bytes that do not exist
     yet (SECURITY.md §10). Listing them here is the pipeline rule: the shape of the whole
     thing up front, so a person is not asked twelve questions they cannot compare.
+
+    Takes tasks rather than a graph because a **replan's card lists only the additions**:
+    re-showing the whole graph for two new rows is how a person learns to click through
+    the card without reading it.
     """
     return [
         {
@@ -291,5 +303,5 @@ def elevated_summary(graph: TaskGraph) -> list[dict[str, Any]]:
             "project": task.spec.project,
             "egresses": task.kind is TaskKind.DELEGATION,
         }
-        for task in graph.tasks
+        for task in tasks
     ]

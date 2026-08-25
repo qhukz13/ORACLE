@@ -25,15 +25,18 @@ person already sanctioned is how approval fatigue is manufactured.
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from oracle.core.approvals import ApprovalStore, Resolution
+from oracle.core.events import new_id
 from oracle.integrations.adapter import ExternalAgentAdapter
 from oracle.integrations.types import HandoffPacket, Workspace
 from oracle.logsink import get_logger
 from oracle.orchestration.graph import TaskGraph
+from oracle.orchestration.models import Task
 from oracle.orchestration.plan import (
     ExecutionPlan,
     compile_plan,
@@ -44,6 +47,14 @@ from oracle.orchestration.plan import (
     validate,
 )
 from oracle.orchestration.registry import Registry
+from oracle.orchestration.replan import (
+    REPLAN_BUDGET,
+    Attempt,
+    ReplanRequest,
+    attach,
+    attempts_report,
+    consider,
+)
 from oracle.policy.engine import PolicyEngine
 from oracle.policy.model import Capability, Decision, Provenance, Tier
 
@@ -140,8 +151,22 @@ class Planner:
 
     # -- the run -------------------------------------------------------------
 
-    async def plan(self, objective: str, *, trace_id: str) -> PlanOutcome:
-        packet = self.packet(objective, task_id=f"plan-{trace_id}")
+    async def plan(
+        self,
+        objective: str,
+        *,
+        trace_id: str,
+        failure: str = "",
+        purpose: str = "planning",
+        preview_extra: dict[str, Any] | None = None,
+    ) -> PlanOutcome:
+        """One approved egress, up to `MAX_CALLS` calls inside it, one validated plan out.
+
+        `failure` is what makes this the same method for planning and **replanning**: a
+        replan is the identical call with the failure attached to the prompt and named on
+        the card. Sharing the path is deliberate — a second, nearly-identical planning
+        route is how one of them quietly stops validating."""
+        packet = self.packet(objective, task_id=f"plan-{trace_id}", extra=failure)
         verdict = self._engine.evaluate(
             EGRESS_TOOL,
             capabilities=frozenset({Capability.AGENT_DELEGATE, Capability.NET_EGRESS}),
@@ -152,27 +177,31 @@ class Planner:
 
         pending = await self._approvals.request(
             EGRESS_TOOL,
-            {"objective": objective},
+            {"objective": objective, "purpose": purpose},
             verdict,
-            f"plan:{trace_id}",
+            f"{purpose}:{trace_id}",
             trace_id=trace_id,
             session_id=self._session_id,
             preview={
                 "destination": DESTINATION,
                 "adapter": self._adapter.id,
-                "purpose": "planning",
+                "purpose": purpose,
                 "objective": objective,
+                # The whole prompt, failure context included: a person approving a replan
+                # is approving the sending of ORACLE's evidence about a failed run, and
+                # summarising that away would hide the only new thing in it.
                 "prompt": packet.render_prompt(),
                 # The bound, stated before the click rather than discovered after it.
                 "calls": f"up to {MAX_CALLS} (one repair attempt if the plan is invalid)",
                 "sends_repo_contents": False,
+                **(preview_extra or {}),
             },
         )
         if await self._approvals.wait(pending) != Resolution.APPROVED:
-            return PlanOutcome(refused=True, problems=["the planning egress was not approved"])
+            return PlanOutcome(refused=True, problems=[f"the {purpose} egress was not approved"])
 
         outcome = PlanOutcome()
-        extra = ""
+        extra = failure
         for attempt in range(1, MAX_CALLS + 1):
             outcome.attempts = attempt
             raw, evidence = await self._call(objective, packet.task_id, extra)
@@ -183,14 +212,37 @@ class Planner:
                 if not problems:
                     outcome.plan = plan
                     outcome.problems = []
-                    log.info("plan.valid", attempt=attempt, tasks=len(plan.tasks))
+                    log.info("plan.valid", attempt=attempt, tasks=len(plan.tasks), purpose=purpose)
                     return outcome
             outcome.problems = problems
-            log.warning("plan.invalid", attempt=attempt, problems=problems[:5])
+            log.warning("plan.invalid", attempt=attempt, problems=problems[:5], purpose=purpose)
             if attempt >= MAX_CALLS:
                 break
-            extra = repair_prompt(problems)
+            # The repair rides *with* the failure context, never instead of it: a repair
+            # prompt that dropped the failure would be asking for a plan for a different
+            # problem.
+            extra = (
+                f"{failure}\n\n{repair_prompt(problems)}" if failure else repair_prompt(problems)
+            )
         return outcome
+
+    async def replan(self, request: ReplanRequest, *, trace_id: str) -> PlanOutcome:
+        """One more idea, told what went wrong. Identical machinery to `plan()`, with the
+        failure in the prompt and the budget on the card."""
+        return await self.plan(
+            request.objective,
+            trace_id=trace_id,
+            failure=failure_context(request),
+            purpose="replanning",
+            preview_extra={
+                "replaces": request.failed_id,
+                "replan": f"{request.attempt_number} of {request.budget} for {request.root_id}",
+                # Named because it is the difference between this and a first plan: what
+                # goes out is ORACLE's measurements of a failed run, not the worker's
+                # account of it.
+                "sends": "ORACLE's own evidence about the failed task, not the worker's claim",
+            },
+        )
 
     async def _call(self, objective: str, task_id: str, extra: str) -> tuple[Any, dict[str, Any]]:
         """One vendor call in a workspace that holds nothing. The temp directory exists
@@ -214,6 +266,51 @@ class Planner:
         return (
             result.structured if result.structured is not None else result.result_text
         ), evidence
+
+
+def _attempt_lines(attempt: Attempt) -> str:
+    """One attempt rendered for the planner. `evidence` only — `Attempt` has no field for
+    the worker's claim, which is the enforcement rather than the convention."""
+    body = [
+        f"- task {attempt.task_id} ({attempt.role}) — {attempt.status}",
+        f"  objective: {attempt.objective}",
+    ]
+    if attempt.error:
+        body.append(f"  error: {attempt.error}")
+    if attempt.evidence:
+        measured = ", ".join(f"{k}={v!r}" for k, v in sorted(attempt.evidence.items()))
+        body.append(f"  ORACLE measured: {measured}")
+    return "\n".join(body)
+
+
+def failure_context(request: ReplanRequest) -> str:
+    """What the planner is told about the failure, and the only thing that makes its
+    second answer different from its first (ORCHESTRATION.md §4, rule 2).
+
+    Everything here is ORACLE's own record. There is no path by which a worker's prose
+    reaches this string, because `Attempt` does not carry one — the separation is a
+    missing field, not a filter somebody has to remember to apply."""
+    parts = [
+        "This is a REPLAN. A previous attempt at this objective failed and you are being "
+        f"asked for one more approach (attempt {request.attempt_number} of {request.budget} "
+        "for this objective; there will not be another).",
+        "WHAT FAILED:\n" + _attempt_lines(request.failed),
+    ]
+    if request.prior:
+        parts.append("ALSO FAILED EARLIER:\n" + "\n".join(_attempt_lines(a) for a in request.prior))
+    if request.skipped:
+        parts.append(
+            "NEVER RAN, because it depended on the failed task. This work is NOT resumed: "
+            "if it is still wanted, your plan must ask for it again.\n"
+            + "\n".join(f"- {a.task_id} ({a.role}): {a.objective}" for a in request.skipped)
+        )
+    parts.append(
+        "Everything above is ORACLE's own measurement of what happened. It is not the "
+        "worker's account of its own work, and you are not being asked to trust one.\n"
+        "Plan the remaining work differently. Do not repeat the failed approach, and do "
+        "not assume the failed task's output exists."
+    )
+    return "\n\n".join(parts)
 
 
 async def approve_graph(
@@ -253,10 +350,67 @@ async def approve_graph(
             "summary": plan.summary,
             # Shown, never acted on: what the planner said it was unsure about.
             "risks": list(plan.risks),
-            "tasks": elevated_summary(graph),
+            "tasks": elevated_summary(graph.tasks),
+            "addition": False,
             "note": (
                 "approving runs the graph; each delegation still asks separately before "
                 "anything leaves this machine"
+            ),
+        },
+    )
+    return await approvals.wait(pending) == Resolution.APPROVED
+
+
+async def approve_additions(
+    approvals: ApprovalStore,
+    engine: PolicyEngine,
+    added: list[Task],
+    plan: ExecutionPlan,
+    *,
+    request: ReplanRequest,
+    trace_id: str,
+    session_id: str | None = None,
+) -> bool:
+    """The same card, for a replan's *added* tasks (ORCHESTRATION.md §4, rule 3).
+
+    Deliberately **not** a new approval type: a replan is new work and gets a new
+    decision, but a second kind of card would be a second thing to learn to read, and the
+    tier, the provenance and the meaning of "yes" are all identical.
+
+    It lists only the additions. Re-showing the whole graph for two new rows is how a
+    person is trained to click through a card without reading it — and the one thing a
+    replan card must communicate is *what is new*, plus which failure it answers and how
+    much of the budget it spends."""
+    verdict = engine.evaluate(
+        GRAPH_TOOL,
+        capabilities=frozenset({Capability.AGENT_DELEGATE}),
+        provenances=frozenset({Provenance.EXTERNAL}),
+        declared_tier=Tier.T2,
+    )
+    if verdict.decision is Decision.DENY:
+        log.warning("replan.denied", rule=verdict.rule)
+        return False
+    pending = await approvals.request(
+        GRAPH_TOOL,
+        {"root_id": request.root_id, "tasks": len(added), "supersedes": request.failed_id},
+        verdict,
+        f"replan:{request.failed_id}",
+        trace_id=trace_id,
+        session_id=session_id,
+        preview={
+            "objective": plan.objective,
+            "summary": plan.summary,
+            "risks": list(plan.risks),
+            "tasks": elevated_summary(added),
+            # The discriminator a UI needs to say "added to the graph" rather than
+            # re-rendering it as though it were the whole thing.
+            "addition": True,
+            "replaces": request.failed_id,
+            "replaced_because": request.failed.error or request.failed.status,
+            "replan": f"{request.attempt_number} of {request.budget}",
+            "note": (
+                f"these {len(added)} tasks are ADDED to graph {request.root_id}; "
+                f"{request.failed_id} stays failed and is not re-run"
             ),
         },
     )
@@ -268,3 +422,93 @@ def compile_and_approve(plan: ExecutionPlan, registry: Registry, *, plan_id: str
     `approve_graph` so a caller can inspect the graph — or a test can — before anybody is
     asked to approve it."""
     return compile_plan(plan, registry, plan_id=plan_id)
+
+
+# -- composition ---------------------------------------------------------------
+
+
+def make_replanner(
+    planner: Planner,
+    approvals: ApprovalStore,
+    engine: PolicyEngine,
+    registry: Registry,
+    tasks_of: Callable[[], Awaitable[list[Task]]],
+    *,
+    objective: str,
+    trace_id: str,
+    session_id: str | None = None,
+    on_exhausted: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+) -> Callable[[Task], Awaitable[list[Task]]]:
+    """Bind the replan decision to the planner that can act on it.
+
+    This is the whole of the composition the scheduler is kept away from: it decides
+    (`orchestration.replan.consider`), it spends (an egress, previewed and approved), it
+    asks again (the additions card), and only then does it hand rows back. The scheduler
+    receives a list of tasks and has no idea any of that happened.
+
+    `tasks_of` reads the root's rows — from the store in the daemon, so the budget is
+    counted from the durable record rather than from anything held in memory by the loop
+    that is asking."""
+
+    async def replan_for(failed: Task) -> list[Task]:
+        tasks = await tasks_of()
+        request, reason = consider(failed, tasks, objective=objective)
+        if request is None:
+            log.info("replan.declined", task_id=failed.id, reason=reason)
+            if on_exhausted is not None and "budget" in reason:
+                # The budget running out is the one refusal that owes the person a
+                # report: ORCHESTRATION.md §4 says the root fails *with everything that
+                # was tried*, and the worktrees are still there to keep or discard.
+                await on_exhausted({"reason": reason, **attempts_report(tasks)})
+            return []
+
+        outcome = await planner.replan(request, trace_id=trace_id)
+        if outcome.plan is None:
+            log.info(
+                "replan.no_plan",
+                task_id=failed.id,
+                refused=outcome.refused,
+                problems=outcome.problems[:3],
+            )
+            return []
+
+        plan_id = new_id("pl")
+        compiled = compile_plan(
+            outcome.plan,
+            registry,
+            root_id=failed.root_id,
+            plan_id=plan_id,
+            # Same root, new namespace: `{root}-r1-a` cannot collide with `{root}-a`.
+            id_prefix=f"{failed.root_id}-r{request.attempt_number}",
+        )
+        added = attach(compiled.tasks, failed=failed, plan_id=plan_id)
+
+        if not await approve_additions(
+            approvals,
+            engine,
+            added,
+            outcome.plan,
+            request=request,
+            trace_id=trace_id,
+            session_id=session_id,
+        ):
+            log.info("replan.not_approved", task_id=failed.id, plan_id=plan_id)
+            return []
+        return added
+
+    return replan_for
+
+
+__all__ = [
+    "EGRESS_TOOL",
+    "GRAPH_TOOL",
+    "MAX_CALLS",
+    "REPLAN_BUDGET",
+    "PlanOutcome",
+    "Planner",
+    "approve_additions",
+    "approve_graph",
+    "compile_and_approve",
+    "failure_context",
+    "make_replanner",
+]
