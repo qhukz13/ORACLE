@@ -28,6 +28,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Approval } from "../protocol";
 import { EgressPreview } from "./EgressPreview";
+import { GraphCard } from "./GraphCard";
 
 /** Blocks an Enter keystroke carried over from whatever the user was doing before. */
 const GUARD_MS = 500;
@@ -177,6 +178,10 @@ export function ConfirmationCenter({ approvals, decided, onRespond }: Confirmati
         // Egress gets its own preview: the §6 box, built from what was actually
         // rendered. The generic EFFECT block would bury the one number that matters.
         <EgressPreview preview={current.preview} />
+      ) : current.tool === "ai.graph" ? (
+        // A graph card carries a whole plan. The generic EFFECT block shows one line of
+        // it, which is how somebody approves twelve tasks they never saw.
+        <GraphCard preview={current.preview} />
       ) : (
         (effect.summary || effect.detail) && (
           <div className="ap-effect">
