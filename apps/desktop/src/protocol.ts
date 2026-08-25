@@ -129,6 +129,32 @@ export interface Delegation {
   result?: Record<string, unknown>;
 }
 
+/**
+ * One task of a graph, folded from the `task.*` events that carry `source: "graph"`.
+ *
+ * The delegation lifecycle emits `task.*` for the same task id with its own payload
+ * shape, which is why the discriminator exists: both streams are wanted, and a client
+ * that guessed from payload keys would fold a delegation's "rendering" into a graph's
+ * status column.
+ */
+export interface GraphTask {
+  taskId: string;
+  kind: string;
+  status: string;
+  dependsOn: string[];
+  summary?: string;
+  /** What ORACLE measured. Never merged with `claim` — that distinction is the whole
+   *  verification design (docs/ORCHESTRATION.md §2). */
+  evidence?: Record<string, unknown>;
+  /** What the worker said about its own work. Shown as a quote, never as a verdict. */
+  claim?: string;
+}
+
+export interface Graph {
+  rootId: string;
+  tasks: GraphTask[];
+}
+
 export function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }

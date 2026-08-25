@@ -17,13 +17,16 @@ from oracle.orchestration.models import (
     aggregate,
 )
 from oracle.orchestration.recovery import Recovered, recover
-from oracle.orchestration.scheduler import Limits, Runner, Scheduler
+from oracle.orchestration.scheduler import Limits, Parked, Runner, Scheduler
+from oracle.orchestration.service import GraphService
 from oracle.orchestration.store import TaskStore
 
 __all__ = [
     "Cost",
     "GraphError",
+    "GraphService",
     "Limits",
+    "Parked",
     "Recovered",
     "Runner",
     "Scheduler",

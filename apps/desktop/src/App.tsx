@@ -15,6 +15,7 @@ import { OracleClient } from "./client";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmationCenter } from "./components/ConfirmationCenter";
 import { DelegationPanel } from "./components/DelegationPanel";
+import { TaskTree } from "./components/TaskTree";
 import { Inspector } from "./components/Inspector";
 import { TerminalDock } from "./components/TerminalDock";
 import { ToolCard } from "./components/ToolCard";
@@ -115,6 +116,20 @@ export default function App() {
     // the worktree is gone. Discarding is safe by construction — the real tree was
     // never touched (docs/INTEGRATIONS.md §7).
     clientRef.current?.send({ type: "delegate.discard", payload: { task_id: taskId } });
+  }, []);
+
+  const cancelTask = useCallback((rootId: string, taskId: string) => {
+    // Not optimistic, like every other command here: the row keeps its status until a
+    // `task.*` event says otherwise. The scheduler is the one that decides a task is
+    // cancelled, and it says so through the same stream as everything else.
+    clientRef.current?.send({
+      type: "graph.cancel",
+      payload: { root_id: rootId, task_id: taskId },
+    });
+  }, []);
+
+  const cancelGraph = useCallback((rootId: string) => {
+    clientRef.current?.send({ type: "graph.cancel", payload: { root_id: rootId } });
   }, []);
 
   // Stable callbacks: xterm.js subscribes once on mount and holds these in a closure.
@@ -279,6 +294,11 @@ export default function App() {
         <main className="stage">
           <ConfirmationCenter approvals={s.approvals} decided={s.decided} onRespond={respond} />
           <DelegationPanel delegations={s.delegations} onDiscard={discard} />
+          <TaskTree
+            graphs={s.graphs}
+            onCancelTask={cancelTask}
+            onCancelGraph={cancelGraph}
+          />
 
           {stage === "events" ? (
             <table className="events">

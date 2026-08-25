@@ -381,3 +381,71 @@ describe("store.apply — delegations", () => {
     expect(useStore.getState().delegations).toHaveLength(1);
   });
 });
+
+describe("store.apply — task graphs", () => {
+  beforeEach(() => {
+    useStore.getState().reset();
+  });
+
+  function gevent(
+    seq: number,
+    type: string,
+    payload: Record<string, unknown> = {},
+    taskId = "look",
+  ): OracleEvent {
+    return {
+      ...ev(seq, type, { source: "graph", root_id: "tk_root", ...payload }, "t_1"),
+      task_id: taskId,
+    };
+  }
+
+  it("folds a graph from created through finished", () => {
+    const { apply } = useStore.getState();
+    apply(gevent(1, "task.created", { kind: "tool" }));
+    apply(gevent(2, "task.created", { kind: "delegation" }, "fix"));
+    apply(gevent(3, "task.updated", { status: "running" }));
+    apply(
+      gevent(4, "task.finished", {
+        status: "succeeded",
+        summary: "fs.read ok",
+        evidence: { rule: "fs.read" },
+        claim: "I read it",
+      }),
+    );
+
+    const graph = useStore.getState().graphs[0];
+    expect(graph?.rootId).toBe("tk_root");
+    expect(graph?.tasks).toHaveLength(2);
+    const look = graph?.tasks.find((t) => t.taskId === "look");
+    expect(look?.status).toBe("succeeded");
+    expect(look?.evidence).toEqual({ rule: "fs.read" });
+    // Kept apart at the last possible moment, as everywhere else.
+    expect(look?.claim).toBe("I read it");
+  });
+
+  it("does not fold a delegation's own lifecycle into a graph", () => {
+    // The same event types, the same task id, a different meaning: `source` is the only
+    // honest discriminator, and guessing from payload keys is what it exists to prevent.
+    const { apply } = useStore.getState();
+    apply({
+      ...ev(1, "task.created", { tool: "ai.delegate", task: "t", adapter: "a" }, "t_1"),
+      task_id: "dlg_1",
+    });
+    expect(useStore.getState().graphs).toHaveLength(0);
+    expect(useStore.getState().delegations).toHaveLength(1);
+  });
+
+  it("ignores an update for a task it never saw created", () => {
+    // A half-known graph rendered as if it were whole is worse than a visible gap.
+    useStore.getState().apply(gevent(1, "task.updated", { status: "running" }, "ghost"));
+    expect(useStore.getState().graphs).toHaveLength(0);
+  });
+
+  it("replaying task.created does not duplicate a task", () => {
+    const { apply } = useStore.getState();
+    const created = gevent(1, "task.created", { kind: "tool" });
+    apply(created);
+    apply({ ...created, seq: 2 });
+    expect(useStore.getState().graphs[0]?.tasks).toHaveLength(1);
+  });
+});

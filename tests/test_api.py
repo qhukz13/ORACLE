@@ -275,3 +275,46 @@ class TestKnowledgeHealth:
         assert body["built"] is False
         assert body["stale"] is True
         assert "reindex" in body["error"]
+
+
+def test_the_task_graph_endpoint_is_a_projection_of_the_table(client: TestClient) -> None:
+    """`GET /api/v1/tasks` reads the rows and shapes them; it is not a second source of
+    truth (ORCHESTRATION.md §6). A graph nobody ran is an empty tree, not a 404 — the
+    client asking is a client that already saw a `task.*` event and wants the whole
+    picture, and an error would tell it to retry something that will never appear."""
+    import asyncio
+
+    from oracle.api.app import state_of
+    from oracle.orchestration.models import Task, TaskKind, TaskResult, TaskSpec, TaskStatus
+
+    st = state_of(client.app)
+    task = Task(
+        id="tk_a",
+        root_id="tk_root",
+        kind=TaskKind.TOOL,
+        spec=TaskSpec(objective="look at it", role="coder"),
+    ).with_status(
+        TaskStatus.SUCCEEDED,
+        result=TaskResult(ok=True, summary="done", evidence={"rule": "fs.read"}, claim="I looked"),
+    )
+    # `TestClient` is synchronous and owns the app's loop, so the row goes in on a loop
+    # of this test's own. Safe because `aiosqlite` binds each call's future to whichever
+    # loop is running when it is made, and the connection's worker thread resolves it
+    # there — but it is the only reason this looks odd.
+    asyncio.run(_save(st, task))
+
+    body = client.get("/api/v1/tasks", params={"root_id": "tk_root"}).json()
+    assert body["root_id"] == "tk_root"
+    assert body["live"] is False
+    assert body["status"] == "succeeded"
+    [only] = body["tasks"]
+    assert only["id"] == "tk_a" and only["kind"] == "tool"
+    # Evidence and claim arrive separate, all the way to the client.
+    assert only["evidence"] == {"rule": "fs.read"} and only["claim"] == "I looked"
+
+    empty = client.get("/api/v1/tasks", params={"root_id": "tk_nothing"}).json()
+    assert empty["tasks"] == [] and empty["live"] is False
+
+
+async def _save(st: object, task: object) -> None:
+    await st.task_store.save(task)  # type: ignore[attr-defined]

@@ -17,6 +17,8 @@ import type {
   Approval,
   ConnectionState,
   Delegation,
+  Graph,
+  GraphTask,
   OracleEvent,
   Tier,
   ToolCall,
@@ -70,6 +72,14 @@ interface State {
    * they finish: the result card (diff, tests, cost, discard) IS the point.
    */
   delegations: Delegation[];
+  /**
+   * Task graphs by root id, folded from `task.*` events stamped `source: "graph"`.
+   * Separate from `delegations` because they are different things seen through the same
+   * event types: a delegation is one worker's lifecycle, a graph is the shape of the
+   * work. A DELEGATION task appears in both, under the same task id, which is what lets
+   * a reader click through from one to the other.
+   */
+  graphs: Graph[];
   lastSeq: number;
   /** The attached PTY, if any. One at a time in v1 — sub-tabs are later. */
   terminal: { ptyId: string | null; cwd: string };
@@ -88,6 +98,9 @@ const MAX_DECIDED = 10;
  *  tail is what matters; decisions live on `task.*` and are never truncated. */
 const MAX_FEED = 100;
 const MAX_DELEGATIONS = 10;
+/** Graphs kept in memory. A graph is at most 12 tasks (ORCHESTRATION.md §3), so this is
+ *  bounded work, not a scrollback. */
+const MAX_GRAPHS = 5;
 /** Only what xterm.js has not consumed needs to live here — it keeps 5000 lines of its
  *  own scrollback, and duplicating that in the store would be pure waste. */
 const MAX_TERM_CHUNKS = 200;
@@ -142,6 +155,7 @@ export const useStore = create<State>((set) => ({
   degraded: null,
   indexing: null,
   delegations: [],
+  graphs: [],
   lastSeq: 0,
   terminal: { ptyId: null, cwd: "" },
   termChunks: [],
@@ -163,6 +177,7 @@ export const useStore = create<State>((set) => ({
       degraded: null,
       indexing: null,
       delegations: [],
+      graphs: [],
       lastSeq: 0,
     }),
 
@@ -314,9 +329,18 @@ export const useStore = create<State>((set) => ({
         }
 
         case "task.created": {
-          // Only delegations for now. Guarding on the tool keeps a future task type
-          // from being folded into a panel that does not understand it.
           const taskId = str(ev.task_id);
+          if (taskId && ev.payload["source"] === "graph") {
+            next.graphs = upsertTask(s.graphs, ev, {
+              taskId,
+              kind: str(ev.payload["kind"]),
+              status: "pending",
+              dependsOn: [],
+            });
+            break;
+          }
+          // Otherwise: a delegation's own lifecycle. Guarding on the tool keeps a future
+          // task type from being folded into a panel that does not understand it.
           if (!taskId || str(ev.payload["tool"]) !== "ai.delegate") break;
           if (s.delegations.some((d) => d.taskId === taskId)) break;
           next.delegations = [
@@ -333,6 +357,13 @@ export const useStore = create<State>((set) => ({
         }
 
         case "task.updated":
+          if (ev.payload["source"] === "graph") {
+            next.graphs = patchTask(s.graphs, ev, (t) => ({
+              ...t,
+              status: str(ev.payload["status"], t.status),
+            }));
+            break;
+          }
           next.delegations = s.delegations.map((d) =>
             d.taskId === str(ev.task_id) ? { ...d, state: str(ev.payload["state"], d.state) } : d,
           );
@@ -358,6 +389,18 @@ export const useStore = create<State>((set) => ({
           break;
 
         case "task.finished":
+          if (ev.payload["source"] === "graph") {
+            next.graphs = patchTask(s.graphs, ev, (t) => ({
+              ...t,
+              status: str(ev.payload["status"], t.status),
+              summary: str(ev.payload["summary"]),
+              evidence: asRecord(ev.payload["evidence"]),
+              // Kept as its own field, deliberately: rendering a worker's claim beside
+              // ORACLE's evidence is fine; rendering it *as* evidence is not.
+              claim: ev.payload["claim"] == null ? undefined : str(ev.payload["claim"]),
+            }));
+            break;
+          }
           next.delegations = s.delegations.map((d) =>
             d.taskId === str(ev.task_id)
               ? {
@@ -385,3 +428,32 @@ export const useStore = create<State>((set) => ({
       return next;
     }),
 }));
+
+/** Add a task to its graph, creating the graph on first sight. Graphs are keyed by
+ *  `root_id` from the payload — the event carries it precisely so a client never has to
+ *  infer which graph a task belongs to. */
+function upsertTask(graphs: Graph[], ev: OracleEvent, task: GraphTask): Graph[] {
+  const rootId = str(ev.payload["root_id"]);
+  if (!rootId) return graphs;
+  const existing = graphs.find((g) => g.rootId === rootId);
+  if (!existing) return [...graphs, { rootId, tasks: [task] }].slice(-MAX_GRAPHS);
+  if (existing.tasks.some((t) => t.taskId === task.taskId)) return graphs;
+  return graphs.map((g) => (g.rootId === rootId ? { ...g, tasks: [...g.tasks, task] } : g));
+}
+
+/** Update one task in place. A task the client never saw created is ignored rather than
+ *  invented: a half-known graph rendered as if it were whole is worse than a gap. */
+function patchTask(
+  graphs: Graph[],
+  ev: OracleEvent,
+  patch: (t: GraphTask) => GraphTask,
+): Graph[] {
+  const taskId = str(ev.task_id);
+  const rootId = str(ev.payload["root_id"]);
+  if (!taskId || !rootId) return graphs;
+  return graphs.map((g) =>
+    g.rootId === rootId
+      ? { ...g, tasks: g.tasks.map((t) => (t.taskId === taskId ? patch(t) : t)) }
+      : g,
+  );
+}

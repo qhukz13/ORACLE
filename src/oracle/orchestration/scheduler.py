@@ -36,6 +36,7 @@ import asyncio
 import contextlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from oracle.core.eventlog import EventLog
 from oracle.core.events import Event, new_id
@@ -52,7 +53,27 @@ from oracle.orchestration.store import TaskStore
 
 log = get_logger(__name__)
 
-Runner = Callable[[Task], Awaitable[TaskResult]]
+
+@dataclass(frozen=True)
+class Parked:
+    """A runner saying "I cannot go on until this completes — take my slot back".
+
+    The scheduler deliberately knows nothing about *why*. Today the only parker is a
+    TOOL task whose call needs a human approval, but the seam is "wait on this awaitable
+    and try me again", not "wait on an approval": the day something parks on a rate limit
+    or a lock, the scheduler needs no new concept, and it stays unable to import the
+    layers that would tell it what an approval is.
+
+    The task goes `WAITING`, its slot frees for other work, and when `until` completes it
+    returns to `PENDING` and is dispatched again. The runner is responsible for
+    remembering whatever it learned the first time round."""
+
+    reason: str
+    until: Awaitable[Any]
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+
+Runner = Callable[[Task], Awaitable["TaskResult | Parked"]]
 
 
 @dataclass(frozen=True)
@@ -112,7 +133,11 @@ class Scheduler:
         self.limits = limits or Limits()
         self._session_id = session_id
         self._trace = trace_id or new_id("tr")
-        self._running: dict[str, asyncio.Task[TaskResult]] = {}
+        self._running: dict[str, asyncio.Task[TaskResult | Parked]] = {}
+        #: Tasks in `WAITING`, mapped to the watcher awaiting whatever they parked on.
+        #: Held apart from `_running` because a parked task holds no slot — that is the
+        #: whole point of parking rather than blocking.
+        self._parked: dict[str, asyncio.Task[None]] = {}
         #: Ids this scheduler cancelled. Consulted *before* a runner's own answer,
         #: because a cancelled run and a failed one look identical from the outside.
         self._cancelled: set[str] = set()
@@ -125,12 +150,26 @@ class Scheduler:
         for task in self.graph.tasks:
             await self._emit("task.created", task, {"kind": str(task.kind), "root": task.root_id})
 
+        try:
+            await self._loop()
+        except asyncio.CancelledError:
+            await self._abandon()
+            raise
+
+        status = self.graph.status()
+        log.info(
+            "graph.finished", root=self.graph.root_id, status=str(status), size=len(self.graph)
+        )
+        self._done.set()
+        return status
+
+    async def _loop(self) -> None:
         while not self.graph.done():
             await self._cascade_skips()
             if self.graph.done():
                 break
             dispatched = await self._dispatch()
-            if not self._running:
+            if not self._running and not self._parked:
                 if dispatched:
                     continue
                 # Nothing running, nothing ready, nothing skippable, and tasks remain.
@@ -144,13 +183,6 @@ class Scheduler:
                 await self._stall()
                 break
             await self._collect_one()
-
-        status = self.graph.status()
-        log.info(
-            "graph.finished", root=self.graph.root_id, status=str(status), size=len(self.graph)
-        )
-        self._done.set()
-        return status
 
     async def _dispatch(self) -> bool:
         """Start every ready task that fits in its slot class. Returns whether anything
@@ -195,11 +227,21 @@ class Scheduler:
         )
 
     async def _collect_one(self) -> None:
-        done, _ = await asyncio.wait(self._running.values(), return_when=asyncio.FIRST_COMPLETED)
+        """Wait for the next thing to happen — a runner finishing, or a parked task's
+        wait ending. Both are progress; only one of them holds a slot."""
+        watching = {*self._running.values(), *self._parked.values()}
+        done, _ = await asyncio.wait(watching, return_when=asyncio.FIRST_COMPLETED)
         for finished in done:
-            task_id = next(tid for tid, t in self._running.items() if t is finished)
-            del self._running[task_id]
-            await self._record(self.graph[task_id], finished)
+            running_id = next((tid for tid, t in self._running.items() if t is finished), None)
+            if running_id is not None:
+                del self._running[running_id]
+                await self._record(self.graph[running_id], finished)  # type: ignore[arg-type]
+                continue
+            parked_id = next((tid for tid, t in self._parked.items() if t is finished), None)
+            if parked_id is not None:
+                # The watcher has already returned the task to PENDING; dropping it here
+                # is what lets the next loop pass dispatch it again.
+                del self._parked[parked_id]
 
     async def _record(self, task: Task, finished: asyncio.Task[TaskResult]) -> None:
         """Turn one completed coroutine into one task transition.
@@ -217,7 +259,7 @@ class Scheduler:
             )
             return
         try:
-            result = finished.result()
+            outcome = finished.result()
         except TimeoutError:
             # The clock, asserted here and nowhere else. TIMEOUT is not FAILED: a
             # timed-out worker may have done the work, and its evidence is still
@@ -249,10 +291,13 @@ class Scheduler:
                 ),
             )
             return
-        if result.ok:
-            await self._finish(task, TaskStatus.SUCCEEDED, result)
+        if isinstance(outcome, Parked):
+            await self._park(task, outcome)
+            return
+        if outcome.ok:
+            await self._finish(task, TaskStatus.SUCCEEDED, outcome)
         else:
-            await self._retry_or_fail(task, result)
+            await self._retry_or_fail(task, outcome)
 
     async def _retry_or_fail(self, task: Task, result: TaskResult) -> None:
         retryable = result.error is not None and result.error.retryable
@@ -272,6 +317,59 @@ class Scheduler:
             )
             return
         await self._finish(task, TaskStatus.FAILED, result)
+
+    async def _park(self, task: Task, parked: Parked) -> None:
+        """`WAITING`: the slot is returned, the task is not."""
+        waiting = task.with_status(TaskStatus.WAITING)
+        self.graph.replace(waiting)
+        await self._persist(waiting)
+        await self._emit(
+            "task.updated",
+            waiting,
+            {"status": str(TaskStatus.WAITING), "reason": parked.reason, **parked.evidence},
+        )
+
+        async def watch() -> None:
+            # Whatever the wait produced is the runner's business; the scheduler only
+            # needs to know it ended. A wait that raises still un-parks the task, because
+            # the runner is the one that can turn "the approval expired" into a result.
+            with contextlib.suppress(Exception):
+                await parked.until
+            if task.id in self._cancelled:
+                return
+            resumed = self.graph[task.id].model_copy(update={"status": TaskStatus.PENDING})
+            self.graph.replace(resumed)
+            await self._persist(resumed)
+            await self._emit("task.updated", resumed, {"status": str(TaskStatus.PENDING)})
+
+        self._parked[task.id] = asyncio.create_task(watch(), name=f"park:{task.id}")
+
+    async def _abandon(self) -> None:
+        """The graph's own coroutine was cancelled — HALT, shutdown, a dropped turn.
+
+        Cancelling `run()` does **not** cancel the tasks it spawned: they are independent
+        asyncio tasks, and without this they would outlive the supervisor that was
+        watching them. That is the orphan HALT exists to prevent, so the cleanup belongs
+        here rather than in a HALT path of its own (ORCHESTRATION.md §3): a delegation's
+        runner sees the cancellation, `DelegationService` cancels its adapter, and the
+        vendor process dies with it."""
+        for task_id, running in list(self._running.items()):
+            running.cancel()
+            self._cancelled.add(task_id)
+        for watcher in list(self._parked.values()):
+            watcher.cancel()
+        for task in self.graph.active():
+            cancelled = task.with_status(
+                TaskStatus.CANCELLED,
+                result=TaskResult(ok=False, summary="the supervisor was stopped"),
+            )
+            self.graph.replace(cancelled)
+            # Best-effort: the loop is being torn down, and a task left RUNNING in the
+            # table would be read as an interrupted agent by the next start-up. Saying
+            # "cancelled" is both true and the weaker claim.
+            with contextlib.suppress(Exception):
+                await self._persist(cancelled)
+        log.info("graph.abandoned", root=self.graph.root_id)
 
     async def _cascade_skips(self) -> None:
         """A dependency that ended in anything but success makes its dependents
@@ -315,6 +413,12 @@ class Scheduler:
         if running is not None:
             running.cancel()
             return
+        # A parked task holds no slot, so it never reaches `_record()`. Its watcher is
+        # cancelled here rather than left to resume a task nobody wants any more — the
+        # watcher also re-checks `_cancelled`, because the wait may already have ended.
+        watcher = self._parked.pop(task_id, None)
+        if watcher is not None:
+            watcher.cancel()
         task = self.graph[task_id]
         if not task.terminal:
             await self._finish(

@@ -163,3 +163,93 @@ def test_harvest_commits_with_oracles_identity_not_the_delegates(tmp_path: Path)
         check=True,
     ).stdout.strip()
     assert author == "test <test@example.invalid>", author
+
+
+async def test_a_graph_cannot_run_what_a_person_could_not(tmp_path: Path) -> None:
+    """SECURITY.md §10, rule 1, as an assertion: putting a call inside a graph does not
+    change the answer. The same denial, the same rule, the same audit entry — a plan is
+    not a privilege, and neither is a task."""
+    from tests.helpers_delegation import make_repo
+    from tests.test_orchestration_runners import executor_for
+
+    make_repo(tmp_path)
+    executor = executor_for(tmp_path)
+    outside = str(tmp_path.parent / "not-in-any-scope.txt")
+
+    direct = await executor.execute("fs.read", {"path": outside})
+    from oracle.runners.tool import make_tool_runner
+
+    through_graph = await make_tool_runner(executor)(
+        Task(
+            id="a",
+            root_id="tk_root",
+            kind=TaskKind.TOOL,
+            spec=TaskSpec(
+                objective="read it anyway", role="coder", tool="fs.read", args={"path": outside}
+            ),
+        )
+    )
+
+    assert direct.error is not None and direct.error.kind == "denied"
+    assert through_graph.error is not None and through_graph.error.kind == "denied"
+    assert through_graph.evidence["rule"] == direct.verdict.rule, (
+        "the graph got a different verdict"
+    )
+
+
+async def test_one_tasks_approval_does_not_authorise_another_task(tmp_path: Path) -> None:
+    """Approvals bind to a task, not merely to a shape. Two tasks asking for the identical
+    call are two decisions: the second must wait for its own answer rather than riding the
+    first one's. Otherwise a graph of twelve identical calls costs one click."""
+    import asyncio
+
+    from oracle.core.approvals import ApprovalStore
+    from oracle.core.eventlog import EventLog
+    from oracle.orchestration.scheduler import Parked
+    from oracle.runners.tool import make_tool_runner
+    from tests.helpers_delegation import make_repo
+    from tests.test_orchestration_runners import executor_for
+    from tests.test_orchestration_service import approving_policy
+
+    repo = make_repo(tmp_path)
+    executor = executor_for(tmp_path, policy=approving_policy(tmp_path))
+
+    import aiosqlite
+
+    from oracle.storage.db import connect, migrate
+
+    conn: aiosqlite.Connection = await connect(tmp_path / "sec.sqlite3")
+    try:
+        await migrate(conn)
+        eventlog = EventLog(conn)
+        await eventlog.load_head()
+        approvals = ApprovalStore(eventlog, executor, ttl_s=30.0)
+        runner = make_tool_runner(executor, approvals)
+
+        args = {"path": str(repo / "app.py")}
+
+        def spec_for(task_id: str) -> Task:
+            return Task(
+                id=task_id,
+                root_id="tk_root",
+                kind=TaskKind.TOOL,
+                spec=TaskSpec(objective="read", role="coder", tool="fs.read", args=args),
+            )
+
+        first = await runner(spec_for("a"))
+        assert isinstance(first, Parked), "a T2 call ran without asking anybody"
+        approval_id = str(first.evidence["approval_id"])
+        await approvals.resolve(approval_id, True)
+        await asyncio.wait_for(first.until, timeout=10)
+
+        # Task "b" wants the identical call. It must ask for itself.
+        second = await runner(spec_for("b"))
+        assert isinstance(second, Parked), "task b rode task a's approval"
+        assert str(second.evidence["approval_id"]) != approval_id
+        second.until.cancel()  # type: ignore[union-attr]
+
+        # And "a" itself proceeds exactly once with what it was granted.
+        done = await runner(spec_for("a"))
+        assert not isinstance(done, Parked) and done.ok
+    finally:
+        await conn.close()

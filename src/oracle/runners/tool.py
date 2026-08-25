@@ -13,10 +13,14 @@ something.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
+from oracle.core.approvals import ApprovalStore, Resolution
 from oracle.logsink import get_logger
 from oracle.orchestration.models import Task, TaskError, TaskResult
+from oracle.orchestration.scheduler import Parked
+from oracle.policy.model import Decision
 from oracle.tools.executor import ToolErrorKind, ToolExecutor, ToolOutcome
 
 log = get_logger(__name__)
@@ -44,11 +48,32 @@ def _evidence(outcome: ToolOutcome) -> dict[str, Any]:
     return evidence
 
 
-def make_tool_runner(executor: ToolExecutor) -> Any:
+def make_tool_runner(
+    executor: ToolExecutor,
+    approvals: ApprovalStore | None = None,
+    *,
+    session_id: str | None = None,
+) -> Any:
     """Bind an executor into a `Runner`. Constructed in the daemon and injected, so the
-    scheduler still imports nothing that can execute."""
+    scheduler still imports nothing that can execute.
 
-    async def run(task: Task) -> TaskResult:
+    With an `ApprovalStore`, a call the gate wants confirmed **parks** the task rather
+    than blocking a slot on a human: the runner asks, returns `Parked`, and is called
+    again once the answer lands. Without one it fails the task cleanly — a graph that
+    silently skipped approvals would be the worst possible reading of "unattended"."""
+
+    #: What the first attempt learned, so the second can present it. Keyed by task id and
+    #: cleared on use: an approval binds to one task and one argument digest, and a
+    #: leftover id is exactly the replay the digest exists to prevent.
+    granted: dict[str, str] = {}
+    #: Tasks that have already been through the asking. Without this, a *refused* task
+    #: parks, resumes with no grant, asks again, parks again - forever, and the human who
+    #: said no is asked again every few milliseconds. Asking once per task is the rule;
+    #: the second attempt runs into the gate's own APPROVAL_REQUIRED and fails there,
+    #: which is where the refusal is already recorded.
+    asked: set[str] = set()
+
+    async def run(task: Task) -> TaskResult | Parked:
         tool_id = task.spec.tool
         if not tool_id:
             # A TOOL task with no tool is a construction bug, not a runtime negotiation.
@@ -60,7 +85,18 @@ def make_tool_runner(executor: ToolExecutor) -> Any:
                     message="TaskSpec.tool is unset on a TOOL task",
                 ),
             )
-        outcome = await executor.execute(tool_id, dict(task.spec.args))
+        approval_id = granted.pop(task.id, None)
+        if approval_id is None and approvals is not None and task.id not in asked:
+            asked.add(task.id)
+            parked = await _ask_for_approval(
+                executor, approvals, task, tool_id, granted, session_id
+            )
+            if parked is not None:
+                return parked
+            # No approval was needed after all; nothing to remember.
+            asked.discard(task.id)
+        asked.discard(task.id)
+        outcome = await executor.execute(tool_id, dict(task.spec.args), approval_id=approval_id)
         if outcome.ok:
             return TaskResult(
                 ok=True,
@@ -90,3 +126,49 @@ def make_tool_runner(executor: ToolExecutor) -> Any:
         )
 
     return run
+
+
+async def _ask_for_approval(
+    executor: ToolExecutor,
+    approvals: ApprovalStore,
+    task: Task,
+    tool_id: str,
+    granted: dict[str, str],
+    session_id: str | None,
+) -> Parked | None:
+    """Price the call, and if the gate wants a human, ask and park.
+
+    `preview()` is the same call the Confirmation Center makes, and it produces the digest
+    the approval binds to — so what a person approves is exactly what later executes, not
+    a re-render of it. Returns `None` when no approval is needed, which is the common case
+    and costs one policy evaluation."""
+    verdict, digest = executor.preview(tool_id, dict(task.spec.args))
+    if verdict.decision is Decision.DENY or not verdict.needs_approval:
+        # A denial is the executor's to report, with its audit entry: this function only
+        # decides whether to wait for a person.
+        return None
+
+    pending = await approvals.request(
+        tool_id,
+        dict(task.spec.args),
+        verdict,
+        digest,
+        trace_id=task.root_id,
+        session_id=session_id,
+        preview={"task_id": task.id, "root_id": task.root_id, "tool": tool_id},
+    )
+
+    async def wait() -> None:
+        resolution = await approvals.wait(pending)
+        if resolution == Resolution.APPROVED:
+            granted[task.id] = pending.id
+        # Anything else — refused, expired, halted — leaves `granted` empty, and the
+        # second attempt runs into the gate's own APPROVAL_REQUIRED failure with the
+        # reason already in the event log. The runner does not re-narrate it.
+
+    log.info("task.awaiting_approval", task_id=task.id, tool=tool_id, approval=pending.id)
+    return Parked(
+        reason=f"{tool_id} needs approval",
+        until=asyncio.create_task(wait(), name=f"approval:{task.id}"),
+        evidence={"approval_id": pending.id, "tool": tool_id},
+    )

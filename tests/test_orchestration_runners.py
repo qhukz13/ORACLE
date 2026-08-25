@@ -47,16 +47,20 @@ tools:
 """
 
 
-def executor_for(tmp_path: Path) -> Any:
+def executor_for(tmp_path: Path, policy: Path | None = None) -> Any:
     """A real executor over a real policy: registry, gate, audit log, no toolhost (these
-    tools run in-process, which `ToolExecutor(host=None)` documents as the test path)."""
+    tools run in-process, which `ToolExecutor(host=None)` documents as the test path).
+
+    `policy` overrides the file for suites that need a different tier - the approval
+    tests raise `fs.read` to T2 so a TOOL task has something real to wait for."""
     from oracle.policy.audit import AuditLog
     from oracle.policy.engine import PolicyEngine, load_policy
     from oracle.tools import ToolExecutor, build_registry
 
-    policy_path = tmp_path / "runner-policy.yaml"
-    policy_path.write_text(POLICY.format(root=(tmp_path / "project").as_posix()), encoding="utf-8")
-    engine = PolicyEngine(load_policy(policy_path))
+    if policy is None:
+        policy = tmp_path / "runner-policy.yaml"
+        policy.write_text(POLICY.format(root=(tmp_path / "project").as_posix()), encoding="utf-8")
+    engine = PolicyEngine(load_policy(policy))
     return ToolExecutor(build_registry(), engine, AuditLog(tmp_path / "runner-audit.jsonl"))
 
 

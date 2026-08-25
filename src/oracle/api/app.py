@@ -35,6 +35,7 @@ from oracle.logsink import bind_trace, configure, get_logger
 from oracle.mcp.calls import McpCallHandler
 from oracle.mcp.tokens import TokenStore
 from oracle.orchestration.recovery import recover
+from oracle.orchestration.service import GraphService
 from oracle.orchestration.store import TaskStore
 from oracle.policy.audit import AuditLog
 from oracle.policy.engine import PolicyEngine, load_policy
@@ -70,6 +71,9 @@ class AppState:
     #: read it at startup; the scheduler that writes to it is created per graph run, and
     #: nothing creates graphs until P8 routes an intent to one.
     task_store: TaskStore
+    #: Live task graphs, addressable by root id, so a person can stop one
+    #: (ORCHESTRATION.md §3). Empty until P8 routes an intent to a graph.
+    graphs: GraphService
     #: Delegation capabilities and the inbound MCP call path (INTEGRATIONS.md §4).
     tokens: TokenStore
     mcp: McpCallHandler
@@ -207,6 +211,7 @@ async def _build_state(settings: Settings) -> AppState:
             degraded = exc.reason
             log.warning("llm.unavailable", reason=exc.reason, remedy=exc.remedy)
 
+    task_store = TaskStore(conn)
     state = AppState(
         settings=settings,
         conn=conn,
@@ -238,7 +243,8 @@ async def _build_state(settings: Settings) -> AppState:
         approvals=approvals,
         terminals=terminals,
         delegations=delegations,
-        task_store=TaskStore(conn),
+        task_store=task_store,
+        graphs=GraphService(eventlog, task_store),
         tokens=tokens,
         mcp=mcp,
         schema_version=version,
@@ -485,6 +491,14 @@ def _register_routes(app: FastAPI) -> None:
         events = await st.eventlog.read_range(since_seq, st.eventlog.last_seq, limit)
         return {"events": [e.wire() for e in events if e.session_id == session_id]}
 
+    @app.get("/api/v1/tasks")
+    async def task_graph(root_id: str = Query(..., min_length=1)) -> dict[str, Any]:
+        """One graph as a tree (ORCHESTRATION.md §6). A projection over `tasks`, not a
+        second source of truth: the WS `task.*` stream keeps a client live, and this is
+        what it reconciles against on connect."""
+        st = state_of(app)
+        return await st.graphs.tree(root_id)
+
     @app.websocket("/api/v1/stream")
     async def stream(ws: WebSocket, since_seq: int = Query(0, ge=0)) -> None:
         await _ws_handler(app, ws, since_seq)
@@ -661,6 +675,16 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
         task_id = str(cmd.payload.get("task_id") or "")
         if task_id:
             await st.delegations.discard(task_id)
+
+    elif cmd.type == "graph.cancel":
+        # One task, or the whole graph. Not HALT: HALT is above this and stops
+        # everything, including graphs this daemon never started.
+        root_id = str(cmd.payload.get("root_id") or "")
+        task_id = str(cmd.payload.get("task_id") or "")
+        if root_id and task_id:
+            await st.graphs.cancel_task(root_id, task_id)
+        elif root_id:
+            await st.graphs.cancel_root(root_id)
 
     elif cmd.type == "halt":
         # Real now, not a stub. Order matters: flip policy to deny-all FIRST, so a
