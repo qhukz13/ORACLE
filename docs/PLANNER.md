@@ -234,3 +234,84 @@ impossible rather than unrequested.** An adapter that cannot be denied tools doe
 planner role, whatever its conformance rate. The corollary for plan *output* is in §2: validate
 collections for emptiness, because a schema filter that silently drops non-conforming items
 returns a conformant, useless plan.
+## 8. As built  `P8-T1, 2026-08-25`
+
+`src/oracle/orchestration/plan.py` (models, validation, compilation),
+`src/oracle/orchestration/registry.py` + `config/agents.yaml` (the capability registry as
+data), `src/oracle/runners/planning.py` (the egress, the repair, the graph card), and the
+`graph.plan` command that ties them to the daemon. 42 tests, no vendor in any of them.
+
+### What a plan is allowed to say
+
+The `ExecutionPlan` models are the spike's, moved rather than rewritten — they were
+measured against a real vendor before they were trusted ([OQ-20](OPEN_QUESTIONS.md#oq-20)).
+Three of §2's rules became one line each:
+
+| Rule | How |
+|---|---|
+| A plan may not name a tool | `extra="forbid"` on both models. A plan carrying **any** unknown field is rejected whole, because "silently trimmed" is exactly how `tool` would have arrived |
+| Check 0 is non-empty | `validate()` returns early on `tasks == []` — the silently-emptied plan the spike actually received |
+| Enums, not ranges | `expected_outcome` is a `Literal`; `len(tasks) ≤ 12` is checked in code (ADR-0017) |
+
+Two more decisions the code had to make that this document did not:
+
+* **The plan's namespace stays the plan's.** Plan-local ids (`"A"`) are remapped to
+  `{root}-a` on compilation, and `depends_on` with them. Letting `"A"` reach the task
+  table would make two plans' first task the same row.
+* **`expected_outcome` chooses the `TaskKind`**, not the plan. A plan says what it wants
+  back; the supervisor decides how that is produced. `verdict` becomes a `VERIFY` task —
+  which is also why a plan asking a *worker* for the `verifier` role is rejected: no model
+  holds it.
+
+### The registry is where the measurement lives now
+
+`config/agents.yaml` is loaded like policy — versioned, human-edited, never writable from
+a tool. It is the answer to "who may hold this role", and it is where OQ-20's verdict is
+recorded in a form the code reads: **antigravity does not hold `planner`**, and a test
+asserts that, so restoring it means arguing with the dev log rather than editing a line.
+
+Two behaviours worth knowing:
+
+* **It fails closed.** An unreadable registry means no agent holds any role, so planning
+  is unavailable and the ladder takes over. A registry that failed open would let a plan
+  pick its own executor.
+* **A stale default loses.** If `defaults:` names an agent that `roles:` no longer gives
+  the role, the default is ignored — honouring it would resurrect a decision a measurement
+  already overturned.
+
+`agent_hint` breaks ties and nothing else. A hint the registry will not honour is dropped
+silently *for selection* and reported loudly *in validation* if the agent does not exist
+at all.
+
+### Two questions, never one, never three
+
+1. **The planning egress** (`ai.delegate`, T2). The preview carries the whole prompt, the
+   objective, and the bound: *"up to 2 calls (one repair attempt if the plan is invalid)"*.
+   Stating the bound before the click is the pipeline rule; asking again for a repair the
+   person already sanctioned is how approval fatigue is manufactured. It also states
+   `sends_repo_contents: false`, because that is the question a person actually has.
+2. **The graph card** (`ai.graph`, T2, escalated by `external` provenance). It lists every
+   task with its role, its agent, and whether it will egress. Approving it authorises the
+   graph to *exist and run* — **no egress**, because each delegation's approval binds to
+   rendered bytes that do not exist yet (SECURITY.md §10).
+
+There is no third question for the repair attempt, and a refusal at either point is a full
+stop rather than a fallback to doing it anyway.
+
+### The repair, bounded
+
+One attempt, fed the *specific* validation errors (`repair_prompt`), then the ladder. The
+validator returns every problem rather than the first precisely so that one round trip can
+fix a plan with three mistakes in it. A second attempt would be an agentic loop wearing a
+budget's clothes.
+
+### Still not built
+
+- **Replanning.** `supersedes` and `plan_id` are written; nothing populates `supersedes`
+  until P8-T2.
+- **Context.** `context_hints` survive as text and nothing fetches them; the context
+  engine is Phase 9. A plan therefore describes what it *wants* looked at and cannot
+  cause a read.
+- **`REPORT` runs as a delegation.** PLANNER.md §4 says a summarizer is never routed to a
+  cloud agent; until the local model owns that role, the daemon maps `REPORT` to the
+  delegation runner and this sentence is the admission rather than a silent shrug.

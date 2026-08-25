@@ -79,6 +79,7 @@ never produces duplicates or holes. If `since_seq` is older than retention, the 
 | `term.resize` | `{pty_id, cols, rows}` | |
 | `delegate` | `{task, project, allowed_tools?}` | starts a delegation (P6-T2). The service asks its own question — the egress preview rides `approval.requested` — before anything leaves the machine |
 | `delegate.discard` | `{task_id}` | throw away a finished delegation's worktree; the packet stays on disk as the record of what was sent |
+| `graph.plan` | `{objective}` | `BUILT 2026-08-25` (P8-T1). An objective becomes a plan, a graph, and a run — with two approvals in between: the planning egress, then the graph's shape. Refusing either is a full stop |
 | `graph.cancel` | `{root_id, task_id?}` | `BUILT 2026-08-25` (P7-T3). With `task_id`, stops one task and its dependents become `SKIPPED`; without, stops the whole graph. Independent branches keep running. Not HALT — HALT is above this and stops graphs this daemon never started |
 | `halt` | `{reason}` | must work in every state, never touches the LLM |
 | `subscribe` | `{topics[]}` | mobile subscribes narrowly to save battery |

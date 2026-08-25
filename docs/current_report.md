@@ -3,102 +3,108 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** P7-T3 — the graph's human surfaces: cancel, HALT, waiting, and something to look at.
-**Done: all seven acceptance criteria. Phase 7 is complete.**
-**Status:** A graph can now be stopped and seen. `GraphService`, `Parked`/`WAITING`,
-`GET /api/v1/tasks`, the `graph.cancel` command, and a `TaskTree` in the desktop UI.
-`make check` green.
+**Task:** P8-T1 — the planner tier: an objective becomes a validated graph, and a person approves
+it. **Done: all seven acceptance criteria.**
+**Status:** Something creates graphs now. `plan.py`, `registry.py` + `config/agents.yaml`,
+`runners/planning.py`, and the `graph.plan` command. The daemon constructs the runners, closing
+P7-T2's one deliberately-unmet criterion. `make check` green.
 **Date:** 2026-08-25
 
 ---
 
-## Phase 7, finished
+## The loop closes
 
-ORACLE runs multi-task graphs: durable, dependency-ordered, verified against a baseline,
-crash-safe, stoppable, and visible — **with no planner anywhere in it**. That ordering was the
-point. When P6-T5's planner spike came back "no", Phase 7 did not care, because a graph does not
-depend on who authored it.
+An objective goes out, a plan comes back, a person approves the shape, and rows execute in
+dependency order — all of it through machinery that already existed. Phase 7 built the graph
+without a planner on purpose; this task supplies one without changing anything underneath it.
 
-## What P7-T3 added
+## What a plan is allowed to say
 
-- **`orchestration/service.py`** — `GraphService` holds live schedulers by `root_id`, the way
-  `TerminalBridge` holds shells. It does not build graphs and does not own runners; both are
-  passed in, so composition stays in the daemon and this file imports nothing that executes.
-- **`Parked`** in the scheduler — a runner can say "take my slot back until this completes".
-- **`GET /api/v1/tasks?root_id=`** — a projection over the `tasks` table.
-- **`graph.cancel`** WS command — one task, or the whole graph.
-- **`TaskTree.tsx`** + a `graphs` slice in the store, folded from `task.*` events stamped
-  `source: "graph"`.
+The `ExecutionPlan` models are the P6-T5 spike's, **moved rather than rewritten**: they were
+measured against a real vendor before they were trusted here. Three of PLANNER.md §2's rules are
+one line of code each:
 
-## HALT needed no new path — and there was a real gap behind that
+- **A plan may not name a tool** — `extra="forbid"` on both models. A plan carrying *any* unknown
+  field is rejected whole, because "silently trimmed" is exactly how `tool` would have arrived.
+  This is the line between a to-do list and a privilege, and it has a test in both the unit suite
+  and the security suite.
+- **Check 0 is non-empty** — the silently-emptied plan the spike actually received.
+- **Enums, not ranges** (ADR-0017).
 
-Cancelling a graph's coroutine does **not** cancel the runner tasks it spawned: they are
-independent asyncio tasks. Left alone, HALT would have killed the supervisor and left a vendor
-process running — the exact orphan HALT exists to prevent.
+Two decisions the design left open and the code had to make: plan-local ids are **remapped**
+(`"A"` → `{root}-a`, dependencies with them) so two plans' first task is not the same row; and
+`expected_outcome` chooses the `TaskKind`, because a plan says what it wants back and the
+supervisor decides how that is produced.
 
-The fix belongs to the scheduler, not to HALT: `_abandon()` cancels its own children on
-`CancelledError`, and everything downstream already worked (delegation runner → `DelegationService`
-→ adapter → process). **No HALT path was added**, and
-`test_halt_reaches_a_graphs_child_process` asserts on a **real child pid** — a HALT proven against
-fake runners is a HALT that has never been tested. It also asserts the row says `CANCELLED`, not
-`RUNNING`: a task left `RUNNING` would be read as an interrupted agent by the next start-up, which
-is a stronger claim than the truth.
+## The registry is where OQ-20's answer lives now
 
-## `WAITING`, and what the scheduler is not allowed to know
+`config/agents.yaml`, loaded like policy — versioned, human-edited, never writable from a tool.
+**Antigravity does not hold `planner`** there, and a test asserts it, so restoring that role means
+arguing with the dev log rather than editing a line.
 
-A `TOOL` task the gate wants confirmed returns `Parked(reason, until)`. The scheduler sets
-`WAITING`, **frees the slot**, and re-dispatches when `until` completes — knowing nothing about
-approvals. The seam is "wait on this awaitable and try me again", so a future park on a rate limit
-or a lock needs no new concept and the import ban stays intact.
+It **fails closed**: an unreadable registry means no agent holds any role, planning becomes
+unavailable, and the ladder takes over. A registry that failed open would let a plan pick its own
+executor. A **stale default loses** to the roles table, because honouring it would resurrect a
+decision a measurement already overturned.
 
-Two rules the runner learned by failing a test:
+## Two questions, never one, never three
 
-- **Ask once per task.** The first version re-asked on the resumed attempt, so a *refused* task
-  parked → resumed → asked again → parked again, forever, asking the person who said no every few
-  milliseconds. A refusal now falls through to the gate's own `APPROVAL_REQUIRED`.
-- **A grant belongs to one task.** Two tasks making the identical call are two decisions; the
-  second asks for itself. Otherwise a graph of twelve identical calls costs one click.
+1. **The planning egress** — the preview carries the whole prompt and the bound: *"up to 2 calls
+   (one repair attempt if the plan is invalid)"*. Stating the bound before the click is the
+   pipeline rule; asking again for a repair the person already sanctioned is how approval fatigue
+   is manufactured. It also says `sends_repo_contents: false`, which is the question a person
+   actually has.
+2. **The graph card** — every task with its role, its agent, and whether it will egress. Priced
+   with `external` provenance, so the plan's own untrustworthiness escalates the tier before
+   anybody is asked. Approving it authorises the graph to **exist and run, not to egress**: each
+   delegation still asks separately, because an egress approval binds to bytes that do not exist
+   yet.
 
-## What the UI must not do
+A refusal at either point is a full stop, not a fallback to doing it anyway.
 
-`TaskTree` keeps **ORACLE measured …** and **the worker said "…"** as different elements with
-different labels, and a vitest asserts they are not the same node. The backend keeps evidence and
-claim apart through the runner, the store, and the API; the screen is the last place the
-distinction could be thrown away.
+## Two bugs, both mine, both in tests
 
-Likewise `skipped` renders as *"skipped — an earlier task did not succeed"*, because "skipped"
-alone reads as a choice somebody made. A test asserts it does not read like `cancelled`.
+- **A test hung the whole suite for ten minutes.** It waited on the event stream for an approval
+  that a *denied* action never requests. Every stream wait now has a deadline, so the same mistake
+  fails in ten seconds with a readable message.
+- **The end-to-end test answered the wrong approval.** `eventlog.stream(0)` replays the backlog, so
+  the second "approve the next request" call re-found the *first*, already-answered one and left
+  the graph card waiting. The helper now skips approvals that are no longer open. This is the third
+  time this exact trap has been sprung in this project; the helper that avoids it should probably
+  move into `helpers_delegation.py` when a fourth suite needs it.
 
 ## Tests
 
-**88 orchestration tests** across six files, plus 8 `TaskTree` tests and 4 store tests in the
-UI. Notable:
+42 across three files (`test_plan_validation.py`, `test_plan_to_graph.py`,
+`security/test_plan_injection.py`), no vendor in any of them — the fake planner is an
+`ExternalAgentAdapter` returning recorded plan JSON, so the schema, the collection and the
+structured field are all real. Notable:
 
-- HALT against a real wedged child process, with the row's final status checked;
-- a parked task proving it freed its slot — a second task finishes while the first waits;
-- a cancelled parked task that an approval answered *afterwards* does not resurrect;
-- one task's approval failing to authorise another task's identical call;
-- a graph's denied tool call getting the same rule and the same verdict as a direct one;
-- the API projection agreeing with the table, including a skip reason and the evidence/claim split.
+- an injected instruction (`IGNORE PREVIOUS INSTRUCTIONS … git push --force`) compiling into a
+  row whose `objective` is that sentence and whose `tool` is `None` — text stays text;
+- the graph card **showing** that sentence rather than summarising it away, because approving what
+  you did not read is the attack;
+- a plan naming a tool rejected whole, twice, in two suites;
+- exactly one repair attempt, told the specific errors, then a stop;
+- prose-wrapped JSON treated as a failure rather than salvaged.
 
-## A note on the gate
+## What is deliberately still missing
 
-`make check` stalled once on the pytest step and I killed it; a clean re-run passes in the usual
-time (414 python tests in ~82 s). Two stale `uv` processes from two hours earlier were sitting on
-the machine and were cleared at the same time. **I could not reproduce the stall**, so it is
-recorded here rather than explained — if it recurs, the first suspect is a test that leaves a
-`STUB_HANG` child behind.
+**Replanning** (`supersedes` is written by the store and populated by nothing until P8-T2) ·
+**context** (`context_hints` survive as text; nothing fetches them until Phase 9, so a plan cannot
+cause a read) · **`REPORT` runs as a delegation**, though PLANNER.md §4 says a summarizer is never
+routed to a cloud agent — that is a Phase 9 correction and the code says so where it happens.
 
 ## Next
 
-**P8-T1** ([current_task.md](current_task.md)): the planner tier — intent → plan → validated
-graph → the graph approval card. The first task that creates a graph rather than running a
-hand-written one, and the first that constructs the runners in the daemon.
+**P8-T2** ([current_task.md](current_task.md)): replanning and multi-worker — a failed task
+produces a bounded, append-only replan; two workers run concurrently on one graph; the lineage is
+visible.
 
 ## Unresolved
 
 [OQ-18](OPEN_QUESTIONS.md#oq-18) (recall 61% vs an 80% gate — Phase 9) ·
 [OQ-19](OPEN_QUESTIONS.md#oq-19) (Agent SDK, trigger-based) ·
 [OQ-21](OPEN_QUESTIONS.md#oq-21) (MCP spec migration, watch) · `agy`'s unauthenticated preflight
-state, still unobserved · whether a task row should carry a child PID (recovery cannot tell
-"alive" from "gone"; both gate) · the unexplained gate stall above.
+state, still unobserved · whether a task row should carry a child PID · the unexplained gate stall
+from P7-T3 (did not recur).
