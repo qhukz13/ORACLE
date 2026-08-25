@@ -34,7 +34,9 @@ from oracle.llm.types import ProviderUnavailable
 from oracle.logsink import bind_trace, configure, get_logger
 from oracle.mcp.calls import McpCallHandler
 from oracle.mcp.tokens import TokenStore
+from oracle.orchestration.plan import compile_plan
 from oracle.orchestration.recovery import recover
+from oracle.orchestration.registry import Registry, load_registry
 from oracle.orchestration.service import GraphService
 from oracle.orchestration.store import TaskStore
 from oracle.policy.audit import AuditLog
@@ -42,6 +44,8 @@ from oracle.policy.engine import PolicyEngine, load_policy
 from oracle.router.intent import IntentClassifier
 from oracle.router.pipeline import TurnPipeline
 from oracle.router.selection import ToolSelector
+from oracle.runners import build_runners
+from oracle.runners.planning import Planner, approve_graph
 from oracle.storage.db import connect, migrate
 from oracle.toolhost import ToolHost
 from oracle.tools import ToolExecutor, ToolRegistry, build_registry, git_undo_runner
@@ -72,8 +76,12 @@ class AppState:
     #: nothing creates graphs until P8 routes an intent to one.
     task_store: TaskStore
     #: Live task graphs, addressable by root id, so a person can stop one
-    #: (ORCHESTRATION.md §3). Empty until P8 routes an intent to a graph.
+    #: (ORCHESTRATION.md §3).
     graphs: GraphService
+    #: The capability registry: which agent may hold which role (PLANNER.md §5). Named
+    #: `agents` because `registry` is the tool registry — two different things, and one
+    #: of them decides who may execute.
+    agents: Registry
     #: Delegation capabilities and the inbound MCP call path (INTEGRATIONS.md §4).
     tokens: TokenStore
     mcp: McpCallHandler
@@ -212,6 +220,11 @@ async def _build_state(settings: Settings) -> AppState:
             log.warning("llm.unavailable", reason=exc.reason, remedy=exc.remedy)
 
     task_store = TaskStore(conn)
+    agent_registry = load_registry(settings.registry_path)
+    if not agent_registry.usable:
+        # Same instinct as policy's read-only lockdown: a registry that failed open would
+        # let a plan pick its own executor. Planning simply becomes unavailable.
+        log.warning("registry.unusable", problem=agent_registry.problem)
     state = AppState(
         settings=settings,
         conn=conn,
@@ -245,6 +258,7 @@ async def _build_state(settings: Settings) -> AppState:
         delegations=delegations,
         task_store=task_store,
         graphs=GraphService(eventlog, task_store),
+        agents=agent_registry,
         tokens=tokens,
         mcp=mcp,
         schema_version=version,
@@ -504,6 +518,36 @@ def _register_routes(app: FastAPI) -> None:
         await _ws_handler(app, ws, since_seq)
 
 
+async def _plan_and_run(st: AppState, objective: str, session_id: str | None, trace: str) -> None:
+    """Plan, ask, compile, ask again, run. Each step's refusal is a full stop, not a
+    fallback to doing it anyway."""
+    planner = Planner(
+        ClaudeCodeAdapter(),
+        st.approvals,
+        st.policy,
+        st.agents,
+        projects=set(st.projects),
+        session_id=session_id,
+    )
+    outcome = await planner.plan(objective, trace_id=trace)
+    if outcome.plan is None:
+        log.info(
+            "graph.not_planned",
+            refused=outcome.refused,
+            attempts=outcome.attempts,
+            problems=outcome.problems[:3],
+        )
+        return
+    plan_id = new_id("pl")
+    graph = compile_plan(outcome.plan, st.agents, plan_id=plan_id)
+    if not await approve_graph(
+        st.approvals, st.policy, graph, outcome.plan, trace_id=trace, session_id=session_id
+    ):
+        log.info("graph.not_approved", root_id=graph.root_id, plan_id=plan_id)
+        return
+    await st.graphs.run(graph, build_runners(st), session_id=session_id, trace_id=trace)
+
+
 # ----------------------------------------------------------------------------- WS
 
 
@@ -675,6 +719,20 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
         task_id = str(cmd.payload.get("task_id") or "")
         if task_id:
             await st.delegations.discard(task_id)
+
+    elif cmd.type == "graph.plan":
+        # An objective in, a graph out — with two questions in between, both the owner's:
+        # the planning egress, and the shape of what came back (PLANNER.md, ORCHESTRATION
+        # §5). Spawned so HALT reaches it like everything else.
+        objective = str(cmd.payload.get("objective") or "").strip()
+        if objective and st.agents.usable:
+            st.spawn(_plan_and_run(st, objective, session_of(cmd), bind_trace()))
+        else:
+            log.warning(
+                "graph.plan_refused",
+                has_objective=bool(objective),
+                registry=st.agents.problem or "ok",
+            )
 
     elif cmd.type == "graph.cancel":
         # One task, or the whole graph. Not HALT: HALT is above this and stops

@@ -41,6 +41,7 @@ scopes:
       - {{ path: "{root}", mode: rw }}
 tools:
   ai.delegate: {{ tier: T2 }}
+  ai.graph: {{ tier: T2 }}
   fs.read:
     tier: T0
     scopes: [projects]

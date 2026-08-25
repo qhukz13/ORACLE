@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     #: which directories ORACLE is allowed to read, and that decision is versioned.
     collections_path: Path = Path("config/collections.yaml")
 
+    #: Which agent may hold which role (PLANNER.md §5). Beside policy for the third time
+    #: and the same reason: a plan must not be able to give itself an executor, so the
+    #: list of executors is versioned data a human edits.
+    registry_path: Path = Path("config/agents.yaml")
+
     #: Start the tool host at boot so the first tool call does not pay ~1.2 s of
     #: process startup. Tests disable it to stay hermetic and fast.
     prewarm_toolhost: bool = True

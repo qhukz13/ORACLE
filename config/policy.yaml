@@ -204,6 +204,11 @@ tools:
   ai.build_packet: { tier: T0 }                  # local only, no egress
   ai.delegate:     { tier: T2 }                  # egress; preview is mandatory
   ai.collect:      { tier: T1 }
+  # The graph approval card (P8-T1). One decision covering a whole plan: the tasks are
+  # listed up front with what each will do and which agent gets it. It authorises the
+  # *shape* only - every delegation inside it still asks its own egress question, because
+  # an egress approval binds to rendered bytes that do not exist yet (SECURITY.md §10).
+  ai.graph:        { tier: T2 }
 
 # Tools deliberately absent, and therefore denied by default:
 #   oracle.set_policy   - policy changes are a human editing this file

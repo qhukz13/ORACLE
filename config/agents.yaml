@@ -1,0 +1,65 @@
+# ORACLE capability registry — data, not code (docs/PLANNER.md §5).
+#
+# What each agent is ALLOWED and PREFERRED to do here. `AgentCaps` (integrations/adapter.py)
+# reports what an adapter *can* do; this file records what it may be given. The split is
+# why "swap the planner" or "add an agent" is a YAML edit plus an adapter.
+#
+# Loaded at startup like policy, and never writable from a tool. A plan that names a role
+# or an agent absent from this file is a VALIDATION ERROR, not a lookup that happens to
+# miss — a hallucinated name must never become a path or a process.
+
+version: 1
+
+roles:
+  # role: what it produces. `expected_outcome` values are the ones a VERIFY task knows how
+  # to demand evidence for (PLANNER.md §4).
+  planner:     { outcome: plan,    workspace: none }
+  coder:       { outcome: diff,    workspace: worktree }
+  debugger:    { outcome: diff,    workspace: worktree }
+  tester:      { outcome: diff,    workspace: worktree }
+  reviewer:    { outcome: verdict, workspace: none }
+  researcher:  { outcome: report,  workspace: none }
+  summarizer:  { outcome: report,  workspace: none }
+  # No model holds this one. Where code can judge, no model is asked to.
+  verifier:    { outcome: verdict, workspace: none, deterministic: true }
+
+agents:
+  claude:
+    adapter: claude_cli
+    roles: [planner, coder, debugger, tester, reviewer, researcher]
+    locality: cloud
+    cost: subscription        # Max plan: no per-token marginal cost, but quota exists
+    structured_output: true
+    workspace: worktree
+    egress: api.anthropic.com
+
+  antigravity:
+    adapter: antigravity_cli
+    # NOT planner. Measured 2026-08-24 (OQ-20): 75% valid-on-first-attempt against a 90%
+    # gate, and every hard failure was --effort high browsing the filesystem. It keeps the
+    # read-only roles, where its ~15k-token prompt overhead is the only cost that matters.
+    roles: [reviewer, researcher]
+    locality: cloud
+    cost: quota               # never routed small calls (OQ-05)
+    structured_output: true
+    effort: low               # high is slower, dearer, and the only setting that failed
+    workspace: project_boundary
+    egress: antigravity.google
+    # Measured: headless `agy` without --dangerously-skip-permissions cannot write. That
+    # flag is refused (INTEGRATIONS.md §5), so this agent can never hold `coder`.
+    read_only: true
+
+  local:
+    adapter: ollama
+    roles: [summarizer, researcher]
+    locality: local
+    cost: free
+    structured_output: true   # schema-constrained, ADR-0017 rules
+    workspace: none
+    egress: none
+
+# Whoever holds `planner` when no override is given. Claude by measurement, not by
+# preference — see the note on antigravity above and PLANNER.md §6's ladder.
+defaults:
+  planner: claude
+  reporter: local
