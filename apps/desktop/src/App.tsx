@@ -15,6 +15,8 @@ import { OracleClient } from "./client";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmationCenter } from "./components/ConfirmationCenter";
 import { DelegationPanel } from "./components/DelegationPanel";
+import { MemoryView, toFacts } from "./components/MemoryView";
+import type { MemoryFact } from "./components/MemoryView";
 import { TaskTree } from "./components/TaskTree";
 import { Inspector } from "./components/Inspector";
 import { TerminalDock } from "./components/TerminalDock";
@@ -34,7 +36,7 @@ const STATE_LABEL: Record<string, string> = {
   halted: "HALTED",
 };
 
-type Stage = "chat" | "events";
+type Stage = "chat" | "events" | "memory";
 
 export default function App() {
   const s = useStore();
@@ -47,6 +49,7 @@ export default function App() {
   const [selectedTurn, setSelectedTurn] = useState<string | null>(null);
   const [projects, setProjects] = useState<string[]>([]);
   const [projectsRoot, setProjectsRoot] = useState("");
+  const [facts, setFacts] = useState<MemoryFact[]>([]);
   const clientRef = useRef<OracleClient | null>(null);
   const logEnd = useRef<HTMLDivElement>(null);
 
@@ -77,6 +80,31 @@ export default function App() {
       cancelled = true;
     };
   }, [s.connection]);
+
+  // What ORACLE remembers is named state, so it comes from REST like the project list.
+  // Re-read on every memory event rather than patching a local copy: the store is small,
+  // the query is a SELECT, and a second projection of a belief system is exactly the
+  // thing that gets to disagree with the first one.
+  const memorySeq = useMemo(
+    () => s.events.filter((e) => e.type.startsWith("memory.")).length,
+    [s.events],
+  );
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/v1/memory")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d) setFacts(toFacts(d));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [s.connection, memorySeq]);
+
+  const forget = useCallback((factId: string) => {
+    clientRef.current?.send({ type: "memory.forget", payload: { fact_id: factId } });
+  }, []);
 
   useEffect(() => {
     logEnd.current?.scrollIntoView({ behavior: "smooth" });
@@ -222,6 +250,13 @@ export default function App() {
         <button className="ghost" onClick={() => setStage(stage === "chat" ? "events" : "chat")}>
           {stage === "chat" ? "Events" : "Chat"}
         </button>
+        <button
+          className="ghost"
+          onClick={() => setStage(stage === "memory" ? "chat" : "memory")}
+          title="what ORACLE has recorded, and why"
+        >
+          {stage === "memory" ? "Chat" : "Memory"}
+        </button>
         <button className="halt" onClick={halt} title="F1">
           HALT
         </button>
@@ -300,7 +335,9 @@ export default function App() {
             onCancelGraph={cancelGraph}
           />
 
-          {stage === "events" ? (
+          {stage === "memory" ? (
+            <MemoryView facts={facts} onForget={forget} />
+          ) : stage === "events" ? (
             <table className="events">
               <thead>
                 <tr>
