@@ -423,6 +423,24 @@ describe("store.apply — task graphs", () => {
     expect(look?.claim).toBe("I read it");
   });
 
+  it("keeps a replacement's lineage from the event that created it", () => {
+    // The scheduler stamps `supersedes` on the first event about a replanned row, so a
+    // client never has to re-query the tree and diff it to find out what replaced what.
+    const { apply } = useStore.getState();
+    apply(gevent(1, "task.created", { kind: "delegation" }, "fix"));
+    apply(gevent(2, "task.finished", { status: "failed", summary: "wrong file" }, "fix"));
+    apply(
+      gevent(3, "task.created", { kind: "delegation", supersedes: "fix" }, "fix-r1"),
+    );
+
+    const graph = useStore.getState().graphs[0];
+    expect(graph?.tasks.map((t) => t.taskId)).toEqual(["fix", "fix-r1"]);
+    // The failed row is still there, still failed. Nothing is rewritten.
+    expect(graph?.tasks.find((t) => t.taskId === "fix")?.status).toBe("failed");
+    expect(graph?.tasks.find((t) => t.taskId === "fix-r1")?.supersedes).toBe("fix");
+    expect(graph?.tasks.find((t) => t.taskId === "fix")?.supersedes).toBeUndefined();
+  });
+
   it("does not fold a delegation's own lifecycle into a graph", () => {
     // The same event types, the same task id, a different meaning: `source` is the only
     // honest discriminator, and guessing from payload keys is what it exists to prevent.

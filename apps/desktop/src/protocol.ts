@@ -148,6 +148,10 @@ export interface GraphTask {
   evidence?: Record<string, unknown>;
   /** What the worker said about its own work. Shown as a quote, never as a verdict. */
   claim?: string;
+  /** The failed attempt this task replaces (docs/ORCHESTRATION.md §4). Replanning is
+   *  append-only: the superseded row is still here, still failed, and the tree shows it
+   *  under its replacement rather than instead of it. */
+  supersedes?: string;
 }
 
 export interface Graph {

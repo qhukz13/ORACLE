@@ -336,6 +336,10 @@ export const useStore = create<State>((set) => ({
               kind: str(ev.payload["kind"]),
               status: "pending",
               dependsOn: [],
+              // Carried on the first event about the row, so a replacement can be placed
+              // without re-querying the tree and diffing it.
+              supersedes:
+                ev.payload["supersedes"] == null ? undefined : str(ev.payload["supersedes"]),
             });
             break;
           }

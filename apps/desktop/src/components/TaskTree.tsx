@@ -10,6 +10,10 @@
  * - **Evidence is not the same as the worker's claim.** They render differently and are
  *   labelled differently, because the whole verification design rests on the difference
  *   and a UI that blurs it undoes the design at the last possible moment.
+ * - **Nothing is erased, because the event log does not erase.** A replanned attempt is
+ *   shown collapsed *under* its replacement (docs/ORCHESTRATION.md §4), never hidden. A
+ *   tree that dropped the failed attempt would be the one place in the whole design where
+ *   history gets rewritten, and it would be the place a person actually looks.
  */
 
 import type { Graph, GraphTask } from "../protocol";
@@ -57,10 +61,14 @@ function TaskRow({
   task,
   rootId,
   onCancel,
+  superseded = [],
 }: {
   task: GraphTask;
   rootId: string;
   onCancel(rootId: string, taskId: string): void;
+  /** The attempts this row replaced, newest first. Rendered inside this row so a replan
+   *  reads as one story rather than as several unrelated failures. */
+  superseded?: GraphTask[];
 }) {
   const evidence = evidenceLine(task);
   const stoppable = ["pending", "ready", "running", "waiting"].includes(task.status);
@@ -82,8 +90,64 @@ function TaskRow({
       {task.summary && <div className="tt-summary">{task.summary}</div>}
       {evidence && <div className="tt-evidence">ORACLE measured: {evidence}</div>}
       {task.claim && <div className="tt-claim">the worker said: “{task.claim}”</div>}
+      {superseded.length > 0 && (
+        <details className="tt-superseded">
+          <summary>
+            replanned after {superseded.length} earlier attempt
+            {superseded.length > 1 ? "s" : ""}
+          </summary>
+          <ol className="tt-tasks">
+            {superseded.map((attempt) => (
+              <TaskRow
+                key={attempt.taskId}
+                task={attempt}
+                rootId={rootId}
+                onCancel={onCancel}
+              />
+            ))}
+          </ol>
+        </details>
+      )}
     </li>
   );
+}
+
+/** Fold a replanned graph into what a person reads top to bottom: the replacement is the
+ *  row, and the attempts it replaced hang off it, newest first.
+ *
+ *  Two rules, both of which exist because breaking either loses a row:
+ *
+ *  - **First replacement wins the attempt.** One replan may author several tasks; showing
+ *    the failed row again under each of them would read as several failures.
+ *  - **A chain nests once.** `a → a' → a''` renders as one row with two collapsed
+ *    attempts, not as `a''` at the top and `a'` *also* at the top carrying `a`.
+ *
+ *  A task that supersedes something this client has never seen still renders on its own:
+ *  a half-known graph shown as if it were whole is worse than a gap. */
+function arrange(tasks: GraphTask[]): { task: GraphTask; superseded: GraphTask[] }[] {
+  const byId = new Map(tasks.map((t) => [t.taskId, t]));
+  const replacedBy = new Map<string, string>();
+  for (const task of tasks) {
+    if (task.supersedes && byId.has(task.supersedes) && !replacedBy.has(task.supersedes)) {
+      replacedBy.set(task.supersedes, task.taskId);
+    }
+  }
+  const rows: { task: GraphTask; superseded: GraphTask[] }[] = [];
+  for (const task of tasks) {
+    if (replacedBy.has(task.taskId)) continue; // it hangs under its replacement instead
+    const superseded: GraphTask[] = [];
+    let current = task;
+    for (;;) {
+      const previous = current.supersedes ? byId.get(current.supersedes) : undefined;
+      // Only follow the link this row actually owns, and never twice: the ids come from
+      // the server but the walk is ours, and a cycle here would hang the render.
+      if (!previous || replacedBy.get(previous.taskId) !== current.taskId) break;
+      superseded.push(previous);
+      current = previous;
+    }
+    rows.push({ task, superseded });
+  }
+  return rows;
 }
 
 export function TaskTree({ graphs, onCancelTask, onCancelGraph }: TaskTreeProps) {
@@ -106,10 +170,11 @@ export function TaskTree({ graphs, onCancelTask, onCancelGraph }: TaskTreeProps)
               )}
             </header>
             <ol className="tt-tasks">
-              {graph.tasks.map((task) => (
+              {arrange(graph.tasks).map(({ task, superseded }) => (
                 <TaskRow
                   key={task.taskId}
                   task={task}
+                  superseded={superseded}
                   rootId={graph.rootId}
                   onCancel={onCancelTask}
                 />

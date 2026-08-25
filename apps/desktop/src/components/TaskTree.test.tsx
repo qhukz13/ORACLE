@@ -115,4 +115,124 @@ describe("TaskTree", () => {
     );
     expect(screen.queryAllByRole("button", { name: "stop graph" })).toHaveLength(1);
   });
+
+  // -- replanning ------------------------------------------------------------
+
+  const replanned: Graph = {
+    rootId: "tk_root",
+    tasks: [
+      {
+        taskId: "fix",
+        kind: "delegation",
+        status: "failed",
+        dependsOn: [],
+        summary: "the worker edited the wrong file",
+        evidence: { diff_lines: 4 },
+      },
+      { taskId: "check", kind: "verify", status: "skipped", dependsOn: ["fix"] },
+      {
+        taskId: "fix-r1",
+        kind: "delegation",
+        status: "running",
+        dependsOn: [],
+        supersedes: "fix",
+      },
+    ],
+  };
+
+  it("shows a superseded attempt beside its replacement rather than hiding it", () => {
+    renderTree(replanned);
+    // Both rows are on the page: replanning is append-only, and the UI is the last place
+    // that could quietly rewrite history.
+    expect(screen.getByText("fix")).toBeTruthy();
+    expect(screen.getByText("fix-r1")).toBeTruthy();
+    expect(screen.getByText("the worker edited the wrong file")).toBeTruthy();
+    expect(screen.getByText(/replanned after 1 earlier attempt$/)).toBeTruthy();
+  });
+
+  it("nests the attempt under the replacement, not beside it", () => {
+    const { container } = render(
+      <TaskTree graphs={[replanned]} onCancelTask={vi.fn()} onCancelGraph={vi.fn()} />,
+    );
+    const top = container.querySelectorAll(".tt > .tt-tasks > .tt-task");
+    // Two top-level rows - the replacement and the skipped verify - not three.
+    expect(top).toHaveLength(2);
+    expect([...top].map((li) => li.querySelector(".tt-id")?.textContent)).toEqual([
+      "check",
+      "fix-r1",
+    ]);
+    const nested = container.querySelector(".tt-superseded .tt-task .tt-id");
+    expect(nested?.textContent).toBe("fix");
+  });
+
+  it("does not resurrect the skipped dependent along with the replacement", () => {
+    renderTree(replanned);
+    // A SKIPPED row stays skipped and stays visible. If the work is still wanted, the
+    // replacement plan asked for it as a new row.
+    expect(screen.getByText(/skipped — an earlier task did not succeed/)).toBeTruthy();
+  });
+
+  it("nests a chain of attempts once, not once per link", () => {
+    const { container } = render(
+      <TaskTree
+        graphs={[
+          {
+            rootId: "tk_root",
+            tasks: [
+              { taskId: "a", kind: "delegation", status: "failed", dependsOn: [] },
+              {
+                taskId: "a-r1",
+                kind: "delegation",
+                status: "failed",
+                dependsOn: [],
+                supersedes: "a",
+              },
+              {
+                taskId: "a-r2",
+                kind: "delegation",
+                status: "failed",
+                dependsOn: [],
+                supersedes: "a-r1",
+              },
+            ],
+          },
+        ]}
+        onCancelTask={vi.fn()}
+        onCancelGraph={vi.fn()}
+      />,
+    );
+    const top = container.querySelectorAll(".tt > .tt-tasks > .tt-task");
+    expect(top).toHaveLength(1);
+    expect(top[0]?.querySelector(".tt-id")?.textContent).toBe("a-r2");
+    expect(screen.getByText(/replanned after 2 earlier attempts/)).toBeTruthy();
+    // Every attempt is still readable - that is what the budget report points at.
+    expect(screen.getByText("a")).toBeTruthy();
+    expect(screen.getByText("a-r1")).toBeTruthy();
+  });
+
+  it("renders a replacement whose attempt it never saw rather than dropping it", () => {
+    const { container } = render(
+      <TaskTree
+        graphs={[
+          {
+            rootId: "tk_root",
+            tasks: [
+              {
+                taskId: "orphan",
+                kind: "delegation",
+                status: "running",
+                dependsOn: [],
+                supersedes: "a-task-this-client-never-saw",
+              },
+            ],
+          },
+        ]}
+        onCancelTask={vi.fn()}
+        onCancelGraph={vi.fn()}
+      />,
+    );
+    expect(container.querySelectorAll(".tt > .tt-tasks > .tt-task")).toHaveLength(1);
+    expect(screen.getByText("orphan")).toBeTruthy();
+    expect(screen.queryByText(/replanned after/)).toBeNull();
+  });
 });
