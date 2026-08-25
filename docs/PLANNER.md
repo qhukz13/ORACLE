@@ -203,6 +203,74 @@ as shipped on 2026-08-24, which works.
 > This is what the ladder was designed for, and the cost of being wrong about a vendor turned out
 > to be one line of `config/agents.yaml` — as intended. Nothing above this line changed.
 
+### As built — the ladder  `P8-T3, 2026-08-25`
+
+`plan_with_ladder()` in `src/oracle/runners/planning.py`, `orchestration/templates.py`,
+`config/plan_templates.yaml`, and the `graph.submit_plan` command. Until this task "no single
+vendor is load-bearing" was a claim about a vendor that happened to be working; there are now
+tests that hold with the planner returning rubbish, with no planner at all, and with the template
+file unreadable.
+
+**The rule that makes the ladder safe is that it is not a second planning path.** Every rung
+produces the same `ExecutionPlan`, checked by the same `validate()`, compiled by the same
+`compile_plan()`, and shown on the same `ai.graph` card at the same tier with the same `external`
+provenance. A rung that skipped a check would not be a degraded mode; it would be a hole with a
+reason attached. A template naming a role nobody holds is rejected exactly as a vendor's plan is —
+and costs a rung.
+
+| Rung | As built | Notes |
+|---|---|---|
+| 1 · planner | unchanged (P8-T1) | one repair attempt, then descend |
+| 2 · template | `config/plan_templates.yaml`, loaded like the registry: versioned, human-edited, never writable from a tool | Two shapes ship: investigate→fix→verify→report, and research→report |
+| 3 · single task | `single_task_plan()`, built in **code** | The rung below "the template file is unreadable" cannot itself be in the template file |
+| 4 · human | `graph.submit_plan`, parsed and validated by the identical functions | Not descended to — a person takes this path, ORACLE does not take it for them |
+
+**A refusal is not a rung.** If the owner declined the planning egress, the ladder stops. Running
+a template plan instead would be answering "no" with "how about this", which is the rule P8-T2
+established for replanning and which does not weaken because the alternative is cheaper.
+
+**A template may not name a project, and may not name a tool.** ORACLE stamps the project it
+already resolved onto every task; a template that could name one would be a hallucinated path with
+a YAML file's authority behind it. `extra="forbid"` on `PlannedTask` applies to the file ORACLE
+ships exactly as it applies to a vendor — the most trusted plan source gets the least trust.
+
+**Substitution is `str.replace`, not `str.format`.** The objective is user text and `format` is a
+small language nobody meant to expose to it: a stray `{` would raise, and `{0.__class__}` is not a
+placeholder anybody designed.
+
+**Every descent is visible.** A `plan.descended` event carries from/to/why, and the graph card
+carries `authored_by`, `rung` and the full list of descents. A graph that ran on rung 3 must be
+readable as such months later, and "it looked a bit thin" is not a record.
+
+### As built — the override, audited  `P8-T3`
+
+§5 has always said a planner's `agent_hint` breaks ties and nothing more. Selection dropped a
+forbidden hint **silently**, which made "the planner recommended an agent the policy forbids and
+was overridden" a true statement nobody could check. `overridden_hints()` now reports every
+unhonoured hint with the reason — not registered, does not hold the role, read-only for a diff,
+local for a delegation — and `audit_overrides()` writes one hash-chained audit entry per override
+before anybody is asked to approve the graph those hints were steering.
+
+### As built — `REPORT` is local now  `P8-T3`
+
+§4's "summarizer: never delegated to a cloud agent — waste" is enforced rather than asserted.
+`task_kind()` reads it off the registry: a role whose holders are **all** `locality: local`
+compiles to `TaskKind.REPORT`, which `runners/report.py` runs against the local provider. Adding
+another local-only role is therefore a YAML edit, not a code change.
+
+Two consequences worth stating:
+
+* **A delegation is never handed to the local model.** `holders_of` sorts free before
+  subscription, so before this a `researcher` task — held by both `claude` and `local` — was
+  assigned to `local` and then run through the Claude adapter. A row that misdescribes its own
+  executor is worse than no row.
+* **The reporter degrades to plain text rather than failing.** No provider, a provider that is
+  down, or an empty answer produces the deterministic listing of what ORACLE measured. A report
+  task that failed the graph because Ollama was not running would be a summary outage reported as
+  a work outage. It is also not shown the workers' claims, for the same reason the replan prompt
+  is not: a local model writing ORACLE's report from a worker's prose is inter-agent injection one
+  step further from anybody checking.
+
 ## 7. What the planner is never given
 
 Stated so scope creep is a violation, not a drift:
@@ -329,6 +397,12 @@ question the design left open are in
 - **Context.** `context_hints` survive as text and nothing fetches them; the context
   engine is Phase 9. A plan therefore describes what it *wants* looked at and cannot
   cause a read.
-- **`REPORT` runs as a delegation.** PLANNER.md §4 says a summarizer is never routed to a
-  cloud agent; until the local model owns that role, the daemon maps `REPORT` to the
-  delegation runner and this sentence is the admission rather than a silent shrug.
+- **Editing a plan inside the card.** §6's rung 4 says the person "writes/edits the task
+  list in the graph approval card". `graph.submit_plan` is the writing half and is
+  validated identically (P8-T3); the *editing* affordance — amending the plan in front of
+  you rather than denying and resubmitting — is a UI surface, not a validation one, and it
+  is not built.
+- **One supervised live run** of the full scenario against real vendors, with every
+  preview human-approved. Everything below the vendor is exercised end to end by
+  `tests/test_reference_graph.py`; what is unmeasured is cost and latency on a real
+  project, which is a person's decision to spend rather than an agent's.

@@ -3,112 +3,106 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** P8-T2 — replanning: a failure buys one more idea, not an afternoon.
-**Done: all seven acceptance criteria.**
-**Status:** `supersedes` is populated now. `orchestration/replan.py` decides, the scheduler
-triggers, `runners/planning.py` spends, `TaskGraph.extend` appends, and the desktop tree shows a
-superseded attempt under its replacement. Two delegations from a plan-authored graph run
-concurrently against real worktrees. `make check` green.
+**Task:** P8-T3 — the ladder, and the scenario Phase 8 was written against.
+**Done: seven of eight acceptance criteria.** The eighth — one supervised live run — is a person's
+to spend, not an agent's, and is stated below rather than ticked.
+**Status:** ORACLE now produces a validated graph with the planner returning rubbish, with no
+planner at all, and with the template file unreadable. The reference multi-task chain runs as one
+test. `REPORT` runs on the local model. `make check` green.
 **Date:** 2026-08-25
 
 ---
 
-## What a failure buys
+## The ladder, and the rule that keeps it from being a hole
 
-One more idea, from a planner told what ORACLE measured, bounded at two per root and one per
-failure — and **nothing at all** if the failure was a person saying no. That last clause is
-closer to the point of this task than it looks: without it, replanning is a mechanism for asking
-someone who just refused whether they would prefer a differently-worded version, twice, before
-giving up.
+Rungs 2–4 of [PLANNER.md §6](PLANNER.md#6-fallbacks) exist: `config/plan_templates.yaml` (data,
+loaded like the registry), `single_task_plan()` (code, because the rung below "the template file
+is unreadable" cannot be in the template file), and `graph.submit_plan` for a plan a person wrote.
 
-## Three layers, and the seam is the deliverable
+**Every rung produces the same `ExecutionPlan`, checked by the same validator, compiled by the
+same compiler, shown on the same card at the same tier with the same `external` provenance.** A
+template naming a role nobody holds is rejected exactly as a vendor's plan is, and costs a rung. A
+plan a person typed meets the same parser — "the author is trusted" is precisely the control
+ADR-0021 says never to build.
 
-The risk this task named up front was "the scheduler grows a planner-shaped hole in it". It did
-not:
+**A refusal is not a rung.** Decline the planning egress and the ladder stops; descending would be
+answering "no" with "how about this". P8-T2's rule, unweakened by the alternative being cheaper.
 
-- **`orchestration/replan.py` decides.** Pure functions, no I/O, imports nothing that acts. Is
-  there a replan here, and if not, *why not* — because "the budget is spent" and "you refused
-  this" are different things for a person to read.
-- **The scheduler triggers.** It hands a failed `Task` to an injected hook and takes back rows to
-  append. It does not know what a planner is, what a budget is, or that anybody was asked to
-  approve anything. `scheduler.py` still imports neither `plan.py` nor `replan.py`, and a security
-  test asserts that against the source.
-- **`runners/planning.py` spends.** The composition layer that was already allowed to see both
-  sides: the egress, the validation, the additions card, the compiled rows.
+Every descent is a `plan.descended` event and a line on the card, so a graph that ran on rung 3 is
+readable as one months later rather than inferred from how thin it looks.
 
-## The decisions the design did not make
+## Two things that were true on paper only
 
-Six, with reasons, in the [dev log](../logs/development/2026-08-25-p8t2-replanning.md) and
-[ORCHESTRATION.md §4](ORCHESTRATION.md#as-built--replanning--p8-t2-2026-08-25). The two worth
-knowing without reading either:
+Both were invisible to every test that existed, and both are in the
+[dev log](../logs/development/2026-08-25-p8t3-ladder.md).
 
-- **The budget is not a counter.** `budget_used()` is `len({t.supersedes for t in rows})`, computed
-  from the table every time. A restarted daemon and a reconnecting client read the same number,
-  one replan authoring three tasks still costs one, and there is nothing to forget to increment —
-  which is the failure mode a budget cannot survive.
-- **A replan cannot run inline.** The first sketch awaited it inside `_record()`, which stops the
-  graph collecting results — including from delegations against real worktrees — for the length of
-  a vendor call *and* two human decisions. It is now a tracked child held beside the parked tasks:
-  no slot, but the graph is not finished while one is outstanding. A test pins it by having a
-  sibling delegation complete *and be recorded* while the replan is blocked.
+- **The graph card was never rendered.** P8-T1 put every task, role, agent and egress marker into
+  the approval payload, and the desktop UI matched `ai.delegate` for the egress box and fell
+  through to the generic EFFECT block for everything else — which shows one line of prose. A
+  person approving twelve tasks saw the tool name and the tier. P8-T1's test asserting "the card
+  shows the injected sentence" was asserting it about the payload; the card did not exist.
+  `GraphCard.tsx` renders it now, objectives **verbatim**, with a vitest that plants the injection
+  string and checks it appears character for character.
+- **A delegation was being handed to the local model.** `holders_of` sorts free before
+  subscription, so `researcher` — held by `claude` and `local` — resolved to `local` and then ran
+  through the Claude adapter. Nothing failed; the row was simply a lie in the one column that
+  answers "which agent did this". `resolve_agent()` now narrows by task kind before cost order.
 
-## The dead end worth recording
+## `REPORT` stops being an admission
 
-The first design resurrected the skipped branch: A failed, B was `SKIPPED`, so A′ succeeding
-should make B eligible again. Intuitive, and wrong twice — it rewrites a row the event log
-already stated, and it assumes A′ is a drop-in for A when a replan exists precisely because the
-first approach was not. **As built:** skipped rows stay skipped and are *named to the planner*,
-with an explicit instruction that the work is not resumed and must be asked for again. Silent
-scope loss becomes a plan the person reads on the card.
+P8-T1 mapped `REPORT` to the delegation runner and said so out loud. The fix reads the rule off
+the registry it was already written in: **a role whose holders are all `locality: local` compiles
+to `REPORT`**, which `runners/report.py` runs against the local provider. Adding another local-only
+role is a YAML edit.
 
-## The claim's absence is a missing field, not a filter
+It summarises ORACLE's evidence and **is not shown the workers' claims** — the same rule as the
+replan prompt, for a sharper reason: a local model writing ORACLE's report from a worker's prose is
+inter-agent injection one step further from anybody checking. It degrades to a deterministic
+listing rather than failing, because a report task that failed the graph when Ollama is down would
+report a summary outage as a work outage.
 
-`Attempt` — the shape that carries a failure to the planner — has `evidence` and no `claim`.
-Feeding "I already fixed it, the tests are wrong" into the thing that authors the next task is
-inter-agent instruction injection with the supervisor as the courier. Excluding it by *having
-nowhere to put it* is one refactor safer than excluding it in a rendering function, and the
-security test asserts on `model_fields` rather than on a string for that reason. A second test
-checks the bytes the adapter actually received.
+## The override is auditable now
 
-## Two questions, both existing cards
+§5 always said `agent_hint` breaks ties and nothing more. Selection dropped a forbidden hint
+*silently*, which made "the planner was overridden" a true statement nobody could check.
+`overridden_hints()` reports each one with its reason; `audit_overrides()` writes a hash-chained
+entry per override before anybody is asked to approve the graph those hints were steering.
 
-The replan egress is `ai.delegate` with the same "up to 2 calls" bound and the same
-`sends_repo_contents: false`, naming which task is being replaced and which budgeted attempt this
-is. The additions card is `ai.graph` — same tier, same `external` provenance, `addition: true`,
-and **only the new tasks on it**. Re-showing the whole graph for two new rows is how a person is
-trained to click through a card without reading it.
+## The reference chain
+
+`tests/test_reference_graph.py` runs objective → planning egress → validation → graph approval →
+per-task gating → verification → report with everything below the vendor real, and asserts the
+**order** — appended to by the things that do the work, not by the test narrating itself. It found
+nothing, which is the correct outcome: its value is that every future change to any Phase 8 seam
+has to keep the order intact. Two variants run beside it, on the template rung and the single-task
+rung, because the ladder's whole claim is about paths nobody usually walks.
 
 ## Tests
 
-45 new across `tests/test_replanning.py` (29) and `tests/security/test_replan_authority.py` (16),
-plus 5 vitests. Notable:
+50 new: 28 in `tests/test_plan_ladder.py`, 3 in `tests/test_reference_graph.py`, 4 added to
+`tests/security/test_plan_injection.py`, 2 to `tests/test_api.py`, 7 vitests, plus the plan-suite
+updates. Notable:
 
-- a graph that always fails, driven with a planner that always answers: it stops at two, reports
-  every attempt with the **branches the partial work was harvested onto**, and leaves all three
-  rows readable;
-- a replan batch that would collide with an existing id, refused *whole* — the good row does not
-  slip in beside the bad one;
-- three independent `coder` tasks compiled from plan JSON: two delegations at once in separate
-  worktrees, three distinct branches and three distinct harvest commits, the third queued;
-- a replan trying to reach a project the original graph could not, twice, including on the repair
-  attempt;
-- the graph card, already approved, buying nothing for rows that did not exist when it was shown.
+- the shipped templates validated against the shipped registry, so the two files cannot drift;
+- an objective containing `{0.__class__}` surviving substitution as text;
+- a refused planning egress producing zero descents and zero packets;
+- an unusable registry reaching nothing **and egressing nothing** on the way to finding out;
+- a template plan priced at the same escalated tier as a planner's.
 
-## What is deliberately not answered
+## The one criterion not met
 
-**Whether a failure-carrying prompt produces a *different* plan or the same plan reworded**
-([OQ-23](OPEN_QUESTIONS.md#oq-23)). P6-T5 measured plan *validity*; validity and difference are
-not the same property, and a valid restatement of a failed plan spends an approval and a
-delegation to arrive back where it started. It was not answered with a synthetic run because a
-synthetic failure answers a synthetic question. What makes shipping it anyway defensible: the
-budget does not make the prompt correct, it makes a wrong prompt cheap.
+**A supervised live run** of the full scenario on a real project, every preview human-approved. Not
+attempted: it spends real quota and its entire point is that a person reads each preview and
+decides. Answering the approvals programmatically would produce a green tick for the one criterion
+whose subject is the human in the loop. What it should measure is in the dev log.
 
-Also still open from P8-T1: **the fallback ladder** (a plan that cannot be produced logs and
-stops — there are no template plans and no second planner), **the reference multi-task scenario as
-one deterministic test**, and **`REPORT` still runs as a delegation**.
+Also still open: **editing a plan inside the card** (rung 4 is the writing half; amending in place
+is a UI surface, not a validation one), and a validator inconsistency found and deliberately left —
+`verifier` + `verdict` is rejected while `reviewer` + `verdict` produces the identical
+deterministic task. The reasoning for not fixing it inside this task is in the dev log.
 
 ## Next
 
-**P8-T3** ([current_task.md](current_task.md)): the ladder and the reference scenario — what
-happens when the planner cannot produce a plan at all, and the one end-to-end test Phase 8's
-acceptance criteria are written against.
+**P9-T1** ([current_task.md](current_task.md)): memory and the context engine — the bands are still
+empty, and both the planner and every delegation are now bounded by context quality rather than by
+mechanism.

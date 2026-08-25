@@ -393,6 +393,21 @@ arrives looking new and sits at the head of the queue where nothing can answer i
 Expiry is counted from the server's timestamp, and an already-expired approval never
 joins the queue.
 
+#### The graph card  `P8-T3, 2026-08-25`
+
+An `ai.graph` approval carries a whole plan, and until this task the UI rendered a one-line
+summary of it: the card fell through to the generic EFFECT block while the payload held every
+task, its role, its agent and whether it would egress. "Approving what you did not read is the
+attack" is P8-T1's own sentence about this exact card, so `GraphCard` renders all of it —
+**objectives verbatim**, never summarised, because an instruction hidden inside a plan is only
+defended against if it is visible here.
+
+It also states **who wrote the plan** (`authored_by`, the ladder's rung, and every descent with
+its reason). A plan a model decomposed and a deterministic template ORACLE fell back to are
+different objects, and a person needs to know which is in front of them *before* they read the
+tasks ([PLANNER.md §6](PLANNER.md#6-fallbacks)). A replan's card says its tasks are being **added**
+to a graph already running, which failure they replace, and that the failed task stays failed.
+
 Rules:
 
 - The command block is the **actual resolved argv**, monospaced, selectable, never re-worded by a model.

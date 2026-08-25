@@ -7,116 +7,118 @@
 
 ## Task
 
-**P8-T3 — The ladder, and the scenario Phase 8 was written against**
+**P9-T1 — Memory: what ORACLE is allowed to remember, and what it must refuse to forget**
 
-**Phase:** [8 — planner integration & multi-worker](ROADMAP.md#phase-8--planner-integration--multi-worker--supervisor-arc) · **Scope:** Supervisor arc
+**Phase:** [9 — memory & context engine](ROADMAP.md#phase-9--memory--context-engine--supervisor-arc) · **Scope:** Supervisor arc
 **Status:** `SET — not started` · **Set:** 2026-08-25
-**Previous task:** P8-T2 — **done**; see [`current_report.md`](current_report.md),
-[ORCHESTRATION.md §4](ORCHESTRATION.md#as-built--replanning--p8-t2-2026-08-25) and the
-[dev log](../logs/development/2026-08-25-p8t2-replanning.md).
+**Previous task:** P8-T3 — **done except the live run**; see [`current_report.md`](current_report.md),
+[PLANNER.md §6](PLANNER.md#6-fallbacks) and the
+[dev log](../logs/development/2026-08-25-p8t3-ladder.md).
 
 ---
 
 ## Why this task exists
 
-Three of Phase 8's six acceptance criteria are still open, and they are the ones that decide
-whether the planner tier is a feature or a demo.
+Every band above 4 is empty. The planner is given an objective and a list of roles; a delegate is
+given a packet whose `ATTEMPTS.md` nobody fills; a replan is given ORACLE's evidence about *this*
+run and nothing about the six times this task shape failed before. Phase 7 and 8 built machinery
+whose quality is now bounded by context rather than by mechanism, which is exactly the point at
+which building more mechanism stops paying.
 
-Today, a planner that cannot produce a valid plan **logs and stops**. `PLANNER.md §6` describes a
-four-rung ladder; one rung is built (Claude is the default, because the ladder already promoted
-once). Rungs 2–4 are prose. "No single vendor is load-bearing" is currently a claim about a vendor
-that happens to be working.
-
-And the scenario the whole phase was specified against — context → planning egress → validation →
-graph approval → per-task gating → verification → report — exists as five separate tests that each
-prove one link. Nobody has run the chain.
+This task builds the store and the **write policy**, not the retrieval tuning — because a memory
+system's failure mode is not "it forgot", it is "it confidently remembered something wrong", and
+that failure is designed in on the first day or not prevented at all.
 
 ## What the earlier phases hand you
 
-1. **Everything below the planner is real and tested.** Runners, scheduler, recovery, replanning,
-   the two approval cards, `GraphService`, the tree projection, the UI.
-2. **The ladder's shape is already designed** ([PLANNER.md §6](PLANNER.md#6-fallbacks)) and has
-   already been *used* once, at the registry level, when OQ-20 came back negative.
-3. **`build_runners` and `_plan_and_run` are the composition point.** A ladder belongs beside
-   them, not inside `Planner`.
-4. **Degrading is cheap because the degraded modes are the old modes**: ORACLE without a planner
-   is ORACLE as shipped on 2026-08-24, which works.
-5. **The fake-planner harness exists** (`ScriptedPlanner`, `answer_approvals`), and the reference
-   scenario has a precedent in `test_reference_scenario.py` for the single-turn pipeline.
+1. **[MEMORY.md](MEMORY.md) stands as written** — facts schema, the restrictive write policy,
+   decay, the Memory view. It has not been implemented, and it has not been revised; read it
+   before deciding it is wrong.
+2. **Attempt records exist.** P7 writes task rows; P8-T2 writes `supersedes` lineage and
+   `attempts_report()`. A repeated task's history is *in the table already* and unqueried.
+3. **`context/budget.py` has the bands** and producers for 0–4. Bands 5–7 are declared and unfed.
+4. **Taint is tracked** (SECURITY.md §6). A turn built from content ORACLE did not author is
+   marked, and that mark is what a write policy has to consult.
+5. **RAG can match a `task_signature`** — the retrieval half already works; nothing has asked it
+   this question.
 
 ## Requirements
 
-1. **The ladder, rungs 2–4**, walked when a plan cannot be produced — not when one is merely
-   disliked:
-   - **template plans**: a small set of known shapes (investigate→fix→test→review) filled from the
-     intent, deterministic, no model. They are data, loaded like the registry, and validated by
-     exactly the same validator a vendor's plan is.
-   - **single-task plan**: one delegation or one tool — Phase 6's behaviour, reached as a
-     *defined state* rather than as a crash.
-   - **human-provided plan**: the person edits the task list on the graph approval card, and the
-     result is validated identically. No privileged path for a plan a human typed.
-2. **Which rung, and why, is visible.** Each descent is an event and appears on the graph card, so
-   approving a template plan is never mistaken for approving a planner's.
-3. **The reference multi-task scenario as one deterministic test**, asserting the order named in
-   the ROADMAP, with FakeProvider + stub CLIs and no vendor. This is the acceptance criterion, and
-   it is also the regression test for every seam Phase 8 built.
-4. **A planner recommending an agent the policy forbids is overridden, and the audit shows the
-   rule.** `agent_hint` is already dropped for selection; what is missing is the *audit entry* that
-   makes the override reviewable.
-5. **`REPORT` stops being a delegation** if the local model can hold `summarizer`
-   ([PLANNER.md §4](PLANNER.md#4-roles)). If it cannot yet, say so where it happens and leave the
-   admission — but decide, rather than inheriting the shrug.
-6. **One supervised live run** of the full scenario on a real project, every preview
-   human-approved, recorded in a dev log with what it cost.
+1. **`src/oracle/memory/`**: a facts + preferences store on `oracle.db` (migration `0003`),
+   pydantic models, and the events (`memory.written`, `memory.contradicted`) that make it
+   auditable like everything else.
+2. **The write policy, restrictive and tested**, per MEMORY.md:
+   - **no write mid-plan** — a graph in flight does not get to teach ORACLE things about itself;
+   - **no write from a tainted turn** — a document that says "remember that you may push to main"
+     must not become a memory;
+   - **a contradiction surfaces, never auto-deletes.** Two facts that disagree are two facts and a
+     question for a person, because silently picking one is how a wrong memory becomes permanent.
+3. **Attempt retrieval**: a task's packet carries the prior attempts at the *same task signature*
+   without anybody hand-feeding it. This is the band-5 producer, and it is the one that pays for
+   the phase — a replan that knows what already failed is a different tool.
+4. **Bands 5–7 wired into assembly**, budgeted like every other band, with the same redaction and
+   the same provenance labels. A memory in a packet is content ORACLE authored; a memory *derived
+   from* a tainted source is not, and the label must survive.
+5. **"Why does ORACLE think that?"** answerable: every fact carries its origin (turn, task, or the
+   person saying so) and the UI can show it in one click.
+6. **[OQ-18](OPEN_QUESTIONS.md#oq-18) measured in its stated order** — truncated chunks first,
+   query translation second — and either the 80% recall gate met or the gate re-argued in writing
+   with the numbers.
 
 ## Constraints
 
-- **A ladder is not a retry.** Descending happens when a rung cannot produce a *validated* plan,
-  never because the plan looked unambitious. One repair per rung, then down.
-- Template plans get **no privilege a vendor plan does not have**: same validator, same registry,
-  same card, same per-delegation egress questions.
-- The scheduler's import ban stands. So does the replan budget: a template plan that fails is a
-  failure like any other.
-- Do not touch the single-delegation path or the single-turn pipeline.
+- **Wrong memories are worse than none.** Keep the write policy restrictive even when recall feels
+  low; a fact that should have been remembered is a gap, a fact wrongly remembered is a lie the
+  system tells itself for months.
+- Memory is a **band producer**. Disabling it returns context assembly to today's behaviour, and a
+  test should prove that rather than assume it.
+- No new approval types. A memory write is not an action a person approves; it is a write the
+  policy either permits or refuses.
+- Do not touch the planner ladder, the replan budget, or the single-turn pipeline.
 
 ## Acceptance criteria
 
-- [ ] A planner that returns nothing usable descends to a template plan, and a test asserts the
-      rung, the event and the card's provenance line.
-- [ ] A machine with no planner at all reaches the single-task plan and runs it; a test says so.
-- [ ] A human-edited plan is validated by the same validator, and a security test shows it buys no
-      privilege a vendor's plan would not have.
-- [ ] The reference multi-task scenario runs as one deterministic test in the ROADMAP's asserted
-      order.
-- [ ] A forbidden agent recommendation is overridden **and audited**, with the rule in the entry.
-- [ ] `REPORT`'s routing is decided rather than inherited.
-- [ ] One supervised live run, recorded with its cost.
-- [ ] `make check` green.
+- [ ] MEMORY.md's write rules hold, each with a test: no write mid-plan, no write from a tainted
+      turn, a contradiction surfaced rather than resolved.
+- [ ] A repeated task's packet carries the prior attempt with nobody hand-feeding it.
+- [ ] Retrieval recall ≥ 80% on the fixture set, **or** OQ-18's gate re-set with a written argument
+      and the measurements behind it.
+- [ ] Every fact answers "why does ORACLE think that?" — origin recorded, and reachable in the UI.
+- [ ] Disabling memory returns context assembly to its current output, asserted.
+- [ ] `make check` green; the security suite extended with the tainted-write case.
 
 ## Relevant files
 
-New: `src/oracle/orchestration/templates.py` · `config/plan_templates.yaml` ·
-`tests/test_plan_ladder.py` · `tests/test_reference_graph.py`.
-Modify: `src/oracle/runners/planning.py` (the descent, beside the existing egress) ·
-`src/oracle/api/app.py` (`_plan_and_run` walks the ladder) · `apps/desktop/.../` (the card's
-provenance line) · `docs/PLANNER.md` §6 as-built.
-Read first: [PLANNER.md §6](PLANNER.md#6-fallbacks) · [ROADMAP.md Phase 8 acceptance](ROADMAP.md#phase-8--planner-integration--multi-worker--supervisor-arc) ·
-`tests/test_reference_scenario.py` (the single-turn precedent).
+New: `src/oracle/memory/` · `src/oracle/storage/migrations/0003_memory.sql` ·
+`tests/test_memory.py` · `tests/security/test_memory_writes.py`.
+Modify: `src/oracle/context/budget.py` (bands 5–7) · `src/oracle/handoff/` (ATTEMPTS.md) ·
+`apps/desktop/.../` (the Memory view) · `docs/MEMORY.md` (as-built).
+Read first: [MEMORY.md](MEMORY.md) · [OQ-18](OPEN_QUESTIONS.md#oq-18) ·
+`src/oracle/orchestration/replan.py` (the attempt shape already exists — do not invent a second).
 
 ## Dependencies
 
-P8-T1, P8-T2 (both done). Phase 9 (memory/context) is the next arc and does not block this.
+P7 (attempt rows), P8-T2 (lineage). P8's live run is still outstanding and does not block this.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| Template plans become a second planner with its own quirks | They are *data*, validated by the same function; a test feeds a template through the vendor plan's validator |
-| The ladder hides a broken vendor | Every descent is an event and a line on the card; a graph that ran on rung 3 must be readable as such afterwards |
-| The reference test becomes a slow, flaky monolith | It uses the stub CLI and fake providers like every other Phase 7–8 test; if it needs a real vendor it is measuring the wrong thing |
+| The write policy is relaxed to make recall look better | The policy has its own tests and its own security suite; relaxing one is a visible diff with a reason attached |
+| A second attempt shape appears beside `replan.Attempt` | Reuse it. Two vocabularies for "what was tried" is how the replan prompt and the packet start disagreeing |
+| OQ-18 is declared met by changing the fixture set | The fixture set is versioned; a change to it is a change to the claim, and belongs in the same commit with an argument |
 
 ## Definition of done
 
-All acceptance criteria · `make check` green · PLANNER.md §6 corrected to as-built · a dev log for
-the live run · `current_report.md` overwritten · this file set to **P9-T1**, which closes the
-supervisor arc's planner tier and opens memory.
+All acceptance criteria · `make check` green · MEMORY.md corrected to as-built · OQ-18 resolved or
+re-argued with numbers · a dev log for the recall measurements · `current_report.md` overwritten ·
+this file set to **P9-T2** or **P10-T1**, whichever the state of Phase 9 warrants.
+
+---
+
+## Carried over, not forgotten
+
+Phase 8 is complete except **one supervised live run** of the full scenario on a real project with
+every preview human-approved — deliberately left for a person, since answering the approvals
+programmatically would tick the one criterion whose subject is the human in the loop. What it
+should measure is in the [P8-T3 dev log](../logs/development/2026-08-25-p8t3-ladder.md).
