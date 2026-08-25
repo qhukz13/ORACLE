@@ -29,7 +29,7 @@ doc, delete the marker.
 | [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | `EXPERIMENT NEEDED` | UX quality, not a phase | open |
 | [OQ-16](#oq-16) | Does `connect_read_pipe` work anywhere on Windows? | `UNKNOWN` | none — worked around | monitoring |
 | [OQ-17](#oq-17) | Is a ~43 min **cold** reindex acceptable? | `ASSUMPTION` | Phase 5 tuning | narrowed 2026-08-22 — warm rebuilds are 37 s |
-| [OQ-18](#oq-18) | Can Russian questions reach an English corpus at all? | `EXPERIMENT NEEDED` | Phase 5 gate | **opened 2026-08-24 — best measured recall is 61%; the gate is 80%** |
+| [OQ-18](#oq-18) | Can Russian questions reach an English corpus at all? | `EXPERIMENT NEEDED` | Phase 5 gate | **narrowed 2026-08-25 — lever 2 measured and ruled out; query translation is what is left** |
 | [OQ-19](#oq-19) | Should the Claude integration move to the Claude Agent SDK? | `TO VERIFY` (on trigger) | none — trigger-based | open |
 | [OQ-20](#oq-20) | Can `agy --json-schema` reliably return a valid ExecutionPlan? | measured 2026-08-24 | P6-T5 / Phase 8 | **answered NO — 75% vs a 90% gate; the ladder promoted Claude** |
 | [OQ-21](#oq-21) | When does ORACLE's MCP server need the 2026-07-28 spec? | `UNKNOWN` | none — watch item | monitoring |
@@ -555,6 +555,29 @@ building anything, and it would change what the first experiment means.
 
 **Until this resolves, the Phase 5 recall criterion is not met**, and saying so is more
 useful than moving the gate to where the numbers already are.
+
+#### Lever 2, measured  `2026-08-25, P9-T1`
+
+`scripts/measure_truncation.py`, [dev log](../logs/development/2026-08-25-oq18-truncation.md).
+Tokenized the declared corpus with `bge-m3`'s own tokenizer — no inference, so the whole
+measurement costs about a minute.
+
+**Truncation is real and much worse than the estimate:** 2,545 of 12,648 chunks (**20.1%**) exceed
+the 512-token window, taking **10.1% of all corpus tokens** with them. It is not uniform —
+**88% of `config` chunks** overflow, against 13% of code. And the character cap that was supposed
+to prevent this is **not enforced**: 17% of chunks are longer than `MAX_CHARS`, the longest by more
+than double.
+
+**And it is not the cause of this question's gap.** The seven Russian cases that never enter the
+candidate list all point at notes-collection markdown whose chunks fit the window with room to
+spare — **0% of their tokens are lost**. Across all 25 Russian fixtures only five expected files
+contain any truncated chunk at all, and the worst loses 11% of one two-chunk file.
+
+**So lever 2 is ruled out and lever 1 is what remains.** Query translation now has to be run on its
+own merits, and — this is what the ordering bought — its result will be interpretable, because the
+index it is measured against does not have a hole where the answers are. The chunking defects are
+worth fixing on their own terms; they belong to a task that touches retrieval, because they change
+chunk boundaries and therefore invalidate every recall number measured before them.
 
 ---
 

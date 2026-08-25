@@ -7,118 +7,126 @@
 
 ## Task
 
-**P9-T1 — Memory: what ORACLE is allowed to remember, and what it must refuse to forget**
+**P9-T2 — Retrieval: the hypothesis that is left, and the corpus it is measured against**
 
 **Phase:** [9 — memory & context engine](ROADMAP.md#phase-9--memory--context-engine--supervisor-arc) · **Scope:** Supervisor arc
 **Status:** `SET — not started` · **Set:** 2026-08-25
-**Previous task:** P8-T3 — **done except the live run**; see [`current_report.md`](current_report.md),
-[PLANNER.md §6](PLANNER.md#6-fallbacks) and the
-[dev log](../logs/development/2026-08-25-p8t3-ladder.md).
+**Previous task:** P9-T1 — **done except the recall gate**; see
+[`current_report.md`](current_report.md), [MEMORY.md §8](MEMORY.md#8-as-built--p9-t1-2026-08-25)
+and the [OQ-18 dev log](../logs/development/2026-08-25-oq18-truncation.md).
 
 ---
 
 ## Why this task exists
 
-Every band above 4 is empty. The planner is given an objective and a list of roles; a delegate is
-given a packet whose `ATTEMPTS.md` nobody fills; a replan is given ORACLE's evidence about *this*
-run and nothing about the six times this task shape failed before. Phase 7 and 8 built machinery
-whose quality is now bounded by context rather than by mechanism, which is exactly the point at
-which building more mechanism stops paying.
+The Phase 5 recall criterion has been unmet since 2026-08-24 and is the oldest open promise in the
+project. P9-T1 removed one of the two hypotheses: **truncation is real, large, and not the cause**
+— the seven Russian cases that never reach the candidate list point at documents that fit the model
+window with room to spare.
 
-This task builds the store and the **write policy**, not the retrieval tuning — because a memory
-system's failure mode is not "it forgot", it is "it confidently remembered something wrong", and
-that failure is designed in on the first day or not prevented at all.
+That leaves query translation, which OQ-18 has always named and nobody has run. It also leaves two
+measured defects in the chunker, and they belong in *this* task rather than a later one for a
+specific reason: **both change chunk boundaries**, and a recall number measured across a boundary
+change cannot be compared with the one before it. Fix the corpus and run the experiment in one
+pass, or spend the next measurement arguing about which change moved it.
 
 ## What the earlier phases hand you
 
-1. **[MEMORY.md](MEMORY.md) stands as written** — facts schema, the restrictive write policy,
-   decay, the Memory view. It has not been implemented, and it has not been revised; read it
-   before deciding it is wrong.
-2. **Attempt records exist.** P7 writes task rows; P8-T2 writes `supersedes` lineage and
-   `attempts_report()`. A repeated task's history is *in the table already* and unqueried.
-3. **`context/budget.py` has the bands** and producers for 0–4. Bands 5–7 are declared and unfed.
-4. **Taint is tracked** (SECURITY.md §6). A turn built from content ORACLE did not author is
-   marked, and that mark is what a write policy has to consult.
-5. **RAG can match a `task_signature`** — the retrieval half already works; nothing has asked it
-   this question.
+1. **The gap is characterised, not guessed.** 61% recall@5 overall, 44% on the 25 Russian fixtures,
+   with seven that never enter the thirty candidates ([OQ-18](OPEN_QUESTIONS.md#oq-18)).
+2. **The corpus defects are counted**: 20.1% of chunks over the 512-token window, 10.1% of all
+   tokens never embedded, 88% of `config` chunks affected, and `MAX_CHARS` not enforced at all —
+   17% of chunks exceed it, the longest by more than double. Numbers and method in the dev log.
+3. **`scripts/measure_truncation.py`** re-runs that count in about a minute, so the repair has a
+   before/after that costs nothing.
+4. **`scripts/eval_embeddings.py`** is the recall harness, with the fixture set and the same
+   corpus walk. It costs tens of minutes and needs the ONNX models on disk.
+5. **The router model is already resident and already sees every query**, which is what makes
+   translation a plausible marginal cost rather than a new dependency.
 
 ## Requirements
 
-1. **`src/oracle/memory/`**: a facts + preferences store on `oracle.db` (migration `0003`),
-   pydantic models, and the events (`memory.written`, `memory.contradicted`) that make it
-   auditable like everything else.
-2. **The write policy, restrictive and tested**, per MEMORY.md:
-   - **no write mid-plan** — a graph in flight does not get to teach ORACLE things about itself;
-   - **no write from a tainted turn** — a document that says "remember that you may push to main"
-     must not become a memory;
-   - **a contradiction surfaces, never auto-deletes.** Two facts that disagree are two facts and a
-     question for a person, because silently picking one is how a wrong memory becomes permanent.
-3. **Attempt retrieval**: a task's packet carries the prior attempts at the *same task signature*
-   without anybody hand-feeding it. This is the band-5 producer, and it is the one that pays for
-   the phase — a replan that knows what already failed is a different tool.
-4. **Bands 5–7 wired into assembly**, budgeted like every other band, with the same redaction and
-   the same provenance labels. A memory in a packet is content ORACLE authored; a memory *derived
-   from* a tainted source is not, and the label must survive.
-5. **"Why does ORACLE think that?"** answerable: every fact carries its origin (turn, task, or the
-   person saying so) and the UI can show it in one click.
-6. **[OQ-18](OPEN_QUESTIONS.md#oq-18) measured in its stated order** — truncated chunks first,
-   query translation second — and either the 80% recall gate met or the gate re-argued in writing
-   with the numbers.
+1. **Fix the chunker's two defects, together, and re-measure:**
+   - enforce `MAX_CHARS` (it is a bound, not a target — `_pack` and `_window` currently exceed it);
+   - make the cap **token-aware** against the fixed model (`bge-m3`, OQ-02), so "~500 tokens" is a
+     measurement rather than an English-prose average. Chunking then depends on the tokenizer,
+     which is the trade `chunking.py` said was worth making once the model was fixed. It now is.
+2. **Reindex and re-run both measurements**, in that order: `measure_truncation.py` to show the
+   corpus is whole, then `eval_embeddings.py` for the recall number that the rest of the task is
+   compared against. **Record the baseline before touching anything** — a repair with no before is
+   an opinion.
+3. **Query translation, as OQ-18 specifies it**: embed an English translation of a Russian question
+   as a second dense probe and fuse the two candidate lists. The router model is resident and
+   already sees the query; the translation is one short generation.
+4. **Measure what it costs, not only what it buys.** RAG.md §5 has so far kept a model call off the
+   retrieval path, and the latency budget has ~70 ms of headroom at `bge-m3`'s p95. If translation
+   spends more than that, it ships behind a decision — for the `crosslang` case only, or not at
+   all — and the decision is written down with its numbers.
+5. **Resolve OQ-18 or re-argue the gate in writing.** Both are acceptable outcomes; a third
+   measurement that leaves it open is not. If 80% is the wrong number for this corpus, say what the
+   right one is and why, with the fixture-level evidence.
+6. **A degraded path that still answers.** No translation model, no ONNX, no index: retrieval
+   thins, it does not fail. The rule curation already follows.
 
 ## Constraints
 
-- **Wrong memories are worse than none.** Keep the write policy restrictive even when recall feels
-  low; a fact that should have been remembered is a gap, a fact wrongly remembered is a lie the
-  system tells itself for months.
-- Memory is a **band producer**. Disabling it returns context assembly to today's behaviour, and a
-  test should prove that rather than assume it.
-- No new approval types. A memory write is not an action a person approves; it is a write the
-  policy either permits or refuses.
-- Do not touch the planner ladder, the replan budget, or the single-turn pipeline.
+- **Do not move the gate to where the numbers are.** Re-arguing it means an argument, not an edit.
+- The fixture set is versioned: a change to it is a change to the claim, and belongs in the same
+  commit with its reasoning. A fixture set adjusted until it passes measures nothing.
+- Chunk-boundary changes invalidate the index. One reindex, one before, one after — not a sequence
+  of small changes each with its own half-comparable number.
+- Do not touch the memory subsystem, the planner ladder, or the replan budget.
 
 ## Acceptance criteria
 
-- [ ] MEMORY.md's write rules hold, each with a test: no write mid-plan, no write from a tainted
-      turn, a contradiction surfaced rather than resolved.
-- [ ] A repeated task's packet carries the prior attempt with nobody hand-feeding it.
-- [ ] Retrieval recall ≥ 80% on the fixture set, **or** OQ-18's gate re-set with a written argument
-      and the measurements behind it.
-- [ ] Every fact answers "why does ORACLE think that?" — origin recorded, and reachable in the UI.
-- [ ] Disabling memory returns context assembly to its current output, asserted.
-- [ ] `make check` green; the security suite extended with the tainted-write case.
+- [ ] `MAX_CHARS` is enforced and the chunker is token-aware; `measure_truncation.py` reports a
+      truncation rate under 2%, with the before number recorded beside it.
+- [ ] The recall harness is re-run on the repaired index and the new baseline is written down,
+      whatever it says.
+- [ ] Query translation is implemented, measured for recall **and** latency, and shipped or
+      refused on those numbers.
+- [ ] [OQ-18](OPEN_QUESTIONS.md#oq-18) is resolved, or the 80% gate is re-argued in writing with
+      fixture-level evidence.
+- [ ] Retrieval degrades rather than failing when the model or the index is missing; a test says so.
+- [ ] `make check` green.
 
 ## Relevant files
 
-New: `src/oracle/memory/` · `src/oracle/storage/migrations/0003_memory.sql` ·
-`tests/test_memory.py` · `tests/security/test_memory_writes.py`.
-Modify: `src/oracle/context/budget.py` (bands 5–7) · `src/oracle/handoff/` (ATTEMPTS.md) ·
-`apps/desktop/.../` (the Memory view) · `docs/MEMORY.md` (as-built).
-Read first: [MEMORY.md](MEMORY.md) · [OQ-18](OPEN_QUESTIONS.md#oq-18) ·
-`src/oracle/orchestration/replan.py` (the attempt shape already exists — do not invent a second).
+Modify: `src/oracle/rag/chunking.py` (both defects) · `src/oracle/rag/retrieval.py` (the second
+probe and the fusion) · `scripts/eval_embeddings.py` (if the harness needs the translation arm) ·
+`docs/RAG.md` (§5 as-built), `docs/OPEN_QUESTIONS.md` (OQ-18).
+Read first: the [OQ-18 dev log](../logs/development/2026-08-25-oq18-truncation.md) ·
+[the bge-m3 log](../logs/development/2026-08-24-oq02-bge-m3.md) ·
+`scripts/measure_truncation.py` (for how the corpus is walked and matched).
 
 ## Dependencies
 
-P7 (attempt rows), P8-T2 (lineage). P8's live run is still outstanding and does not block this.
+None outstanding. P9-T1's memory subsystem is independent of this and does not block it.
 
 ## Risks
 
 | Risk | Mitigation |
 |---|---|
-| The write policy is relaxed to make recall look better | The policy has its own tests and its own security suite; relaxing one is a visible diff with a reason attached |
-| A second attempt shape appears beside `replan.Attempt` | Reuse it. Two vocabularies for "what was tried" is how the replan prompt and the packet start disagreeing |
-| OQ-18 is declared met by changing the fixture set | The fixture set is versioned; a change to it is a change to the claim, and belongs in the same commit with an argument |
+| The repair and the experiment get tangled and neither number is attributable | Repair, reindex, measure, *then* experiment. Two recorded baselines, in that order |
+| Translation lands on the latency path and quietly costs every turn | Measure p50/p95 before shipping, and scope it to `crosslang` if it does not fit |
+| The fixture set drifts towards passing | It is versioned; a change to it goes in the same commit as its argument |
+| A token-aware chunker makes chunking depend on the tokenizer | That is the trade, taken deliberately now the model is fixed. State it in RAG.md rather than letting it be discovered |
 
 ## Definition of done
 
-All acceptance criteria · `make check` green · MEMORY.md corrected to as-built · OQ-18 resolved or
-re-argued with numbers · a dev log for the recall measurements · `current_report.md` overwritten ·
-this file set to **P9-T2** or **P10-T1**, whichever the state of Phase 9 warrants.
+All acceptance criteria · `make check` green · RAG.md corrected to as-built · OQ-18 resolved or
+re-argued · a dev log with both measurements and their method · `current_report.md` overwritten ·
+this file set to **P9-T3** or **P10-T1**, whichever the state of Phase 9 warrants.
 
 ---
 
 ## Carried over, not forgotten
 
-Phase 8 is complete except **one supervised live run** of the full scenario on a real project with
-every preview human-approved — deliberately left for a person, since answering the approvals
-programmatically would tick the one criterion whose subject is the human in the loop. What it
-should measure is in the [P8-T3 dev log](../logs/development/2026-08-25-p8t3-ladder.md).
+- **One supervised live run** of the Phase 8 scenario on a real project, every preview
+  human-approved — deliberately left for a person
+  ([P8-T3 dev log](../logs/development/2026-08-25-p8t3-ladder.md)).
+- **A validator inconsistency**: `verifier` + `verdict` is rejected while `reviewer` + `verdict`
+  produces the identical deterministic task. Worth fixing in the task that next touches
+  `plan.validate()`.
+- **A memory friction**: a correction typed while a graph runs is refused, because "never mid-plan"
+  is implemented literally. The fix, when somebody hits it, is a queue — not an exception.
