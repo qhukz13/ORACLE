@@ -365,6 +365,11 @@ class Scheduler:
                 task_id=task.id,
                 trace_id=self._trace,
                 actor="system",
-                payload={"root_id": task.root_id, **payload},
+                # `source` because a DELEGATION task's own lifecycle emits `task.*` for
+                # the same task_id (rendering → awaiting_egress → running → verifying).
+                # Both streams are wanted — one is graph state, the other is the
+                # delegation's progress — and a consumer must be able to tell them apart
+                # without guessing from payload keys.
+                payload={"root_id": task.root_id, "source": "graph", **payload},
             )
         )

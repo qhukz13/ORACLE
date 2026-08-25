@@ -16,6 +16,7 @@ from oracle.orchestration.models import (
     TaskStatus,
     aggregate,
 )
+from oracle.orchestration.recovery import Recovered, recover
 from oracle.orchestration.scheduler import Limits, Runner, Scheduler
 from oracle.orchestration.store import TaskStore
 
@@ -23,6 +24,7 @@ __all__ = [
     "Cost",
     "GraphError",
     "Limits",
+    "Recovered",
     "Runner",
     "Scheduler",
     "Task",
@@ -35,5 +37,6 @@ __all__ = [
     "TaskStore",
     "aggregate",
     "find_cycle",
+    "recover",
     "validate",
 ]

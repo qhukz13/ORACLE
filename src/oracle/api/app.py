@@ -34,6 +34,8 @@ from oracle.llm.types import ProviderUnavailable
 from oracle.logsink import bind_trace, configure, get_logger
 from oracle.mcp.calls import McpCallHandler
 from oracle.mcp.tokens import TokenStore
+from oracle.orchestration.recovery import recover
+from oracle.orchestration.store import TaskStore
 from oracle.policy.audit import AuditLog
 from oracle.policy.engine import PolicyEngine, load_policy
 from oracle.router.intent import IntentClassifier
@@ -64,6 +66,10 @@ class AppState:
     approvals: ApprovalStore
     terminals: TerminalBridge
     delegations: DelegationService
+    #: The durable task graph (ORCHESTRATION.md §2). Present from P7-T2 so recovery can
+    #: read it at startup; the scheduler that writes to it is created per graph run, and
+    #: nothing creates graphs until P8 routes an intent to one.
+    task_store: TaskStore
     #: Delegation capabilities and the inbound MCP call path (INTEGRATIONS.md §4).
     tokens: TokenStore
     mcp: McpCallHandler
@@ -232,6 +238,7 @@ async def _build_state(settings: Settings) -> AppState:
         approvals=approvals,
         terminals=terminals,
         delegations=delegations,
+        task_store=TaskStore(conn),
         tokens=tokens,
         mcp=mcp,
         schema_version=version,
@@ -289,6 +296,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         st = await _build_state(settings)
         app.state.oracle = st
+        # Before anything else runs: a graph left mid-flight by a crash is reported and
+        # nothing is resumed (ORCHESTRATION.md §3). Awaited rather than spawned — starting
+        # new work while unexplained work sits in the table is the failure mode the rule
+        # exists to prevent.
+        found = await recover(st.task_store, st.eventlog)
+        if found.gated:
+            log.warning(
+                "oracled.recovered",
+                interrupted=[t.id for t in found.interrupted],
+                action="nothing restarted; a human decides",
+            )
         if settings.prewarm_toolhost:
             st.spawn(_prewarm(st))
         _start_indexing(st)

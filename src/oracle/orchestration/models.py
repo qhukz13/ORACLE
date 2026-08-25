@@ -115,6 +115,16 @@ class TaskSpec(BaseModel):
     acceptance: tuple[str, ...] = ()
     constraints: tuple[str, ...] = ()
     expected_outcome: str = "report"
+    #: `TOOL` tasks only: the invocation, exactly as `ToolExecutor` expects it.
+    #:
+    #: **Set by the supervisor, never by a plan.** A plan that could name a tool and its
+    #: arguments would be a plan with execution authority, which is the one thing
+    #: ADR-0021 says a plan must never have. Plans author worker tasks; tool tasks come
+    #: from templates and from ORACLE's own decisions. P8's plan validation rejects a
+    #: `PlannedTask` that tries to set these — noted here because the field exists before
+    #: the validation that guards it.
+    tool: str | None = None
+    args: dict[str, Any] = Field(default_factory=dict)
 
 
 class TaskResult(BaseModel):
