@@ -3,104 +3,102 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** P7-T2 — the real runners: tool, delegation, verify, and what happens after a crash.
-**Done: six of seven acceptance criteria; the seventh is met differently and says so below.**
-**Status:** `src/oracle/runners/` + `orchestration/recovery.py`. **74 orchestration tests**;
-everything below the vendor is real and only the CLI is a stub. `make check` green, security
-suite included.
+**Task:** P7-T3 — the graph's human surfaces: cancel, HALT, waiting, and something to look at.
+**Done: all seven acceptance criteria. Phase 7 is complete.**
+**Status:** A graph can now be stopped and seen. `GraphService`, `Parked`/`WAITING`,
+`GET /api/v1/tasks`, the `graph.cancel` command, and a `TaskTree` in the desktop UI.
+`make check` green.
 **Date:** 2026-08-25
 
 ---
 
-## What was built
+## Phase 7, finished
 
-- **`runners/tool.py`** — a `TOOL` task is an ordinary `ToolInvocation` through the existing
-  `ToolExecutor`: same registry, same gate, same audit entry. The judgement it adds is which
-  failures are retryable (a denial never is).
-- **`runners/delegation.py`** — `DelegationService` wrapped, not rewritten. Splits the lifecycle's
-  single dict into **evidence** (exit code, diff, tests, branch) and **claim** (what the agent
-  said), and harvests the result onto the task's branch before anything can discard the worktree.
-- **`runners/verify.py`** — the baseline comparison, below.
-- **`orchestration/recovery.py`** — read what was in flight, mark it, announce it, restart nothing.
-- **`api/app.py`** — `AppState` carries a `TaskStore`; recovery is awaited at startup, before any
-  other work begins.
+ORACLE runs multi-task graphs: durable, dependency-ordered, verified against a baseline,
+crash-safe, stoppable, and visible — **with no planner anywhere in it**. That ordering was the
+point. When P6-T5's planner spike came back "no", Phase 7 did not care, because a graph does not
+depend on who authored it.
 
-`runners/` sits outside `orchestration/` on purpose: the scheduler may not import the layers that
-execute, and a security test enforces that against the source. The runners are a composition
-layer, like `api/app.py` — allowed to see both sides, which is what composing means.
+## What P7-T3 added
 
-## Verification is a delta, not a threshold
+- **`orchestration/service.py`** — `GraphService` holds live schedulers by `root_id`, the way
+  `TerminalBridge` holds shells. It does not build graphs and does not own runners; both are
+  passed in, so composition stays in the daemon and this file imports nothing that executes.
+- **`Parked`** in the scheduler — a runner can say "take my slot back until this completes".
+- **`GET /api/v1/tasks?root_id=`** — a projection over the `tasks` table.
+- **`graph.cancel`** WS command — one task, or the whole graph.
+- **`TaskTree.tsx`** + a `graphs` slice in the store, folded from `task.*` events stamped
+  `source: "graph"`.
 
-The measurement from P6-T5, now load-bearing: a **pristine** worktree of this repo fails 28 tests
-(no `.venv`, so suites that spawn a binary die); the delegate's worktree failed the same 28 and
-passed five more. A verifier reading "failures > 0" as failure would reject every correct
-delegation this repo can produce.
+## HALT needed no new path — and there was a real gap behind that
 
-So `VERIFY` runs the suite in the worker's workspace, runs it once per graph in a clean one, and
-reports `new_failures`, `fixed`, `delta_passed`. **No baseline, no verdict** — if the baseline
-cannot be taken, the task fails and says why rather than falling back to a threshold. The
-workspace it checks comes from the dependency's *row*; the row is the record, never the claim.
+Cancelling a graph's coroutine does **not** cancel the runner tasks it spawned: they are
+independent asyncio tasks. Left alone, HALT would have killed the supervisor and left a vendor
+process running — the exact orphan HALT exists to prevent.
 
-## Two bugs the tests found
+The fix belongs to the scheduler, not to HALT: `_abandon()` cancels its own children on
+`CancelledError`, and everything downstream already worked (delegation runner → `DelegationService`
+→ adapter → process). **No HALT path was added**, and
+`test_halt_reaches_a_graphs_child_process` asserts on a **real child pid** — a HALT proven against
+fake runners is a HALT that has never been tested. It also asserts the row says `CANCELLED`, not
+`RUNNING`: a task left `RUNNING` would be read as an interrupted agent by the next start-up, which
+is a stronger claim than the truth.
 
-**Harvest was gated on `diff_lines`** — which counts *tracked* changes only. A worker whose output
-is new files (a new module, a new test, a recorded fixture) produces none, so its work would never
-have been committed, and the P6-T5 hole would have stayed open for the most common case. Harvest
-is now attempted whenever a worktree exists; `harvest()` decides for itself whether anything was
-staged.
+## `WAITING`, and what the scheduler is not allowed to know
 
-**A three-approval test approved one and let two expire.** The "wait for the next approval" helper
-restarts the event stream from seq 0 and returns the first match, so calling it in a loop re-reads
-the same request forever. Three concurrent egresses need one subscription and three answers. Worth
-recording because the failure looked like a scheduler concurrency bug and was a bug in how the
-test listened.
+A `TOOL` task the gate wants confirmed returns `Parked(reason, until)`. The scheduler sets
+`WAITING`, **frees the slot**, and re-dispatches when `until` completes — knowing nothing about
+approvals. The seam is "wait on this awaitable and try me again", so a future park on a rate limit
+or a lock needs no new concept and the import ban stays intact.
 
-## Crash recovery, and what it honestly cannot do
+Two rules the runner learned by failing a test:
 
-Every `RUNNING` task becomes `FAILED(interrupted)` — never retried, never restarted; dependents are
-`SKIPPED` on the next pass, so nothing proceeds on a result nobody verified. Unstarted tasks are
-left alone and reported. One `system.degraded` event names everything found; a clean shutdown
-emits nothing, because a recovery event on every start trains everyone to ignore recovery events.
+- **Ask once per task.** The first version re-asked on the resumed attempt, so a *refused* task
+  parked → resumed → asked again → parked again, forever, asking the person who said no every few
+  milliseconds. A refusal now falls through to the gate's own `APPROVAL_REQUIRED`.
+- **A grant belongs to one task.** Two tasks making the identical call are two decisions; the
+  second asks for itself. Otherwise a graph of twelve identical calls costs one click.
 
-**ORACLE records no child PID**, so ORCHESTRATION.md §3's "process alive → gate" / "process gone →
-`FAILED(interrupted)` → gate" split collapses into its conservative branch. Both branches gate, so
-no decision changes — what is lost is being able to say which happened. Adding `pid` is a
-migration plus a scheduler hook in exchange for a diagnostic, so it waits for a task that needs
-the diagnostic. And "gate" today means a critical event, not a card: the graph approval UI is P8.
+## What the UI must not do
 
-## The criterion met differently
+`TaskTree` keeps **ORACLE measured …** and **the worker said "…"** as different elements with
+different labels, and a vitest asserts they are not the same node. The backend keeps evidence and
+claim apart through the runner, the store, and the API; the screen is the last place the
+distinction could be thrown away.
 
-My own task file listed `api/app.py` under "construct and inject the runners". The store and
-recovery are wired, because both have an effect today. **The runners are not constructed there** —
-nothing creates graphs until P8 routes an intent to one, and building runners that nothing calls
-is dead code wearing the costume of integration. P8's entry point constructs them from the same
-factories the tests use.
+Likewise `skipped` renders as *"skipped — an earlier task did not succeed"*, because "skipped"
+alone reads as a choice somebody made. A test asserts it does not read like `cancelled`.
 
 ## Tests
 
-74 across five files. The ones that pin judgement rather than arithmetic:
+**88 orchestration tests** across six files, plus 8 `TaskTree` tests and 4 store tests in the
+UI. Notable:
 
-- the four-task graph (tool → delegation → verify → report) through the **real** lifecycle, with
-  the stub CLI standing in for Claude, asserted by order and by events;
-- a delegation's evidence and claim proven separate, with `result_text` absent from `evidence`;
-- a harvested result read back **after** its worktree is discarded;
-- a refused egress that never submits and never retries;
-- three real delegations under a limit of two: distinct workspaces, distinct branches, peak 2;
-- pre-existing failures not failing a verification, a new failure failing it, a missing baseline
-  refusing to judge;
-- a suite that did not run recorded as "not verified", never as a pass — P6-T5's false green;
-- an interrupted graph whose dependents refuse to run after recovery.
+- HALT against a real wedged child process, with the row's final status checked;
+- a parked task proving it freed its slot — a second task finishes while the first waits;
+- a cancelled parked task that an approval answered *afterwards* does not resurrect;
+- one task's approval failing to authorise another task's identical call;
+- a graph's denied tool call getting the same rule and the same verdict as a direct one;
+- the API projection agreeing with the table, including a skip reason and the evidence/claim split.
+
+## A note on the gate
+
+`make check` stalled once on the pytest step and I killed it; a clean re-run passes in the usual
+time (414 python tests in ~82 s). Two stale `uv` processes from two hours earlier were sitting on
+the machine and were cleared at the same time. **I could not reproduce the stall**, so it is
+recorded here rather than explained — if it recurs, the first suspect is a test that leaves a
+`STUB_HANG` child behind.
 
 ## Next
 
-**P7-T3** ([current_task.md](current_task.md)): the graph's human surfaces — cancellation from
-outside a running graph, HALT across one, the `WAITING` state and approval-parking, and the
-API projection a task tree can be read from.
+**P8-T1** ([current_task.md](current_task.md)): the planner tier — intent → plan → validated
+graph → the graph approval card. The first task that creates a graph rather than running a
+hand-written one, and the first that constructs the runners in the daemon.
 
 ## Unresolved
 
 [OQ-18](OPEN_QUESTIONS.md#oq-18) (recall 61% vs an 80% gate — Phase 9) ·
 [OQ-19](OPEN_QUESTIONS.md#oq-19) (Agent SDK, trigger-based) ·
 [OQ-21](OPEN_QUESTIONS.md#oq-21) (MCP spec migration, watch) · `agy`'s unauthenticated preflight
-state, still unobserved · whether `agy` works with the Antigravity IDE closed · whether a task row
-should carry a child PID (above).
+state, still unobserved · whether a task row should carry a child PID (recovery cannot tell
+"alive" from "gone"; both gate) · the unexplained gate stall above.

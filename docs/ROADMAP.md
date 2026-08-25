@@ -124,7 +124,18 @@ stopped only by the permission gate ORACLE refuses to skip ([SECURITY.md §10](S
 
 ---
 
-## Phase 7 — Task graph & supervisor  **[Supervisor arc]**
+## Phase 7 — **done, 2026-08-25**: Task graph & supervisor  **[Supervisor arc]**
+
+**Outcome.** ORACLE runs multi-task graphs: durable rows, dependency-ordered scheduling, real
+runners over the existing executor and delegation lifecycle, verification as a **delta against a
+baseline**, crash recovery that restarts nothing, cancellation from outside, HALT proven against a
+real child process, `WAITING` for work parked on a person, and an API projection the desktop UI
+renders as a tree. 88 orchestration tests, all offline and deterministic.
+
+**And no planner anywhere in it**, which was the point of the ordering: when P6-T5's spike
+returned "no" on Antigravity, Phase 7 did not care, because a graph does not depend on who
+authored it. As-built detail in [ORCHESTRATION.md](ORCHESTRATION.md).
+
 
 **Goal.** ORACLE runs a **hand-written** multi-task graph: durable tasks, dependencies, batched
 topological scheduling, bounded concurrency, cancellation, crash recovery, human gates — with no

@@ -79,6 +79,7 @@ never produces duplicates or holes. If `since_seq` is older than retention, the 
 | `term.resize` | `{pty_id, cols, rows}` | |
 | `delegate` | `{task, project, allowed_tools?}` | starts a delegation (P6-T2). The service asks its own question — the egress preview rides `approval.requested` — before anything leaves the machine |
 | `delegate.discard` | `{task_id}` | throw away a finished delegation's worktree; the packet stays on disk as the record of what was sent |
+| `graph.cancel` | `{root_id, task_id?}` | `BUILT 2026-08-25` (P7-T3). With `task_id`, stops one task and its dependents become `SKIPPED`; without, stops the whole graph. Independent branches keep running. Not HALT — HALT is above this and stops graphs this daemon never started |
 | `halt` | `{reason}` | must work in every state, never touches the LLM |
 | `subscribe` | `{topics[]}` | mobile subscribes narrowly to save battery |
 
@@ -135,11 +136,12 @@ GET    /api/v1/sessions                 list
 GET    /api/v1/sessions/{id}/events     paged history (?since_seq=&limit=)
 DELETE /api/v1/sessions/{id}
 
-GET    /api/v1/tasks                    ?status=active|waiting|done|failed
-GET    /api/v1/tasks/{id}               full record incl. costs; from Phase 7: kind, role,
-                                        agent, depends_on, supersedes, root_id — the execution
-                                        tree is GET /tasks?root_id= (ORCHESTRATION.md §6)
-POST   /api/v1/tasks/{id}/cancel        cancels the task; dependents become skipped
+GET    /api/v1/tasks?root_id=          BUILT 2026-08-25: one graph as a tree
+GET    /api/v1/tasks                    PLANNED: ?status=active|waiting|done|failed
+GET    /api/v1/tasks/{id}               PLANNED: full record incl. costs
+POST   /api/v1/tasks/{id}/cancel        PLANNED as REST; the built path is the `graph.cancel`
+                                        command, because cancelling is a live action on a live
+                                        graph and the WS stream is where the answer arrives
 
 GET    /api/v1/approvals                pending
 POST   /api/v1/approvals/{id}           {decision, nonce}
@@ -171,6 +173,44 @@ project and collection reads · `Idempotency-Key` required on every POST that st
 retry cannot launch a pipeline twice.
 
 ---
+
+### `GET /api/v1/tasks?root_id=` — the execution tree  `BUILT 2026-08-25`
+
+A **projection over the `tasks` table** (ORCHESTRATION.md §6), not a second source of truth: no
+cache, no second writer, and the same shape whether the graph is running or finished.
+
+```json
+{
+  "root_id": "tk_root",
+  "live": true,
+  "status": "running",
+  "tasks": [
+    {
+      "id": "check", "kind": "verify", "status": "failed",
+      "depends_on": ["fix"], "objective": "…", "role": "tester",
+      "agent": null, "attempt": 1, "supersedes": null,
+      "started_at": "…", "finished_at": "…",
+      "summary": "1 test that passed before this work now fails",
+      "evidence": {"observed": {"passed": 583, "failed": 29}, "new_failures": ["…"]},
+      "claim": "everything passes",
+      "error": {"kind": "execution_failed", "message": "…", "retryable": false}
+    }
+  ]
+}
+```
+
+Three properties worth stating, because each is a decision:
+
+* **`evidence` and `claim` arrive as separate fields** and must stay separate on screen. Evidence
+  is what ORACLE measured; the claim is what the worker said about its own work. A client that
+  renders them together has undone the verification design at the last possible moment.
+* **`live` is the only thing not in the table** — it means "this process is still running it".
+* **An unknown `root_id` returns an empty tree, not 404.** A client asking has already seen a
+  `task.*` event; a 404 would tell it to retry something that will never appear.
+
+Live updates ride the existing WS `task.*` events, which carry `"source": "graph"`. That stamp
+matters: a `DELEGATION` task emits `task.*` twice over — once as graph state, once as its own
+lifecycle — under the same `task_id`, and both are wanted.
 
 ## 4. Errors
 

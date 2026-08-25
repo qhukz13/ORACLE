@@ -280,6 +280,30 @@ glyphs while running (`ORACLE → Asterim → Claude·coder / Claude·tester / A
 replan brief's picture). Selecting any of them opens this tree in the inspector. The orbit still
 answers "what is ORACLE doing"; the tree answers "how, and with what evidence".
 
+### What was built  `P7-T3, 2026-08-25` — the list, not the tree
+
+`TaskTree.tsx` is the *plain* version of the above: a list per graph, with dependencies, status,
+and a cancel button per stoppable row. The orbital view, the longest-path layout and the
+superseded-attempt lineage stay Phase 11; this exists because until it did, a running graph was
+visible only by reading the `tasks` table by hand.
+
+Three of the rules above are already load-bearing and are enforced by tests, not by intention:
+
+- **Evidence and claim render apart.** `ORACLE measured: 583 passed, 29 failed` and
+  `the worker said: "everything passes"` are different elements with different labels. A vitest
+  asserts they are not the same node — the backend keeps the two apart through the runner, the
+  store and the API, and the last place it could be thrown away is the screen.
+- **`skipped` does not read like `cancelled`.** It renders as *"skipped — an earlier task did not
+  succeed"*, because "skipped" alone reads as a choice somebody made, and it was not. Another
+  test asserts the two labels differ.
+- **Nothing optimistic.** The cancel button sends `graph.cancel` and changes no row; the status is
+  whatever the server last said, exactly as the delegation card's discard button behaves.
+
+The store folds `task.*` events stamped `source: "graph"` into a `graphs` slice, separate from
+`delegations`. Both are folded from the same event types: a delegation is one worker's lifecycle,
+a graph is the shape of the work, and a `DELEGATION` task appears in both under one `task_id` —
+which is what will let a reader click from one to the other when Phase 11 draws it properly.
+
 ## 7. Activity timeline
 
 The event log, rendered. A vertical chronological stream, grouped by turn, filterable by

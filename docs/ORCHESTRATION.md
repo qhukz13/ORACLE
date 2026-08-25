@@ -332,7 +332,82 @@ Two honest limits, stated rather than implied:
 creates graphs until P8 routes an intent to one, and constructing runners that nothing
 calls would be dead code wearing the costume of integration.
 
+### As built — the human surfaces  `P7-T3, 2026-08-25`
+
+`orchestration/service.py`, `Parked` in the scheduler, `GET /api/v1/tasks`, the `graph.cancel`
+command, and a `TaskTree` in the desktop UI. Phase 7 is complete: a graph now schedules real work,
+verifies it, survives a crash, **can be stopped, and can be looked at** — with no planner anywhere.
+
+**`GraphService` is an address, not a new authority.** It holds the live schedulers by `root_id`
+so the API can say "stop that one", the way `TerminalBridge` holds shells. It does not build
+graphs and does not own runners: both are passed in, so the composition stays in the daemon and
+this file keeps importing nothing that executes.
+
+#### HALT needed no new path, and now there is a test that says so
+
+Cancelling a graph's coroutine does **not** cancel the runner tasks it spawned — they are
+independent asyncio tasks. Without something to close that gap, HALT would have left a vendor
+process running while the supervisor watching it was gone: the exact orphan HALT exists to
+prevent. The fix belongs to the scheduler, not to HALT: `_abandon()` cancels its own children on
+`CancelledError`, and everything downstream already worked — the delegation runner sees the
+cancellation, `DelegationService` cancels its adapter, the process dies.
+
+`test_halt_reaches_a_graphs_child_process` asserts on a **real child pid** (the stub CLI, wedged
+with `STUB_HANG=1`), because a HALT proven against fake runners is a HALT that has never been
+tested. It also asserts the row says `CANCELLED` rather than `RUNNING`: a task left `RUNNING` in
+the table is read as an interrupted agent by the next start-up, which is a stronger claim than
+the truth.
+
+#### `WAITING`: parking, and what the scheduler is not allowed to know
+
+A `TOOL` task whose call the gate wants confirmed returns `Parked(reason, until)` instead of a
+result. The scheduler sets `WAITING`, **frees the slot**, and re-dispatches when `until`
+completes. It deliberately knows nothing about approvals — the seam is "wait on this awaitable and
+try me again" — so the day something parks on a rate limit or a lock there is no new concept, and
+the import ban stays intact.
+
+The runner's own rules, both learned by a test failing:
+
+* **Ask once per task.** The first version re-asked on the resumed attempt, so a *refused* task
+  parked, resumed, asked again, parked again — forever, asking the person who said no every few
+  milliseconds. Now the second attempt runs into the gate's own `APPROVAL_REQUIRED` and fails
+  there, where the refusal is already recorded.
+* **A grant belongs to one task.** Two tasks making the identical call are two decisions; the
+  second asks for itself. Otherwise a graph of twelve identical calls costs one click
+  (`test_one_tasks_approval_does_not_authorise_another_task`).
+
+Cancelling a parked task cancels its watcher too, and the watcher re-checks: an approval answered
+*after* the cancellation does not resurrect it.
+
+#### The projection
+
+`GET /api/v1/tasks?root_id=…` is a SELECT and a shape — no cache, no second writer. It answers
+identically for a live graph and a finished one; `live` is the single thing the table cannot know.
+A graph nobody ran is an empty tree rather than a 404, because the client asking has already seen
+a `task.*` event and a 404 would tell it to retry something that will never appear.
+
+Scheduler events carry `source: "graph"`, which the UI store uses as its discriminator: a
+`DELEGATION` task emits `task.*` twice over, once as graph state and once as its own lifecycle,
+under the same `task_id`. Both are wanted. Guessing which is which from payload keys is what the
+stamp prevents.
+
+The `TaskTree` component renders status, dependencies, and the reason a task was skipped —
+and keeps **ORACLE measured …** visually and structurally apart from **the worker said "…"**.
+A UI that renders a claim as a verdict undoes the entire verification design at the last possible
+moment, so a vitest asserts the two are not the same element, and another asserts `SKIPPED` and
+`CANCELLED` do not render as the same word.
+
+#### What Phase 7 leaves for Phase 8
+
+- **Nothing creates graphs.** Every graph in the tests is hand-written; routing an intent to one
+  is P8's first job, and the runners are constructed there.
+- **A "gate" is still an event, not a card.** Recovery and the graph approval both need the UI
+  P8 designs.
+- **No task row carries a child PID**, so recovery cannot distinguish "process alive" from
+  "process gone" (both gate). Worth revisiting only if the diagnostic is ever wanted.
+
 ## 4. Failure and replanning
+
 
 
 
