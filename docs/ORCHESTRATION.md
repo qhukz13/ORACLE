@@ -200,7 +200,7 @@ Ported from `asterim-pipeline`'s tested rules, because they are the ones that su
 ### As built  `P7-T1, 2026-08-25`
 
 `src/oracle/orchestration/` — `models.py`, `graph.py`, `store.py`, `scheduler.py` — plus migration
-`0002_tasks.sql`. 29 tests across `tests/test_orchestration_graph.py`,
+`0002_tasks.sql`. 53 tests across `tests/test_orchestration_graph.py`,
 `tests/test_orchestration_scheduler.py` and `tests/security/test_orchestration_boundary.py`, all
 offline and deterministic: **every runner in them is a coroutine the test wrote.** That is the
 claim P7-T1 exists to make good on — the supervisor's correctness is decidable without running

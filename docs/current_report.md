@@ -5,7 +5,7 @@
 
 **Task:** P7-T1 — the task graph: model, storage, algebra, and a scheduler that runs fake work.
 **Done: all seven acceptance criteria.**
-**Status:** `src/oracle/orchestration/` exists — 4 modules, migration `0002`, **29 tests**, all
+**Status:** `src/oracle/orchestration/` exists — 4 modules, migration `0002`, **53 tests**, all
 offline and deterministic. `make check` green, security suite included. No planner, no vendor, no
 real runner: those are P7-T2, by design.
 **Date:** 2026-08-25
@@ -60,7 +60,7 @@ provenance lie in the one place provenance is checkable.
 
 ## Tests
 
-29 across three files. Notable ones, because they pin judgement rather than arithmetic:
+53 across three files. Notable ones, because they pin judgement rather than arithmetic:
 
 - the four-task graph (tool → delegation → verify → report) asserted by **execution order**;
 - a graph with **no edges** dispatching all four at once — the common case, per OQ-20's finding
@@ -83,7 +83,7 @@ interrupted agent) need a child process to have an opinion about, which is P7-T2
 ## Docs
 
 [ORCHESTRATION.md](ORCHESTRATION.md) gained an **as-built** section: what matches the design, the
-six questions the design underspecified and how they were decided, what is not built yet, and the
+seven questions the design underspecified and how they were decided, what is not built yet, and the
 harvest step. Two places where the code deviates from the sketch are corrected in the sketch
 itself — `role`/`project` live in `TaskSpec`, and `TaskResult.error` is a `TaskError` rather than
 the tool layer's `ToolError`, because the orchestration layer must not import that layer.
