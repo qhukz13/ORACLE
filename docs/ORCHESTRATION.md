@@ -256,7 +256,84 @@ security test asserts the author.
 Found the hard way: the P6-T5 spike lost its own plan-authored artifact to this
 ([dev log](../logs/development/2026-08-24-p6t5-antigravity-planning.md), finding 8).
 
+### As built — the runners  `P7-T2, 2026-08-25`
+
+`src/oracle/runners/` — `tool.py`, `delegation.py`, `verify.py` — plus
+`orchestration/recovery.py`. 74 orchestration tests in total; everything below the vendor
+is real (a real `ToolExecutor` over a real policy, a real `DelegationService`, real
+worktrees, real git) and only the CLI is a stub replaying recorded output.
+
+**Why `runners/` is not inside `orchestration/`.** The scheduler may not import the layers
+that execute, and a security test enforces that against the source. Putting the adapters
+in the same package would have forced either a protocol dance or a hole in the ban. They
+are a composition layer, like `api/app.py`: allowed to see both sides, which is what
+composing means.
+
+| Runner | Wraps | The judgement it adds |
+|---|---|---|
+| `TOOL` | `ToolExecutor` | Which failures are retryable. A denial never is; `TIMEOUT` and `EXECUTION_FAILED` are. Retrying a denial is how an agent nags a person into approving something |
+| `DELEGATION` | `DelegationService`, unchanged | Splitting the lifecycle's single dict into `evidence` (exit code, diff, tests, branch) and `claim` (what the agent said). Only `evidence` sets `ok`, so only `evidence` gates a dependent task |
+| `VERIFY` | `dev.run_tests` | Comparing against a baseline instead of a threshold — see below |
+
+**Verification is a delta, not a threshold.** P6-T5 measured 28 failing tests in a
+*pristine* worktree of this repo (no `.venv`, so suites that spawn a binary die) and the
+same 28 in the delegate's, which had added five passing tests and broken nothing. A
+verifier reading "failures > 0" would reject every correct delegation. So `VERIFY` runs
+the suite in the worker's workspace, runs it once per graph in a clean one, and reports
+`new_failures`, `fixed` and `delta_passed`. **No baseline, no verdict**: if the baseline
+cannot be taken, the task fails and says so rather than falling back to a threshold —
+a verifier that guesses is worse than one that admits it cannot tell. The workspace it
+checks is read from the dependency's *row*, never from a claim.
+
+**Two bugs the tests found, both worth keeping in mind:**
+
+* Harvest was gated on `diff_lines`, which counts *tracked* changes only. A worker whose
+  output is new files — a new module, a new test, a recorded fixture — produces none, so
+  its work would never have been committed. Harvest is now attempted whenever a worktree
+  exists and `harvest()` itself decides whether anything was staged.
+* A test that resolved three concurrent egress approvals by calling the "wait for the
+  next approval" helper in a loop re-read the *same* request every time (the helper
+  restarts the stream from seq 0), while the other two expired. Three concurrent
+  delegations need one subscription and three answers.
+
+**`source: "graph"` on scheduler events.** A `DELEGATION` task's own lifecycle emits
+`task.*` for the same `task_id` (rendering → awaiting_egress → running → verifying).
+Both streams are wanted — one is graph state, the other is the delegation's progress —
+so the scheduler stamps its own, and a consumer no longer has to guess from payload keys.
+
+### Crash recovery, as built  `P7-T2`
+
+`orchestration/recovery.py`, awaited at daemon start before any other work begins.
+
+* Every `RUNNING` task becomes `FAILED` with error kind `interrupted`, `retryable: false`.
+  Dependents are therefore `SKIPPED` on the next scheduling pass — nothing proceeds on a
+  result nobody verified.
+* `PENDING`/`READY`/`WAITING` tasks are left exactly as they are and reported, which is
+  what lets a person see a half-finished graph rather than a quiet one.
+* One `system.degraded` event names everything found; a clean shutdown emits nothing,
+  because a recovery event on every start trains everyone to ignore recovery events.
+* **Nothing is restarted, ever.**
+
+Two honest limits, stated rather than implied:
+
+1. **No PID, so no liveness check.** ORCHESTRATION.md §3 splits "process alive → gate"
+   from "process gone → FAILED(interrupted) → gate". ORACLE records no child PID on the
+   task row, so both collapse into the conservative branch. Both gate, so no *decision*
+   changes; what is lost is the ability to say which happened. Adding `pid` is a
+   migration plus a scheduler hook and buys a diagnostic, so it waits for a task that
+   needs the diagnostic.
+2. **"Gate" today means an event, not a card.** There is no graph approval UI until P8;
+   recovery states facts loudly and stops. Worktrees are deliberately *not* cleaned up —
+   an interrupted delegation may have left real work, and `harvest()` exists because such
+   work is worth something.
+
+**Not wired: the runners are not constructed in the daemon.** `AppState` carries a
+`TaskStore` and recovery runs at startup, because both have an effect today. Nothing
+creates graphs until P8 routes an intent to one, and constructing runners that nothing
+calls would be dead code wearing the costume of integration.
+
 ## 4. Failure and replanning
+
 
 
 What happens when things fail, per failure class:
