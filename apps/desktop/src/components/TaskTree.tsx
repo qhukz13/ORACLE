@@ -10,6 +10,15 @@
  * - **Evidence is not the same as the worker's claim.** They render differently and are
  *   labelled differently, because the whole verification design rests on the difference
  *   and a UI that blurs it undoes the design at the last possible moment.
+ * **On §6b's `role="tree"`**, which this deliberately does not use. A hand-rolled ARIA tree
+ * with roving tabindex is worse for real screen-reader users than the native semantics here
+ * unless it is built and tested very carefully: `<details>` already announces expanded and
+ * collapsed correctly everywhere, and a half-built `treeitem` loses that while gaining a
+ * keyboard model people have to discover. What §6b actually asks for is "keyboard-navigable",
+ * and native disclosure plus per-row labelled buttons delivers it. If the tree later grows
+ * genuinely tree-shaped navigation (collapse-all, jump-to-parent), revisit it *with* the axe
+ * case and a roving-tabindex test, not before.
+ *
  * - **Nothing is erased, because the event log does not erase.** A replanned attempt is
  *   shown collapsed *under* its replacement (docs/ORCHESTRATION.md §4), never hidden. A
  *   tree that dropped the failed attempt would be the one place in the whole design where
@@ -146,7 +155,14 @@ function TaskRow({
           </span>
         )}
         {stoppable && (
-          <button type="button" onClick={() => onCancel(rootId, task.taskId)}>
+          // Named for its row, not just "cancel". A screen reader listing the buttons on a
+          // six-task graph otherwise reads "cancel, cancel, cancel, cancel, cancel, cancel",
+          // and the one control that stops work becomes the one control nobody can aim.
+          <button
+            type="button"
+            aria-label={`cancel ${task.taskId}${task.objective ? ` — ${task.objective}` : ""}`}
+            onClick={() => onCancel(rootId, task.taskId)}
+          >
             cancel
           </button>
         )}
@@ -229,7 +245,7 @@ export function TaskTree({ graphs, onCancelTask, onCancelGraph }: TaskTreeProps)
           ["pending", "ready", "running", "waiting"].includes(t.status),
         );
         return (
-          <article key={graph.rootId} className="tt">
+          <article key={graph.rootId} className="tt" aria-label={`Graph ${graph.rootId}`}>
             <header className="tt-graph-head">
               <span className="tt-root">{graph.rootId}</span>
               <span className="tt-count">
@@ -242,7 +258,11 @@ export function TaskTree({ graphs, onCancelTask, onCancelGraph }: TaskTreeProps)
                   to be a measurement. */}
               {totalCost(graph.tasks) && <span className="tt-cost">{totalCost(graph.tasks)}</span>}
               {live && (
-                <button type="button" onClick={() => onCancelGraph(graph.rootId)}>
+                <button
+                  type="button"
+                  aria-label={`stop graph ${graph.rootId} and every task in it`}
+                  onClick={() => onCancelGraph(graph.rootId)}
+                >
                   stop graph
                 </button>
               )}

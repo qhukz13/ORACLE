@@ -86,14 +86,14 @@ describe("TaskTree", () => {
 
   it("offers to stop what is still stoppable, and nothing else", () => {
     renderTree();
-    const buttons = screen.getAllByRole("button", { name: "cancel" });
+    const buttons = screen.getAllByRole("button", { name: /^cancel / });
     // running + skipped-is-terminal → only `fix` is stoppable here.
     expect(buttons).toHaveLength(1);
   });
 
   it("sends a cancel without changing the row itself", () => {
     const { onCancelTask } = renderTree();
-    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel / }));
     expect(onCancelTask).toHaveBeenCalledWith("tk_root", "fix");
     // Nothing optimistic: the status is whatever the server last said.
     expect(screen.getByText("running")).toBeTruthy();
@@ -101,7 +101,7 @@ describe("TaskTree", () => {
 
   it("offers to stop the whole graph only while something is live", () => {
     const { onCancelGraph } = renderTree();
-    fireEvent.click(screen.getByRole("button", { name: "stop graph" }));
+    fireEvent.click(screen.getByRole("button", { name: /^stop graph / }));
     expect(onCancelGraph).toHaveBeenCalledWith("tk_root");
 
     render(
@@ -116,7 +116,7 @@ describe("TaskTree", () => {
         onCancelGraph={vi.fn()}
       />,
     );
-    expect(screen.queryAllByRole("button", { name: "stop graph" })).toHaveLength(1);
+    expect(screen.queryAllByRole("button", { name: /^stop graph / })).toHaveLength(1);
   });
 
   // -- replanning ------------------------------------------------------------
@@ -237,5 +237,22 @@ describe("TaskTree", () => {
     expect(container.querySelectorAll(".tt > .tt-tasks > .tt-task")).toHaveLength(1);
     expect(screen.getByText("orphan")).toBeTruthy();
     expect(screen.queryByText(/replanned after/)).toBeNull();
+  });
+});
+
+describe("the control that stops work can be aimed", () => {
+  it("names each cancel button for its own row", () => {
+    // Six tasks, six buttons, all reading "cancel" is how the one control that stops work
+    // becomes the one control a screen-reader user cannot target.
+    renderTree();
+    const buttons = screen.getAllByRole("button", { name: /^cancel / });
+    const names = buttons.map((b) => b.getAttribute("aria-label"));
+    expect(new Set(names).size).toBe(names.length);
+    expect(names.some((n) => n?.includes("fix"))).toBe(true);
+  });
+
+  it("says what stopping the graph will stop", () => {
+    renderTree();
+    expect(screen.getByRole("button", { name: /stop graph .* and every task in it/ })).toBeTruthy();
   });
 });
