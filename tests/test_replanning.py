@@ -49,7 +49,7 @@ from oracle.orchestration.scheduler import Limits, Scheduler
 from oracle.orchestration.service import GraphService
 from oracle.orchestration.store import TaskStore
 from oracle.runners.planning import Planner, approve_graph, failure_context, make_replanner
-from tests.helpers_delegation import make_repo
+from tests.helpers_delegation import make_repo, wait_event
 from tests.test_orchestration_runners import executor_for
 from tests.test_plan_to_graph import ScriptedPlanner, approve_next, first_preview
 from tests.test_plan_validation import raw_plan
@@ -399,10 +399,11 @@ async def _settled(eventlog: EventLog, task_id: str) -> None:
     """Wait until the scheduler has *recorded* a task, not merely until its runner
     returned. `task.finished` is emitted after the transition is written, so it is the
     honest signal that the loop came back round rather than that a coroutine ended."""
-    async for event in eventlog.stream(0):
-        if event.type == "task.finished" and event.task_id == task_id:
-            return
-    raise AssertionError("the event stream ended")  # pragma: no cover
+    await wait_event(
+        eventlog,
+        lambda e: e.type == "task.finished" and e.task_id == task_id,
+        what=f"{task_id} to be recorded",
+    )
 
 
 async def test_a_replan_does_not_stall_the_other_delegations(
@@ -514,20 +515,19 @@ async def answer_approvals(
     sprung four times."""
     previews: list[dict[str, Any]] = []
     seen: set[str] = set()
-    async for event in eventlog.stream(0):
-        if event.type != "approval.requested":
-            continue
+    while len(previews) < len(decisions):
+        event = await wait_event(
+            eventlog,
+            lambda e: e.type == "approval.requested" and str(e.payload["approval_id"]) not in seen,
+            what=f"approval {len(previews) + 1} of {len(decisions)}",
+        )
         approval_id = str(event.payload["approval_id"])
-        if approval_id in seen:
-            continue
         seen.add(approval_id)
         preview = dict(event.payload["preview"])
         preview["__tool__"] = str(event.payload["tool"])
         previews.append(preview)
         await approvals.resolve(approval_id, decisions[len(previews) - 1])
-        if len(previews) == len(decisions):
-            return previews
-    raise AssertionError("the event stream ended")  # pragma: no cover
+    return previews
 
 
 async def test_one_failure_produces_exactly_one_planning_call_carrying_the_evidence(

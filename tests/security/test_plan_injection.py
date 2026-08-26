@@ -25,7 +25,7 @@ from oracle.orchestration.models import TaskKind
 from oracle.orchestration.plan import compile_plan, parse, validate
 from oracle.orchestration.registry import load_registry
 from oracle.runners.planning import approve_graph
-from tests.helpers_delegation import make_repo
+from tests.helpers_delegation import make_repo, wait_event
 from tests.test_orchestration_runners import executor_for
 from tests.test_plan_validation import raw_plan
 
@@ -110,12 +110,11 @@ async def test_the_card_shows_the_injected_text_rather_than_hiding_it(
     running = asyncio.create_task(
         approve_graph(approvals, executor._engine, graph, plan, trace_id="tr_sec")
     )
-    payload: dict[str, Any] = {}
-    async for event in eventlog.stream(0):
-        if event.type == "approval.requested":
-            payload = dict(event.payload)
-            await approvals.resolve(str(event.payload["approval_id"]), False)
-            break
+    asked = await wait_event(
+        eventlog, lambda e: e.type == "approval.requested", what="the graph card"
+    )
+    payload = dict(asked.payload)
+    await approvals.resolve(str(asked.payload["approval_id"]), False)
     assert await asyncio.wait_for(running, timeout=10) is False
 
     preview = payload["preview"]
@@ -140,12 +139,11 @@ async def test_the_graph_card_is_priced_as_untrusted_input(
     running = asyncio.create_task(
         approve_graph(approvals, executor._engine, graph, plan, trace_id="tr_sec")
     )
-    tier = ""
-    async for event in eventlog.stream(0):
-        if event.type == "approval.requested":
-            tier = str(event.payload["tier"])
-            await approvals.resolve(str(event.payload["approval_id"]), False)
-            break
+    asked = await wait_event(
+        eventlog, lambda e: e.type == "approval.requested", what="the graph card"
+    )
+    tier = str(asked.payload["tier"])
+    await approvals.resolve(str(asked.payload["approval_id"]), False)
     await asyncio.wait_for(running, timeout=10)
 
     # T2 is the declared tier; taint pushes it up. Asserting "not T2" rather than a
@@ -270,14 +268,12 @@ async def test_a_degraded_rung_is_priced_exactly_like_a_planners_plan(
             source=PlanSource.SINGLE_TASK,
         )
     )
-    tool = ""
-    tier = ""
-    async for event in eventlog.stream(0):
-        if event.type == "approval.requested":
-            tool = str(event.payload["tool"])
-            tier = str(event.payload["tier"])
-            await approvals.resolve(str(event.payload["approval_id"]), True)
-            break
+    asked = await wait_event(
+        eventlog, lambda e: e.type == "approval.requested", what="the graph card"
+    )
+    tool = str(asked.payload["tool"])
+    tier = str(asked.payload["tier"])
+    await approvals.resolve(str(asked.payload["approval_id"]), True)
     await asyncio.wait_for(running, timeout=10)
 
     assert tool == "ai.graph", "a degraded rung got its own approval type"

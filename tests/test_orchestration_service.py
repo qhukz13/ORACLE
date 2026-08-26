@@ -29,7 +29,13 @@ from oracle.orchestration.service import GraphService
 from oracle.orchestration.store import TaskStore
 from oracle.runners.delegation import make_delegation_runner
 from oracle.runners.tool import make_tool_runner
-from tests.helpers_delegation import SMOKE, make_repo, make_service, stub_adapter
+from tests.helpers_delegation import (
+    SMOKE,
+    make_repo,
+    make_service,
+    stub_adapter,
+    wait_event,
+)
 from tests.test_orchestration_runners import POLICY, executor_for
 
 ROOT = "tk_root"
@@ -141,13 +147,10 @@ async def test_halt_reaches_a_graphs_child_process(
         graphs.run(graph, {TaskKind.DELEGATION: make_delegation_runner(delegations, repo)})
     )
 
-    async def approve() -> None:
-        async for event in eventlog.stream(0):
-            if event.type == "approval.requested":
-                await approvals.resolve(str(event.payload["approval_id"]), True)
-                return
-
-    await asyncio.wait_for(approve(), timeout=30)
+    asked = await wait_event(
+        eventlog, lambda e: e.type == "approval.requested", what="the egress approval"
+    )
+    await approvals.resolve(str(asked.payload["approval_id"]), True)
     pid = await _wait_for_pid(delegations, "d")
 
     # HALT, in the only part that matters here: cancel the tracked task.
@@ -236,11 +239,10 @@ async def test_a_task_needing_approval_parks_and_frees_its_slot(
     )
     running = asyncio.create_task(graphs.run(graph, {TaskKind.TOOL: runner}))
 
-    approval_id = ""
-    async for event in eventlog.stream(0):
-        if event.type == "approval.requested":
-            approval_id = str(event.payload["approval_id"])
-            break
+    asked = await wait_event(
+        eventlog, lambda e: e.type == "approval.requested", what="the parked task's approval"
+    )
+    approval_id = str(asked.payload["approval_id"])
     assert approval_id
 
     # The parked task is WAITING and the *other* task got the slot and finished.
@@ -272,10 +274,10 @@ async def test_a_refused_approval_fails_the_task_with_the_reason(
     graph = TaskGraph([task("needs_ok", tool="fs.read", args={"path": str(repo / "app.py")})])
     running = asyncio.create_task(graphs.run(graph, {TaskKind.TOOL: runner}))
 
-    async for event in eventlog.stream(0):
-        if event.type == "approval.requested":
-            await approvals.resolve(str(event.payload["approval_id"]), False)
-            break
+    asked = await wait_event(
+        eventlog, lambda e: e.type == "approval.requested", what="the parked task's approval"
+    )
+    await approvals.resolve(str(asked.payload["approval_id"]), False)
 
     status = await asyncio.wait_for(running, timeout=30)
 
@@ -301,11 +303,10 @@ async def test_cancelling_a_parked_task_does_not_leave_it_waiting(
     graph = TaskGraph([task("needs_ok", tool="fs.read", args={"path": str(repo / "app.py")})])
     running = asyncio.create_task(graphs.run(graph, {TaskKind.TOOL: runner}))
 
-    approval_id = ""
-    async for event in eventlog.stream(0):
-        if event.type == "approval.requested":
-            approval_id = str(event.payload["approval_id"])
-            break
+    asked = await wait_event(
+        eventlog, lambda e: e.type == "approval.requested", what="the parked task's approval"
+    )
+    approval_id = str(asked.payload["approval_id"])
     for _ in range(200):
         if graph["needs_ok"].status is TaskStatus.WAITING:
             break

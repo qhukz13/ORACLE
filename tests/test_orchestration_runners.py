@@ -488,7 +488,7 @@ async def test_two_delegations_run_side_by_side_and_the_third_queues(
     workspaces, three distinct branches, and never more than two live at once."""
     import asyncio
 
-    from tests.helpers_delegation import SMOKE
+    from tests.helpers_delegation import SMOKE, wait_event
 
     monkeypatch.setenv("STUB_FIXTURE", str(SMOKE))
     repo = make_repo(tmp_path)
@@ -522,16 +522,17 @@ async def test_two_delegations_run_side_by_side_and_the_third_queues(
         # re-reads the same request forever while the others quietly expire. Three
         # concurrent egresses need three answers, in the order they are asked.
         seen: set[str] = set()
-        async for event in eventlog.stream(0):
-            if event.type != "approval.requested":
-                continue
+        while len(seen) < 3:
+            event = await wait_event(
+                eventlog,
+                lambda e: (
+                    e.type == "approval.requested" and str(e.payload["approval_id"]) not in seen
+                ),
+                what=f"egress approval {len(seen) + 1} of 3",
+            )
             approval_id = str(event.payload["approval_id"])
-            if approval_id in seen:
-                continue
             seen.add(approval_id)
             await approvals.resolve(approval_id, True)
-            if len(seen) == 3:
-                return
 
     approver = asyncio.create_task(approve_each())
     status = await asyncio.wait_for(scheduler.run(), timeout=180)

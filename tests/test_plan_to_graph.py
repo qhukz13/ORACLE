@@ -21,6 +21,7 @@ import pytest
 
 from oracle.core.approvals import ApprovalStore
 from oracle.core.eventlog import EventLog
+from oracle.core.events import Event
 from oracle.integrations.types import AgentCaps, AgentResult, Preflight
 from oracle.orchestration.models import TaskKind, TaskResult, TaskStatus
 from oracle.orchestration.plan import compile_plan
@@ -28,7 +29,7 @@ from oracle.orchestration.registry import load_registry
 from oracle.orchestration.service import GraphService
 from oracle.orchestration.store import TaskStore
 from oracle.runners.planning import Planner, approve_graph
-from tests.helpers_delegation import make_repo
+from tests.helpers_delegation import make_repo, wait_event
 from tests.test_orchestration_runners import executor_for
 from tests.test_plan_validation import raw_plan
 
@@ -93,22 +94,22 @@ async def first_preview(
     bare `async for` over the stream waits for something that will never arrive. The first
     version of these tests did exactly that and hung for the whole pytest timeout instead
     of failing in ten seconds."""
-    async for event in eventlog.stream(0):
-        if event.type != "approval.requested":
-            continue
-        approval_id = str(event.payload["approval_id"])
+
+    def unanswered(event: Event) -> bool:
         # Skip anything already answered. `stream(0)` replays the backlog, so a second
         # call would otherwise re-find the *first* request, "answer" it again, and leave
         # the one it was waiting for unanswered - which is precisely how the end-to-end
         # test hung the first time.
-        still_open = approvals.get(approval_id)
-        if still_open is None or not still_open.open:
-            continue
-        preview = dict(event.payload["preview"])
-        preview["__tool__"] = str(event.payload["tool"])
-        await approvals.resolve(approval_id, decision)
-        return preview
-    raise AssertionError("no approval was requested")  # pragma: no cover
+        if event.type != "approval.requested":
+            return False
+        still_open = approvals.get(str(event.payload["approval_id"]))
+        return still_open is not None and still_open.open
+
+    event = await wait_event(eventlog, unanswered, what="an unanswered approval")
+    preview = dict(event.payload["preview"])
+    preview["__tool__"] = str(event.payload["tool"])
+    await approvals.resolve(str(event.payload["approval_id"]), decision)
+    return preview
 
 
 async def approve_next(approvals: ApprovalStore, eventlog: EventLog, decision: bool) -> str:

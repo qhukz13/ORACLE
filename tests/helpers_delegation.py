@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -142,26 +143,58 @@ WAIT_S = 30.0
 async def wait_for(eventlog: EventLog, type_: str) -> Event:
     """Block until an event of `type_` lands on the log — via the same `stream()`
     subscription a WS client uses, so the test rides the real fan-out path."""
-
-    async def watch() -> Event:
-        async for event in eventlog.stream(0):
-            if event.type == type_:
-                return event
-        raise AssertionError("event stream ended")  # pragma: no cover
-
-    return await asyncio.wait_for(watch(), WAIT_S)
+    return await wait_event(eventlog, lambda e: e.type == type_, what=f"a {type_} event")
 
 
 async def wait_state(eventlog: EventLog, state: str) -> Event:
     """Block until `task.updated` reports the given state."""
+    return await wait_event(
+        eventlog,
+        lambda e: e.type == "task.updated" and e.payload.get("state") == state,
+        what=f"task.updated state={state}",
+    )
+
+
+async def wait_event(
+    eventlog: EventLog,
+    match: Callable[[Event], bool],
+    *,
+    # ASYNC109 would rather this were `asyncio.timeout` at the call site. It is a
+    # deadline on a helper every test shares, not a parameter a caller reasons about —
+    # pushing it out would put the thing that prevents the hang back in the hands of the
+    # code that keeps forgetting it.
+    timeout: float = WAIT_S,  # noqa: ASYNC109
+    what: str = "an event",
+) -> Event:
+    """Block until an event satisfies `match`, or fail loudly.
+
+    **The only shape a test should use to wait on the log.** A bare
+    `async for event in eventlog.stream(0)` that never sees what it is waiting for does
+    not fail — it hangs, and because there is no global test timeout it hangs the whole
+    run. That has now cost this project four separate multi-minute stalls (P6-T2, P7-T2,
+    P8-T1, and a suite-wide hang on 2026-08-26), which is why the helper P8-T1's report
+    predicted would be needed "when a fourth suite needs it" lives here now.
+
+    Two traps it also closes, both sprung before:
+
+    * `stream(0)` **replays the backlog**, so a helper called twice re-reads the first
+      match. Callers that must answer several events pass a `match` that skips the ones
+      they have already handled (see `answer_approvals` in `tests/test_replanning.py`).
+    * a stream that ends is not a match; it is a different failure, and it says so.
+    """
 
     async def watch() -> Event:
         async for event in eventlog.stream(0):
-            if event.type == "task.updated" and event.payload.get("state") == state:
+            if match(event):
                 return event
-        raise AssertionError("event stream ended")  # pragma: no cover
+        raise AssertionError(f"the event stream ended before {what}")  # pragma: no cover
 
-    return await asyncio.wait_for(watch(), WAIT_S)
+    try:
+        return await asyncio.wait_for(watch(), timeout)
+    except TimeoutError:
+        raise AssertionError(
+            f"waited {timeout:.0f}s for {what} and it never arrived (last_seq={eventlog.last_seq})"
+        ) from None
 
 
 async def events_of(eventlog: EventLog, type_: str | None = None) -> list[Event]:
