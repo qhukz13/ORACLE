@@ -13,6 +13,7 @@ tree-sitter index, and pretending with a regex would be a mock dressed up as cur
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -76,6 +77,7 @@ def gather_retrieval(
     *,
     project: str | None = None,
     limit: int = 6,
+    translator: Callable[[str], str | None] | None = None,
 ) -> tuple[tuple[ContextExcerpt, ...], tuple[str, ...]]:
     """Step 3: top hybrid hits for the goal, scoped to the project.
 
@@ -83,10 +85,19 @@ def gather_retrieval(
     hands those to the gate, which escalates the egress approval. Splitting the two
     here would let a caller take the text and forget the taint; returning them
     together makes forgetting a type error.
+
+    **This is the path query translation ships on** (OQ-18, RAG.md §5). A goal typed in
+    Russian against an English repository otherwise reaches the packet through one
+    multilingual embedding; a second English probe is worth measured recall here and is
+    measured *not* to fit the interactive answer path, where the whole latency headroom
+    is smaller than one query embedding. A packet precedes a delegation that runs for
+    minutes, so seconds are free exactly here and nowhere else.
     """
     from oracle.rag.retrieval import retrieve
 
-    retrieved = retrieve(question, store, embedder, project=project, limit=limit)
+    retrieved = retrieve(
+        question, store, embedder, project=project, limit=limit, translator=translator
+    )
     excerpts = tuple(
         ContextExcerpt(
             source=f"{hit.rel_path} · {hit.anchor}" if hit.anchor else hit.rel_path,

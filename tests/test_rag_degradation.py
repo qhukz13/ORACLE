@@ -90,6 +90,102 @@ def test_an_index_cut_by_a_different_chunker_is_refused_not_used(tmp_path: Path)
         KnowledgeStore(path, DIM).bind("bge-m3", DIM)
 
 
+def _store_with_one_chunk(path: Path) -> KnowledgeStore:
+    """A real, bound, minimal index — enough for `retrieve()` to run end to end."""
+    import hashlib
+
+    import numpy as np
+
+    from oracle.rag.chunking import Chunk
+    from oracle.rag.collections import ContentKind, Document
+
+    store = KnowledgeStore(path, DIM)
+    store.bind("bge-m3", DIM)
+    doc = Document(
+        collection="projects",
+        project="Asterim",
+        path="a.md",
+        abs_path=Path("C:/Projects/Asterim/a.md"),
+        kind=ContentKind.MARKDOWN,
+        size=10,
+        mtime_ns=1,
+    )
+    store.put(
+        doc,
+        [Chunk(doc=doc, ordinal=0, anchor="A", text="token refresh")],
+        np.ones((1, DIM), dtype=np.float32),
+        content_hash=hashlib.sha256(b"a.md").hexdigest(),
+        provenance="local_owned",
+        indexed_at="2026-08-26T00:00:00Z",
+        idents=["token refresh"],
+        token_counts=[2],
+    )
+    return store
+
+
+class _Embedder:
+    """A stand-in for the ONNX embedder: constant vectors, no model on disk.
+
+    The vectors are constant on purpose. These tests are about whether a probe *runs*,
+    not about what it ranks — a fake that scored differently per query would make a
+    degradation test quietly depend on retrieval quality."""
+
+    def encode(self, texts: list[str], role: str, *, batch: int = 16) -> Any:
+        import numpy as np
+
+        return np.ones((len(texts), DIM), dtype=np.float32)
+
+
+@pytest.mark.parametrize(
+    ("translator", "why"),
+    [
+        (None, "translation switched off, or no provider at all"),
+        (lambda _q: None, "the model refused, timed out, or did not translate"),
+        (lambda _q: "", "an empty translation is not a translation"),
+    ],
+)
+def test_retrieval_thins_to_the_native_probe_when_translation_is_unavailable(
+    tmp_path: Path, translator: Any, why: str
+) -> None:
+    """Every way the second probe can fail to arrive, and the same outcome each time.
+
+    This is the property that let translation ship at all (OQ-18): the degraded result
+    is *today's* result, so the worst case of a mechanism that improves crosslingual
+    recall is that it improves nothing. Parametrised rather than written three times
+    because the failures differ only in where they start."""
+    from oracle.rag.retrieval import retrieve
+
+    store = _store_with_one_chunk(tmp_path / "knowledge.db")
+    try:
+        got = retrieve("как работает refresh токена", store, _Embedder(), translator=translator)
+    finally:
+        store.close()
+
+    assert got.hits, f"retrieval must still answer when {why}"
+    assert got.translated_count == 0
+    assert "+translated" not in got.strategy
+
+
+def test_a_translator_that_raises_is_a_bug_not_a_degradation(tmp_path: Path) -> None:
+    """The one case retrieval does NOT absorb, stated so the boundary is deliberate.
+
+    `translate_to_english` returns `None` on every failure it knows about, and the bridge
+    in `api/app.py` catches the rest. If an exception still reaches here, the contract
+    upstream is broken and hiding it would turn a bug into silently worse retrieval —
+    which is the exact failure mode this whole question has been chasing."""
+    from oracle.rag.retrieval import retrieve
+
+    def explode(_q: str) -> str:
+        raise RuntimeError("a translator must not do this")
+
+    store = _store_with_one_chunk(tmp_path / "knowledge.db")
+    try:
+        with pytest.raises(RuntimeError, match="must not do this"):
+            retrieve("как работает refresh токена", store, _Embedder(), translator=explode)
+    finally:
+        store.close()
+
+
 def test_a_refused_index_still_leaves_a_usable_packet(tmp_path: Path) -> None:
     """The end of that path: `SchemaMismatch` is an exception, and `_curate` must treat
     it like every other retrieval outage rather than letting it reach the delegation."""

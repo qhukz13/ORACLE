@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
@@ -69,6 +70,10 @@ class Retrieved:
     strategy: str
     dense_count: int
     lexical_count: int
+    #: Candidates from the translated probe, 0 when it did not run or produced nothing.
+    #: Reported rather than inferred from `strategy` so "translation was on and returned
+    #: nothing" is distinguishable from "translation was never asked for".
+    translated_count: int = 0
 
 
 def _fts_term(term: str) -> str:
@@ -216,8 +221,21 @@ def retrieve(
     project: str | None = None,
     limit: int = TOP_K,
     now: datetime | None = None,
+    translator: Callable[[str], str | None] | None = None,
 ) -> Retrieved:
-    """The full pipeline: two retrievers, fusion, boosts, diversity, top-k."""
+    """The full pipeline: two retrievers, fusion, boosts, diversity, top-k.
+
+    `translator` adds a **second dense probe** for a question written in a script the
+    corpus is not (OQ-18, `rag/translate.py`). It is a plain callable returning `None`
+    rather than a provider, for two reasons: this function is synchronous and runs in a
+    worker thread, and — more importantly — a retrieval path must not be able to reach
+    the LLM layer. What arrives here is a string or nothing.
+
+    Passing it is a caller's decision, not a default, and the callers disagree on purpose:
+    the Handoff Packet passes one because a delegation takes minutes, and `know.search`
+    does not because the interactive budget has ~70 ms of headroom against a 63 ms p50
+    probe (RAG.md §5).
+    """
     now = now or datetime.now(UTC)
 
     vector = embedder.encode([question], QUERY)[0]
@@ -232,8 +250,28 @@ def retrieve(
         )
         strategy = "hybrid" if lexical else "dense"
 
-    by_id = {h.chunk_id: h for h in (*dense, *lexical)}
+    # The second probe. Everything about it is allowed to be missing: no translator, no
+    # model, a refusal, a timeout, a translation that did not translate. Each lands here
+    # as `None` and leaves the ranking exactly as it was.
+    translated: list[Hit] = []
+    # Truthiness, not `is not None`: an empty translation is not a translation, and
+    # embedding `""` produces a probe that ranks the corpus by nothing in particular.
+    # `translate_to_english` already refuses one — this is the second lock, because the
+    # seam is a plain callable and the next caller to pass one may not.
+    if translator is not None and (english := translator(question)):
+        translated = store.search_dense(
+            embedder.encode([english], QUERY)[0],
+            CANDIDATES,
+            collection=collection,
+            project=project,
+        )
+        if translated:
+            strategy += "+translated"
+
+    by_id = {h.chunk_id: h for h in (*dense, *translated, *lexical)}
     rankings = [[h.chunk_id for h in dense]]
+    if translated:
+        rankings.append([h.chunk_id for h in translated])
     if lexical:
         rankings.append([h.chunk_id for h in lexical])
     fused = rrf(rankings)
@@ -249,6 +287,7 @@ def retrieve(
         "rag.retrieved",
         strategy=strategy,
         dense=len(dense),
+        translated=len(translated),
         lexical=len(lexical),
         returned=len(hits),
     )
@@ -262,6 +301,7 @@ def retrieve(
         strategy=strategy,
         dense_count=len(dense),
         lexical_count=len(lexical),
+        translated_count=len(translated),
     )
 
 

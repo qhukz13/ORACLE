@@ -44,6 +44,8 @@ from oracle.orchestration.registry import Registry, load_registry
 from oracle.orchestration.service import GraphService
 from oracle.orchestration.store import TaskStore
 from oracle.orchestration.templates import Templates, load_templates
+from oracle.pipelines.loader import Loaded
+from oracle.pipelines.loader import discover as discover_pipelines
 from oracle.policy.audit import AuditLog
 from oracle.policy.engine import PolicyEngine, load_policy
 from oracle.router.intent import IntentClassifier
@@ -97,6 +99,10 @@ class AppState:
     #: Rung 2 of the planner ladder: the shapes ORACLE uses when no model will produce a
     #: plan (PLANNER.md §6). Data, loaded beside the registry.
     templates: Templates
+    #: Named workflows, by name (PIPELINES.md §2). Data as well: a pipeline is a file a
+    #: human wrote, and running one compiles it to an ordinary task graph rather than
+    #: reaching a second executor.
+    pipelines: dict[str, Loaded]
     #: What ORACLE learned, as opposed to what it can look up (MEMORY.md). Facts,
     #: preferences and prior attempts — the last of which is what stops a delegate
     #: repeating last week's dead end.
@@ -120,14 +126,61 @@ def state_of(app: FastAPI) -> AppState:
     return app.state.oracle  # type: ignore[no-any-return]
 
 
-def _curate(st: AppState, repo: Path, project: str, task_text: str) -> PacketInputs:
+def _packet_translator(st: AppState) -> Callable[[str], str | None] | None:
+    """The synchronous seam `retrieve()` takes, bridged onto the async provider.
+
+    `_curate` runs in a worker thread (`to_thread`), so reaching an async provider means
+    scheduling onto the loop that owns it and waiting from the thread. That is the whole
+    of the machinery here, and it is deliberately confined to this function: nothing in
+    `rag/` learns that an LLM exists — it receives a string or a `None`.
+
+    Returns `None` — meaning "do not translate at all" — when the provider is absent or
+    the switch is off, so the caller has one degradation path rather than two.
+    """
+    provider = st.provider
+    if provider is None or not st.settings.translate_queries:
+        return None
+
+    from oracle.rag.translate import DEFAULT_TIMEOUT_S, looks_translatable, translate_to_english
+
+    loop = asyncio.get_running_loop()
+
+    def translate(question: str) -> str | None:
+        # The cheap test first: an all-Latin goal has nothing to gain from a second
+        # all-Latin probe, and this is the common case on this corpus.
+        if not looks_translatable(question):
+            return None
+        future = asyncio.run_coroutine_threadsafe(translate_to_english(question, provider), loop)
+        try:
+            # `translate_to_english` owns the real deadline; this one only exists so a
+            # loop that has stopped cannot park a worker thread forever.
+            return future.result(timeout=DEFAULT_TIMEOUT_S + 5)
+        except Exception as exc:
+            future.cancel()
+            log.info("delegate.translation_unavailable", reason=str(exc)[:200])
+            return None
+
+    return translate
+
+
+def _curate(
+    st: AppState,
+    repo: Path,
+    project: str,
+    task_text: str,
+    translator: Callable[[str], str | None] | None = None,
+) -> PacketInputs:
     """§6 curation for a delegation: orientation docs, retrieval scoped to the project,
     git state. Runs off the event loop (`to_thread`) — the embedder alone is seconds.
 
     Degradable on purpose: no knowledge index or no embedding model means a thinner
     packet (docs + git state), never a failed delegation. The taint from retrieval
     provenance rides into `PacketInputs`, so the egress approval escalates when the
-    packet carries `local_foreign` text (SECURITY.md §6)."""
+    packet carries `local_foreign` text (SECURITY.md §6).
+
+    `translator` is built by the caller (`_packet_translator`) because it needs the
+    running loop, and defaults to `None` so every existing caller — and every test —
+    keeps the untranslated behaviour."""
     from oracle.handoff.gather import gather_project_docs, gather_retrieval
 
     excerpts = list(gather_project_docs(repo))
@@ -139,7 +192,9 @@ def _curate(st: AppState, repo: Path, project: str, task_text: str) -> PacketInp
         store = KnowledgeStore(st.settings.data_dir / "knowledge.db", DEFAULT.out_dim)
         try:
             store.bind(DEFAULT.name, DEFAULT.out_dim)
-            hits, tainted = gather_retrieval(task_text, store, Embedder(DEFAULT), project=project)
+            hits, tainted = gather_retrieval(
+                task_text, store, Embedder(DEFAULT), project=project, translator=translator
+            )
             excerpts.extend(hits)
         finally:
             store.close()
@@ -242,6 +297,22 @@ async def _build_state(settings: Settings) -> AppState:
     memory = MemoryStore(conn, eventlog)
     agent_registry = load_registry(settings.registry_path)
     plan_templates = load_templates(settings.plan_templates_path)
+    # Discovered at boot like the registry and the templates, and just as fail-open: a
+    # broken pipeline file is a `Problem` in the log, not a daemon that will not start,
+    # and the pipelines that *do* parse stay available (PIPELINES.md §2).
+    pipeline_index, pipeline_problems = discover_pipelines(
+        config_dir=settings.pipelines_dir,
+        projects_root=settings.projects_root,
+        projects=tuple(projects),
+    )
+    log.info(
+        "pipelines.loaded",
+        count=len(pipeline_index),
+        names=sorted(pipeline_index),
+        problems=len(pipeline_problems),
+    )
+    for problem in pipeline_problems:
+        log.warning("pipelines.problem", detail=str(problem))
     if not agent_registry.usable:
         # Same instinct as policy's read-only lockdown: a registry that failed open would
         # let a plan pick its own executor. Planning simply becomes unavailable.
@@ -256,6 +327,9 @@ async def _build_state(settings: Settings) -> AppState:
             provider,
             classifier,
             projects=projects,
+            # Names the pre-router will recognise deterministically, with no model in the
+            # loop (PIPELINES.md §5).
+            pipelines=frozenset(pipeline_index),
             stats=stats,
             executor=executor,
             # Selection needs the model. Without one the pipeline still routes and
@@ -284,6 +358,7 @@ async def _build_state(settings: Settings) -> AppState:
         graphs=GraphService(eventlog, task_store),
         agents=agent_registry,
         templates=plan_templates,
+        pipelines=pipeline_index,
         memory=memory,
         tokens=tokens,
         mcp=mcp,
@@ -295,6 +370,18 @@ async def _build_state(settings: Settings) -> AppState:
     # it through `AppState.spawn` means HALT reaches it like every other tracked task.
     # Assigned after construction because the pipeline is built inside the state.
     state.agent.spawn = state.spawn
+
+    def _start_pipeline(name: str, session_id: str | None, trace: str) -> None:
+        """The pre-router's hook, assigned here because it needs the finished state.
+
+        Runs with the pipeline's own declared defaults: a name typed into the chat has no
+        parameters attached, and every parameter has a default precisely so a run needs
+        no arguments (PIPELINES.md §2)."""
+        loaded = state.pipelines.get(name)
+        if loaded is not None:
+            state.spawn(_run_pipeline(state, loaded, {}, session_id, trace))
+
+    state.agent.run_pipeline = _start_pipeline
     return state
 
 
@@ -416,6 +503,20 @@ def _register_routes(app: FastAPI) -> None:
                 "structured_output": st.agent.stats.snapshot(),
             },
             "projects": st.projects,
+            # The named workflows this daemon found (PIPELINES.md §5). Sent so the palette
+            # can offer them by name and so a person can see what ORACLE actually
+            # discovered — the commonest pipeline bug is a file in the wrong directory,
+            # and "it is not in this list" answers that in one glance.
+            "pipelines": [
+                {
+                    "name": name,
+                    "description": loaded.pipeline.description,
+                    "project": loaded.project,
+                    "source": loaded.source,
+                    "steps": len(loaded.pipeline.steps),
+                }
+                for name, loaded in sorted(st.pipelines.items())
+            ],
             # The UI needs a real path to open a terminal in, and it must be one the
             # runtime chose — not one assembled in the browser.
             "projects_root": str(st.settings.projects_root),
@@ -712,6 +813,57 @@ async def _run_plan(
     await _record_attempts(st, graph.root_id, trace)
 
 
+async def _run_pipeline(
+    st: AppState,
+    loaded: Loaded,
+    params: dict[str, Any],
+    session_id: str | None,
+    trace: str,
+) -> None:
+    """One pipeline run, with its boundary announced and its record kept.
+
+    The two `pipeline.*` events are the only new event types Phase 10 adds, and neither
+    is a `task.*`: the steps emit ordinary task events because they *are* ordinary tasks.
+    A consumer needs no new vocabulary to render a run — `TaskTree` already does it.
+    """
+    from oracle.runners.pipeline import PipelineService
+
+    service = PipelineService(
+        st.graphs,
+        st.executor,
+        st.approvals,
+        st.policy,
+        projects_root=st.settings.projects_root,
+    )
+    await st.eventlog.append(
+        Event(
+            type="pipeline.started",
+            session_id=session_id,
+            trace_id=trace,
+            actor="user",
+            payload={"pipeline": loaded.pipeline.name, "source": loaded.source, "params": params},
+        )
+    )
+    record = await service.run(
+        loaded,
+        params,
+        runners_for=lambda granted: build_runners(st, pre_granted=granted),
+        session_id=session_id,
+        trace_id=trace,
+    )
+    await st.eventlog.append(
+        Event(
+            type="pipeline.finished",
+            session_id=session_id,
+            trace_id=trace,
+            actor="system",
+            payload=record,
+        )
+    )
+    if record.get("root_id"):
+        await _record_attempts(st, str(record["root_id"]), trace)
+
+
 async def _record_attempts(st: AppState, root_id: str, trace: str) -> None:
     """Every task that ran becomes a durable attempt (MEMORY.md §4).
 
@@ -900,7 +1052,9 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
             else ("Read", "Edit", "Write")
         )
         pkt = HandoffPacket(task_id=new_id("dlg"), task=task_text, allowed_tools=allowed)
-        inputs = await asyncio.to_thread(_curate, st, repo, project, task_text)
+        inputs = await asyncio.to_thread(
+            _curate, st, repo, project, task_text, _packet_translator(st)
+        )
         st.spawn(
             st.delegations.run(pkt, repo, inputs, session_id=session_of(cmd), trace_id=bind_trace())
         )
@@ -909,6 +1063,37 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
         task_id = str(cmd.payload.get("task_id") or "")
         if task_id:
             await st.delegations.discard(task_id)
+
+    elif cmd.type == "pipe.run":
+        # A named workflow a human wrote, run as a task graph (PIPELINES.md §3).
+        #
+        # Not a registered tool, and deliberately: a tool that starts a whole graph would
+        # be unbounded work behind one tier, and `PlannedTask(extra="forbid")` plus
+        # ADR-0021 already stop a *plan* from naming one. A pipeline is started by a
+        # person, or by the deterministic pre-router match — never by a model.
+        name = str(cmd.payload.get("name") or "").strip()
+        loaded = st.pipelines.get(name)
+        if loaded is None:
+            await st.eventlog.append(
+                Event(
+                    type="error",
+                    session_id=session_of(cmd),
+                    trace_id=bind_trace(),
+                    actor="system",
+                    payload={"error": f"no pipeline named {name!r}", "known": sorted(st.pipelines)},
+                )
+            )
+        else:
+            raw_params = cmd.payload.get("params")
+            st.spawn(
+                _run_pipeline(
+                    st,
+                    loaded,
+                    dict(raw_params) if isinstance(raw_params, dict) else {},
+                    session_of(cmd),
+                    bind_trace(),
+                )
+            )
 
     elif cmd.type == "graph.plan":
         # An objective in, a graph out — with two questions in between, both the owner's:

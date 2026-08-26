@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -388,3 +389,112 @@ class TestOnlyTheMajorityScriptReachesBM25:
         store.db.commit()
         assert store.script_census() is None
         assert "как" in discriminating_terms("как работает токен", store)
+
+
+class TestTranslatedProbe:
+    """OQ-18's second dense probe: the question asked again in the corpus's language.
+
+    These pin what fusing a third ranking actually *does*, including what it cannot do.
+    The evidence that it helps is the corpus measurement, not a six-document fixture —
+    what belongs here is the mechanism, and one property of RRF that a reader has to
+    know before trusting either number.
+
+    The ranks below are chosen, not discovered, and the arithmetic is the point:
+    RRF scores a document `Σ 1/(60 + rank + 1)` over the lists it appears in.
+    """
+
+    #: (rank under the native probe, rank under the translated probe). `a` is the
+    #: component the Russian query reads, `b` the component its English translation
+    #: reads; they are independent dimensions, which is what lets one document rank
+    #: fourth for one probe and first for the other.
+    DOCS: ClassVar[dict[str, tuple[float, float]]] = {
+        #                     a     b     native rank / translated rank
+        "unrelated.ts": (0.90, 0.05),  # 0 / 5  →  1/61 + 1/66 = 0.03154
+        "views.ts": (0.80, 0.40),  # 1 / 4  →  1/62 + 1/65 = 0.03151
+        "session.ts": (0.70, 0.50),  # 2 / 3  →  1/63 + 1/64 = 0.03150
+        "TokenService.ts": (0.60, 0.79),  # 3 / 0  →  1/64 + 1/61 = 0.03202  ← wins
+        "cache.ts": (0.50, 0.70),  # 4 / 1  →  1/65 + 1/62 = 0.03151
+        "log.ts": (0.40, 0.60),  # 5 / 2  →  1/66 + 1/63 = 0.03103
+    }
+
+    RU = "как работает refresh токена"
+    EN = "how does token refresh work"
+
+    def index(self, tmp_path: Path) -> KnowledgeStore:
+        store = KnowledgeStore(tmp_path / "xl.db", DIM)
+        store.bind("fake", DIM)
+        for rel, (a, b) in self.DOCS.items():
+            # The third component pads to unit norm so every document is the same length
+            # and only the two query axes decide the ranking.
+            pad = (1.0 - a * a - b * b) ** 0.5
+            _put(store, rel, [f"chunk of {rel}"], [[a, b, pad, 0.0]])
+        store.record_script_census()
+        return store
+
+    def embedder(self) -> FakeEmbedder:
+        return FakeEmbedder({self.RU: [1.0, 0, 0, 0], self.EN: [0, 1.0, 0, 0]})
+
+    def test_the_native_probe_alone_ranks_the_wrong_document_first(self, tmp_path: Path) -> None:
+        """The measured failure, in miniature: the Russian embedding points somewhere
+        the answer is not, and nothing downstream can fix that."""
+        got = retrieve(self.RU, self.index(tmp_path), self.embedder(), limit=1)
+        assert got.hits[0].rel_path == "unrelated.ts"
+        assert got.translated_count == 0
+        assert "+translated" not in got.strategy
+
+    def test_a_document_both_probes_like_beats_one_only_the_native_probe_likes(
+        self, tmp_path: Path
+    ) -> None:
+        """What the second probe buys: fourth on the native ranking and first on the
+        translated one outscores first-then-sixth. That is the whole mechanism."""
+        got = retrieve(
+            self.RU,
+            self.index(tmp_path),
+            self.embedder(),
+            limit=1,
+            translator=lambda _q: self.EN,
+        )
+        assert got.hits[0].rel_path == "TokenService.ts"
+        assert got.translated_count == len(self.DOCS)
+        assert "+translated" in got.strategy
+
+    def test_fusion_adds_a_ranking_it_does_not_replace_one(self, tmp_path: Path) -> None:
+        """A wrong translation must cost a rank, not the result. This is what makes a
+        translator that fails 5 times in 25 survivable rather than dangerous."""
+        got = retrieve(
+            self.RU, self.index(tmp_path), self.embedder(), limit=8, translator=lambda _q: self.EN
+        )
+        assert "unrelated.ts" in [h.rel_path for h in got.hits]
+
+
+class TestRrfBuriesASingleListDocument:
+    """The arithmetic behind `en-relay-dockerfile`, asserted where it is exact.
+
+    `retrieve` fuses with **unweighted** RRF: a document scores `Σ 1/(60 + rank + 1)`
+    over the lists it appears in. Two consequences follow, and the second is a measured
+    miss in the fixture set rather than a hypothetical:
+
+    1. Appearing in *both* lists is worth far more than ranking well in one.
+    2. So a document only one retriever can produce is unreachable at the top, however
+       certain that retriever is.
+
+    `en-relay-dockerfile` expects `Asterim/Dockerfile.relay`. Config files are indexed
+    lexically and **never embedded** (RAG.md §2), so it exists in the lexical list and
+    cannot exist in the dense one. BM25 ranks it inside the top 5 on its own; fusion puts
+    it out. That is not a broken fixture and not a tuning opportunity — RAG.md §5 chose
+    RRF precisely for having no weights, and weighting it to rescue one fixture would
+    trade the property for the case.
+    """
+
+    def test_first_in_one_list_loses_to_second_in_two(self) -> None:
+        scores = rrf([["dense_hit", "shared"], ["config_only", "shared"]])
+        assert scores["shared"] > scores["config_only"]
+        assert scores["config_only"] == pytest.approx(1 / 61)
+        assert scores["shared"] == pytest.approx(1 / 62 + 1 / 62)
+
+    def test_the_gap_does_not_close_at_any_rank(self) -> None:
+        """Even against the worst-placed document that both lists hold: `1/61` is the
+        ceiling for one list, and two lists start at `1/61 + 1/(60 + n + 1)`."""
+        long_list = [f"d{i}" for i in range(30)]
+        scores = rrf([[*long_list, "shared"], ["config_only", "shared"]])
+        assert scores["shared"] > scores["config_only"]
