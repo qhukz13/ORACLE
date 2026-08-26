@@ -12,9 +12,8 @@ Measured on 2026-08-21, not estimated:
 | Asterim (git-tracked) | **798 files** — 267 `.ts`, 190 `.md`, 91 `.tsx`, 62 `.js`, 30 `.json` |
 | Source2DemViewer | Rust; `target/` holds 3,915 files that must never be indexed |
 | GameRecs, GrowAMonster, asterim-pipeline, AsterimDesign | a few hundred each |
-| `Documents/AI/ML Learning` (Obsidian) | **157 Markdown notes** |
+| `Documents/AI/ML Learning` (Obsidian) | **182 Markdown notes**, plus a shelf of PDF textbooks |
 | `Documents/ObsidianNotes` | 3 notes |
-| `Documents/MLAI NOTES/ML/AI` | 1 note + 1 PDF (32 MB) |
 
 **Total: a few thousand documents → roughly 30k–80k chunks.**
 
@@ -68,9 +67,8 @@ collections:
   - id: notes
     kind: markdown
     roots:
-      - "C:/Users/qhukz/Documents/AI/ML Learning"       # 157 notes
+      - "C:/Users/qhukz/Documents/AI/ML Learning"       # 182 notes + the PDF shelf
       - "C:/Users/qhukz/Documents/ObsidianNotes"        # see `deny` — this root has a Passwords/ folder
-      - "C:/Users/qhukz/Documents/MLAI NOTES/ML/AI"
     obsidian: true
 
   # NOT indexed, deliberately: Documents/ at large, Downloads, AppData,

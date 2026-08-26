@@ -71,7 +71,6 @@ scopes:
     roots:
       - { path: "C:/Users/qhukz/Documents/ObsidianNotes",      mode: rw }
       - { path: "C:/Users/qhukz/Documents/AI/ML Learning",     mode: rw }
-      - { path: "C:/Users/qhukz/Documents/MLAI NOTES/ML/AI",   mode: ro }
   scratch:
     roots: [ { path: "D:/ORACLE/scratch", mode: rw } ]
 
