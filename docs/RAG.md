@@ -479,6 +479,29 @@ Two rules the set has had to learn about itself:
   in 12 of them. `measure()` discards it before ranking. It stays a legitimate corpus document; it
   just cannot answer itself.
 
+### The rule above was true in one script and false in the other  `2026-08-26`
+
+`measure()` in `scripts/index_knowledge.py` has discarded the fixture file since 2026-08-22.
+`scripts/eval_embeddings.py` — the script that produced **every number
+[OQ-18](OPEN_QUESTIONS.md#oq-18) records** — never got the same guard. Re-measured on the real
+corpus: answer-key documents sat in the lexical candidates of **37 of the 38 queries**, and
+`tests/fixtures/retrieval/cases.yaml` was the single strongest lexical match for nearly all of them.
+
+Both scripts now share one constant (`ANSWER_KEY`, imported, not restated), and it is slightly
+broader than the old rule: the *intent* fixtures leak the same way.
+
+**Two copies of an idea and a fix reaching one of them** is the shape of four of the five instrument
+defects found between 2026-08-22 and 2026-08-26 — the chunker copy, the fusion denominator, the
+config denominator, and this. Recorded here because the lesson is not about fixtures: it is that a
+second implementation of a rule is a place for the rule to be wrong quietly.
+
+**What is deliberately *not* excluded** is ORACLE's own prose. `docs/RAG.md` quoting a fixture
+question is a real document that a real query could really want, and scoring against a corpus that
+omits it would measure a corpus nobody has. Only the file whose purpose is to list the answers comes
+out. The residual — ORACLE writing about its own fixtures, which every task like this one increases —
+is real and unquantified on the dense side. `TO VERIFY`: how many top-5 *dense* slots ORACLE's
+documentation takes on its own fixture set.
+
 ---
 
 ## 9. Non-goals

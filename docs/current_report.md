@@ -3,110 +3,134 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** P9-T2 — retrieval: the hypothesis that is left, and the corpus it is measured against.
-**Done: four and a half of six acceptance criteria.** Both of OQ-18's levers are measured. The
-gate is **not** met and **not** moved: the best measured configuration is **78.9%** against 80% —
-**30 of 38 fixtures, one short**.
-**Status:** The chunk budget is enforced and calibrated; recall improved on every strategy;
-`make check` green.
+**Task:** P9-T3 (the translator, measured) and **Phase 10 — Pipelines (built)**.
+**Status:** Phase 10 is done, tested and documented. P9-T3 is **half done**: the translator is
+measured and shipped, the corpus re-scoring is **scheduled for 2026-08-27 07:12** and OQ-18 stays
+open until it lands.
 **Date:** 2026-08-26
 
 ---
 
-## The headline
+## Phase 10 — pipelines, built
 
-Two full runs over the real corpus, ~4.3 hours of CPU, identical except for the chunker.
-Composed per-case for the path that actually ships:
+A YAML file becomes a validated `Pipeline`, renders against its parameters, compiles to a task
+graph and runs on P7's scheduler. **No pipeline executor, no `pipeline_runs` table, no new
+`TaskKind`, no new runner**, and exactly two new event types — neither of them a `task.*`, because
+the steps *are* ordinary tasks and `TaskTree` renders a run with no new code.
 
-| | overall recall@5 | RU recall@5 |
-|---|---|---|
-| before this task | 68.4% | 56.0% |
-| **after the chunker repair** | **71.1%** | **60.0%** |
-| **+ an English probe** | **78.9%** | **72.0%** |
-| the gate | 80% — 31 of 38 | |
+The roadmap's extra acceptance criterion is a passing test rather than a claim: a compiled pipeline
+and a hand-written graph of the same steps emit identical event sequences, element for element,
+with no event type unique to either.
 
-| lever | effect on the shipped path |
-|---|---|
-| 2 · truncation, fixed | +2.7 overall, +4.0 RU |
-| 1 · query translation, at its ceiling | +7.8 overall, +12.0 RU |
-| 3 · not fusing BM25 on a crosslingual query | already correct in `retrieval.py`, worth 12–20 RU points, and the **harness had it wrong** |
+Two shipped pipelines in [`config/pipelines/`](../config/pipelines/), both priced against the
+**real** `config/policy.yaml` and the **real** tool registry by a test — so a renamed tool or an
+argument a contract does not take fails a test rather than a run. The daemon boots, discovers both,
+and reports them on `/api/v1/status`; the palette offers them by name.
 
-## The correction that matters most
+### Five things the spec could not have known
 
-**OQ-18's "44% on the 25 Russian fixtures" was measuring a code path ORACLE does not run.**
+All five are corrected **in PIPELINES.md**, not worked around in code. A spec that disagrees with
+its implementation is worse than no spec: the next reader cannot tell which half to trust.
 
-`retrieve()`'s `discriminating_terms` drops minority-script terms at any frequency, so a Russian
-query returns no lexical terms and takes the **dense-only** path — it never fuses BM25. The eval
-harness's `gated` strategy tests only document frequency, with no script rule. So every
-crosslingual number this project has recorded described a fusion that does not happen. What ships
-scored **56%** on those fixtures before this task, not 44%.
+1. **A P7 defect.** `Limits.timeout_s[TaskKind.TOOL]` is **120 s**; `dev.run_tests` declares 630 s
+   and `dev.build` 930 s. **Any TOOL task running either was killed at two minutes and recorded as
+   `TIMEOUT`** — which reads as "the tests hung", not "the scheduler did not wait". True since P7-T2
+   and invisible because the graphs built before now ran delegations (3600 s) and verifications
+   (900 s). `Task.timeout_s` (migration `0004`) is the `task` level ORCHESTRATION.md §3 already
+   specified. **It is a graph fix and should outlive pipelines.**
+2. **The spec contradicted itself twice.** `on_failure: ask` appears nine lines after "never a
+   prompt mid-run"; §2's example uses `retry: { on: [...] }` twenty lines before §3 says the tool
+   contract decides retryability, not the author. Both refused, by not existing in the enum.
+3. **Three things in the worked example do not exist**: a `project` tool argument (every tool takes
+   a `ScopedPath`), `oracle.report`, and `capture: junit`.
+4. **A policy entry that is a floor, not a price.** `pipe.run: T2` made PIPELINES.md's own
+   `tier = max(tier(step))` rule unimplementable, because `evaluate()` only ever *raises* a tier.
+   Found by a read-only pipeline hanging 180 s and returning `refused` — an approval nobody
+   answered. It is `T0` now, with the reasoning in `policy.yaml`.
+5. **Cancelling marks the rest `CANCELLED`, not `SKIPPED`.** My test asserted the spec and the
+   scheduler was right: `SKIPPED` means *an ancestor failed*, `CANCELLED` means *a person stopped
+   it*, and collapsing them loses the one distinction somebody reading a stopped run needs.
 
-That is the fourth instrument discrepancy in three days, after the chunker copy, the config
-denominator and the off-by-one summary header. They share a shape and it is worth naming: **the
-measurements were fine and the things around them were not.** The harness now calls the shipped
-chunker, prints both denominators, and has a header that lines up with its rows.
+### The dangerous part
 
-## The chunk budget
+One card authorising six actions and one card nobody reads are the same gesture. Six of the 21
+cases in `tests/security/test_pipeline_authority.py` constrain the grant-minting: bound to the
+digest the card displayed, single-use, per task, T3 refused at validation, revoked in a `finally`.
+A pipeline from `<project>/.oracle/pipelines/` is `local_foreign` — repository content, the same
+trust class as a checked-in `AGENTS.md` — so the gate escalates it and the card says so.
 
-Two defects, both real, neither about tokenizers on its own:
+---
 
-- **The cap was never enforced.** `MAX_CHARS` was documented as the ceiling on a chunk and applied
-  to the *body* — `_pack` counted block bodies while emitting `header + anchor + body`, `_window`
-  counted lines while emitting `prefix + lines`, and the overlap path dropped a newline per line.
-  The longest "1,800-character" chunk in the corpus was **4,055 characters**. The test that should
-  have caught it asserted `<= MAX_CHARS * 2`; a budget with a factor-of-two tolerance is not a
-  budget.
-- **It was calibrated against the wrong corpus.** "~500 tokens at 3.6 chars/token" — bge-m3
-  tokenizes this corpus at 3.05 (code) / 3.33 (markdown) median and 2.34 / 2.42 at the 1st
-  percentile. **27.1%** of embedded chunks overflowed the window.
+## P9-T3 — the translator is measured; the corpus run is not
 
-`MAX_CHARS` is 1200 now. Truncation is **0.7%** of embedded chunks and 0.10% of embedded tokens. It
-costs 43% more chunks and 20 MB of index — and made indexing *faster* in wall-clock (7,523 s
-against 8,032 s), because attention cost is superlinear in sequence length.
+**Done, and it changes the design:** `qwen3.5:0.8b` translates a fixture question in **1.6 s p50**,
+and **5 of the 25 came back still in Russian** — valid JSON, inside the length cap, and not a
+translation. Unguarded that is the worst failure shape available: the second probe embeds the same
+question twice, RRF fuses a ranking with itself, and every log line says it worked. The shipped
+translator rejects an output that still carries the source script. Raw output is kept in
+[`oq18-translations-unguarded.json`](../logs/measurements/oq18-translations-unguarded.json) so the
+guard can be argued from a number.
 
-**`CHUNKER_VERSION` is recorded in the index** and checked like the embedding model. Incremental
-indexing does not rebuild rows it already has, so a boundary change leaves an index half cut each
-way with nothing failing. **Your `knowledge.db` will now report "not stale, wrong" and ask for a
-reindex** — that is the guard working, not a break.
+A second measurement changed a constant: the same call took **19.7 s with the machine busy**
+against a 20 s budget. A budget that fits only an idle machine is a feature that switches itself
+off under load and says nothing. It is 45 s now — enough for warm-but-loaded, still refusing a cold
+model load.
 
-## The suite hang, fixed at the cause
+**Query translation ships on the Handoff Packet path only**, behind `Settings.translate_queries`.
+`tests/test_rag_degradation.py` asserts the property that let it ship at all: no translator, a
+refusal, a timeout, an empty string — every one thins retrieval to the native probe, so the worst
+case of the mechanism is that it improves nothing.
 
-`make check` hung on me three times. Eleven `async for event in eventlog.stream(0)` loops in tests
-had no deadline: when the awaited event never arrives they do not fail, they hang, and with no
-global pytest timeout they hang the whole run. P8-T1's report predicted the trigger — *"the helper
-should probably move into `helpers_delegation.py` when a fourth suite needs it"*. A fourth suite
-needed it. `wait_event(eventlog, match, timeout, what)` exists, `wait_for`/`wait_state` are
-one-liners over it, and all eleven are converted: a missing event now fails in 30 s with
-`waited 30s for the graph card and it never arrived (last_seq=…)`.
+### The finding that outlives the task
 
-## What is not done, and why
+**The answer key was in the corpus.** `tests/fixtures/retrieval/cases.yaml` holds all 38 fixture
+questions verbatim beside their expected paths, and `C:/Projects` contains ORACLE — so it is the
+strongest lexical match for **37 of the 38 queries that measure this system**.
 
-**Query translation is measured but not implemented.** Two things block it and neither is typing:
+It was found and fixed on 2026-08-22 (commit `b660172`) **in `scripts/index_knowledge.py`**, and
+`scripts/eval_embeddings.py` never got it — which is the script that produced **every number OQ-18
+records**. Two copies of one idea and a fix reaching one of them: the shape of four of the five
+instrument defects this project has found. There is one copy now, imported rather than restated.
 
-1. **The translator is unmeasured.** +12.0 RU is what a *human* translation buys — deliberately the
-   ceiling, so a negative result would have killed the idea outright. Whether the resident 0.8B
-   model's Russian reaches it is the next measurement. **Ollama was not running on this machine**,
-   so it could not be answered here.
-2. **The latency does not fit the interactive path.** A second dense probe costs one more query
-   embedding — 63 ms p50 / 97 ms p95, measured — against ~70 ms of headroom, before the generation
-   call. Where it fits is the Handoff Packet, where a delegation takes minutes.
+So `en-relay-dockerfile` is **not** structurally unreachable, as P9-T2 recorded. It is at
+unique-file rank 4, behind the fixture file and three ORACLE documents *about* the fixture file.
+What actually sinks it is RRF's arithmetic, now pinned by `TestRrfBuriesASingleListDocument`: a
+document one retriever cannot produce scores `1/61` and one both lists hold scores `1/61 + 1/62`,
+so a config file — indexed lexically, never embedded — cannot survive fusion. That is a property of
+the design, not a broken fixture, and weighting RRF to rescue one case would trade the property the
+algorithm was chosen for.
 
-Shipping the mechanism on a ceiling measurement is how a system acquires a feature that works in
-the log and not on the machine, so it waits for one cheap measurement.
+### What is scheduled, and why it moved
 
-**OQ-18 is therefore narrowed, not resolved.** The gate stays at 80% — 6.3 points on 38 fixtures is
-2.4 cases, and a gate re-argued to sit just below where the numbers landed measures nothing.
+The corpus run was killed at 2h45m and re-scheduled as a **Windows task, `ORACLE-OQ18-eval`, for
+2026-08-27 07:12** (`StartWhenAvailable`, so it runs at next boot if the machine is off). It takes
+~3 hours and writes `logs/measurements/oq18-translated.{txt,json}` and the reusable forward pass to
+`D:/ORACLE/scratch/`.
 
-One of the eight remaining misses is structural rather than ranking: `en-relay-dockerfile` expects a
-**config** file, which is indexed lexically and never embedded. No dense probe of any quality can
-retrieve it.
+Moving it was the better choice on the merits, not only for the CPU: the killed run loaded its
+corpus at 11:12, and **Phase 10 rewrote four ORACLE documents that are in that corpus**. Its numbers
+would have described a snapshot that no longer exists — and since OQ-18's live finding is precisely
+that ORACLE's own documents contaminate the measurement, measuring a stale snapshot is worse than
+measuring the committed state.
 
-## Also landed
+---
 
-The carried-over `verifier` + `verdict` inconsistency is cleared — the accurate spelling was
-rejected while the misleading one was accepted. The shipped template uses the honest spelling.
+## A test that fails under load, and what that is worth knowing
+
+`tests/security/test_terminal.py::…::test_a_long_burst_arrives_complete` lost 189 lines of a ConPTY
+burst — twice — while the corpus run had all 24 threads saturated. It also failed at `HEAD` with
+none of this work applied (verified in a clean `git worktree`), so it was never this branch's doing.
+**On an idle machine it passes in 6 s, and the full gate is green.**
+
+So: a flake, not a bug. But it is a flake in the *merge gate*, and it is the one test whose subject
+is data loss — so "it only fails when the machine is busy" is an uncomfortable thing for it to mean.
+Recorded in [current_task.md](current_task.md) rather than closed: if it reappears, the question is
+whether the ConPTY reader really does drop output under starvation or whether the test's own
+deadline is too tight, and those have different fixes.
+
+`make check` is **green**: **1,061 Python** + **171 TypeScript**, security suite included.
 
 ## Next
 
-**P9-T3** ([current_task.md](current_task.md)): measure the translator and close the last fixture.
-Both remaining steps are small and named; the expensive part of this question is done.
+**P11-T1** ([current_task.md](current_task.md)) — but read the two carried-over items there first;
+one of them is a scheduled job that will have produced numbers by the time anybody reads this.

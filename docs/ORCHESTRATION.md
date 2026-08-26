@@ -180,6 +180,16 @@ extends to graphs without new machinery:
 - **Cancel root** — cancels every non-terminal task in the graph.
 - **Timeouts** are layered per task kind: tool contract < step < task < graph. A `DELEGATION`
   timeout marks the task `TIMEOUT` and still runs collection over the worktree.
+
+  **The `task` level was specified here and not built until 2026-08-26.**  `AS BUILT, P10`
+  P7 shipped only the per-kind default, and `Limits.timeout_s[TaskKind.TOOL]` is **120 s** while
+  `dev.run_tests` declares 630 s in its own contract and `dev.build` declares 930 s — so any TOOL
+  task running either was killed at two minutes and recorded as `TIMEOUT`, which reads as "the
+  tests hung" rather than "the scheduler did not wait". Nothing failed loudly enough to find it,
+  because the graphs built before Phase 10 ran delegations (3600 s) and verifications (900 s), and
+  the one kind with a short default is the one a pipeline is made almost entirely of.
+  `Task.timeout_s` (migration `0004`, `NULL` = use the kind default) is that level. It is a graph
+  fix rather than a pipeline feature and stands on its own merits.
 - **HALT** is unchanged and above all of this: every loop cancelled, every job object terminated,
   policy to deny-all, manual resume. A task graph adds zero new HALT paths because tasks execute
   through the same executor and adapters HALT already reaches.

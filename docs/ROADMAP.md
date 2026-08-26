@@ -62,7 +62,7 @@ The supervisor-arc equivalent is the long-term goal, stated once:
   P8     Planner integration & multi-worker
   P9     Memory & context engine
  CAPABILITY ARC
-  P10    Pipelines (on the task graph)
+  P10    Pipelines (on the task graph)          ← DONE 2026-08-26
   P11    Execution visualisation & advanced UI
   P12    Mobile
  EXPERIMENTAL
@@ -257,7 +257,36 @@ restrictive even if recall feels low at first.
 
 ---
 
-## Phase 10 — Pipelines  **[Capability arc]**
+## Phase 10 — **done, 2026-08-26**: Pipelines  **[Capability arc]**
+
+**Outcome.** A YAML file becomes a validated `Pipeline`, renders against its parameters, compiles
+to a task graph and runs on P7's scheduler. **No pipeline executor, no `pipeline_runs` table, no
+new `TaskKind`, no new runner, and exactly two new event types — neither of them a `task.*`.** The
+roadmap's own extra criterion is a passing test: a compiled pipeline and a hand-written graph of
+the same steps emit identical event sequences, element for element, with no type unique to either.
+
+Two shipped pipelines ([`config/pipelines/`](../config/pipelines/)), both priced against the real
+policy and the real tool registry by a test — `oracle-selfcheck` runs ORACLE's own merge gate and
+is the live demonstration of "asks once, before starting", because four of its six steps are T2.
+
+**DSL creep was the risk and the answer was seven refusals**, each a model field or a missing enum
+member rather than a review note: no `{{ steps.*.* }}`, no `when` over a step result, no
+`on_failure: ask`, no `retry: { on: [...] }`, no `capture: junit`, no `report` step, no T3. Four of
+those were things PIPELINES.md itself specified; §2's worked example named three tools and
+arguments that do not exist. The document is corrected in place with the reason for each.
+
+**And it found a P7 defect.** `Limits.timeout_s[TaskKind.TOOL]` is 120 s while `dev.run_tests`
+declares 630 s and `dev.build` 930 s — so **any TOOL task running either was killed at two minutes
+and recorded as `TIMEOUT`**, which reads as "the tests hung" rather than "the scheduler did not
+wait". `Task.timeout_s` (migration `0004`) adds the `task` level ORCHESTRATION.md §3 already
+specified. It is the only change P10 made below the pipeline layer, and it stands on its own merits.
+
+**The one deliberate v1 acceptance:** a `continue` step and its successor may run concurrently,
+because "nothing depends on it" is how `continue` is expressed. The alternative touches
+`graph.ready()`'s fail-closed rule, which is a P7-core change and not one to make on speculation.
+
+As-built detail in [PIPELINES.md](PIPELINES.md).
+
 
 **Goal.** [PIPELINES.md](PIPELINES.md) as specified — with one architectural change from the
 replan: **a pipeline compiles to a task graph.** The YAML front-end, validation, up-front

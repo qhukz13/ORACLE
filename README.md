@@ -23,22 +23,28 @@ your code. Heavy reasoning is delegated to agents that are good at it; ORACLE's 
 
 ## Status
 
-★ **The MVP is complete.** Phases 0–4 done. Next: [Phase 5 — Project knowledge](docs/ROADMAP.md#phase-5--project-knowledge-rag--post-mvp).
+★ **Phases 0–10 are built.** Next: [Phase 11 — Execution visualisation & the knowledge graph](docs/ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc).
 
-ORACLE runs, routes, acts, and has an interface. Ask it to check a repository and it runs `git.status`
-and shows you the card. Ask it to push and it stops and shows you the commits that would leave the
-machine. Type in the terminal dock and your keystrokes reach a real ConPTY inside a Job Object that
-the HALT key can kill.
+ORACLE runs, routes, acts, retrieves, delegates, plans and remembers. Ask it to check a repository
+and it runs `git.status` and shows you the card. Ask it to push and it stops and shows you the
+commits that would leave the machine. Give it an objective and it produces a plan, turns the plan
+into a task graph, and runs the graph across local tools and Claude — asking before every side
+effect and before anything leaves the machine. Type in the terminal dock and your keystrokes reach
+a real ConPTY inside a Job Object that the HALT key can kill.
 
 | | |
 |---|---|
-| Tools | **29** behind the policy gate (26 offerable, 11 reachable from a routed turn) |
-| Tests | **370 Python** + **77 TypeScript**; the security suite is a merge gate |
+| Tools | **33** contracts behind the policy gate |
+| Pipelines | declarative YAML workflows that **compile to task graphs** — one approval up front, no second executor |
+| Tests | **1,061 Python** + **171 TypeScript**; the security suite is a merge gate |
 | Router | `qwen3.5:0.8b`, 93.3% intent accuracy, 100% tool selection on the eval set |
+| Knowledge | hybrid retrieval over the real corpus, `bge-m3`; the recall gate is **unmet and stated** ([OQ-18](docs/OPEN_QUESTIONS.md#oq-18)) |
+| Supervision | task graphs, a planner tier with a fallback ladder, bounded replanning, crash recovery |
 | Isolation | every tool runs in a separate low-privilege process inside a Job Object |
 
-What is not there yet: knowledge retrieval, delegation to Claude/Antigravity, pipelines, mobile, and
-the orbital view.
+What is not there yet: the execution tree and knowledge-graph views, the orbital view, mobile,
+and voice. One item is deliberately reserved for a person rather than an agent: a supervised
+live run of the Phase 8 scenario on a real project with every preview human-approved.
 
 Read `docs/` first — this repository is design-first and the documents lead the code.
 
