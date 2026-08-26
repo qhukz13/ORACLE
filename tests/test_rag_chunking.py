@@ -146,10 +146,35 @@ class TestCode:
 
 
 class TestBounds:
-    def test_no_chunk_wildly_exceeds_the_budget(self) -> None:
+    """`MAX_CHARS` is a bound on the **rendered** chunk, not on the body inside it.
+
+    These assertions were `<= MAX_CHARS * 2` until 2026-08-26, and the slack was hiding a
+    real bug: `_pack` counted block bodies while emitting `header + anchor + body` per
+    block, and `_window` counted lines while emitting `prefix + lines`. On the real corpus
+    that produced 4,055-character chunks from an 1,800-character cap, and 27% of embedded
+    chunks past the model's token window. A budget with a factor-of-two tolerance is not a
+    budget."""
+
+    def test_no_chunk_exceeds_the_budget(self) -> None:
         text = "# T\n\n" + ("a paragraph of prose that goes on and on. " * 400)
         for chunk in chunk_markdown(doc("T.md"), text):
-            assert len(chunk.text) <= MAX_CHARS * 2
+            assert len(chunk.text) <= MAX_CHARS
+
+    def test_the_header_and_the_anchors_are_inside_the_budget_not_beside_it(self) -> None:
+        """The regression test for the bug above. A deep path and long headings make the
+        non-body part of a chunk large; if the cap is applied to the body alone, this is
+        where it shows."""
+        deep = doc(
+            "a-very-long-vault-directory-name/another-nested-section-directory/"
+            "and-one-more-level-for-good-measure/A Note With A Long Title.md"
+        )
+        heading = "## " + ("A Heading With Quite A Lot Of Words In It " * 3) + "\n\n"
+        body = "sentences that carry the section. " * 30 + "\n\n"
+        chunks = chunk_markdown(deep, "# Top\n\n" + (heading + body) * 12)
+        assert chunks
+        assert max(len(c.text) for c in chunks) <= MAX_CHARS
+        # And the prefix really is in there — otherwise this measures nothing.
+        assert any("A Note With A Long Title.md" in c.text for c in chunks)
 
     def test_a_single_enormous_line_is_still_split(self) -> None:
         """A 176 KB single-line JSON blob got through the first benchmark run and became
@@ -157,7 +182,23 @@ class TestBounds:
         blob = doc("data.json", ContentKind.CONFIG)
         chunks = chunk_document(blob, '{"k":"' + "x" * 200_000 + '"}')
         assert chunks
-        assert max(len(c.text) for c in chunks) <= MAX_CHARS * 2
+        assert max(len(c.text) for c in chunks) <= MAX_CHARS
+
+    def test_every_kind_of_document_respects_the_budget(self) -> None:
+        """One assertion over the dispatch, so a new `ContentKind` cannot arrive with its
+        own idea of how big a chunk may be."""
+        code = "\n".join(f"export function fn{i}() {{\n  return {i};\n}}" for i in range(120))
+        config = "{\n" + "\n".join(f'  "k{i}": {i},' for i in range(600)) + "\n}"
+        cases = [
+            (doc("n.md"), "# H\n\n" + "prose. " * 900),
+            (doc("c.ts", ContentKind.CODE), code),
+            (doc("t.txt", ContentKind.TEXT), "a line of running text. " * 600),
+            (doc("c.json", ContentKind.CONFIG), config),
+        ]
+        for document, text in cases:
+            chunks = chunk_document(document, text)
+            assert chunks, document.path
+            assert max(len(c.text) for c in chunks) <= MAX_CHARS, document.path
 
     def test_tiny_blocks_are_packed_not_emitted_individually(self) -> None:
         """Thirty chunks of forty tokens each is thirty rows that match nothing."""

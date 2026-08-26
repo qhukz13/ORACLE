@@ -458,6 +458,41 @@ def chunk_code(doc: Doc) -> list[Chunk]:
 
 
 def chunk_doc(doc: Doc) -> list[Chunk]:
+    """Chunk with **the shipped chunker** (`oracle.rag.chunking`).
+
+    This used to call the local copy above, and that was right for OQ-02: every embedding
+    candidate had to see byte-identical chunks, and depending on `src/` would have made
+    the comparison depend on whatever the index happened to be doing that week.
+
+    It is wrong now, and measurably so. The model is fixed (OQ-02) and the two chunkers
+    have **drifted**: on the same corpus the copy produced 12,770 chunks and the shipped
+    one 11,727 (measured 2026-08-25, `scripts/measure_truncation.py`). A recall number
+    computed over chunks the index does not produce describes this script, not ORACLE —
+    and OQ-18's 61%/44% baseline was computed that way.
+
+    The local `chunk_markdown` / `chunk_code` / `_pack` / `_window` below are kept, unused
+    by this path, because `--models` comparisons recorded before this change were measured
+    with them and deleting them would make those runs unreproducible.
+    """
+    from oracle.rag.chunking import chunk_document
+    from oracle.rag.collections import ContentKind, Document
+
+    shipped = Document(
+        collection=doc.collection,
+        project=doc.project,
+        path=doc.path,
+        abs_path=doc.abs_path,
+        kind=ContentKind(doc.kind),
+        size=len(doc.text),
+        mtime_ns=0,
+    )
+    return chunk_document(  # type: ignore[return-value]
+        shipped, doc.text, obsidian=doc.collection == "notes"
+    )
+
+
+def chunk_doc_legacy(doc: Doc) -> list[Chunk]:
+    """The pre-2026-08-25 chunker, kept so older `--models` runs stay reproducible."""
     if doc.kind == "markdown":
         return chunk_markdown(doc)
     if doc.kind == "code":
@@ -868,12 +903,30 @@ def main() -> int:
             qraw = np.vstack(qvs)
             query_pool[key] = (qraw, qtimes)
 
+        def rank_of(qv: np.ndarray, v: np.ndarray = vecs, si: list[int] = sem_idx) -> list[int]:
+            sims = v @ qv
+            top = np.argpartition(-sims, 50)[:50]
+            return [si[i] for i in top[np.argsort(-sims[top])]]
+
         dense_rank: dict[str, list[int]] = {}
         for c, qv in zip(cases, Embedder.finish(qraw, cand.truncate_to), strict=True):
-            sims = vecs @ qv
-            top = np.argpartition(-sims, 50)[:50]
-            top = top[np.argsort(-sims[top])]
-            dense_rank[c["id"]] = [sem_idx[i] for i in top]
+            dense_rank[c["id"]] = rank_of(qv)
+
+        # OQ-18 lever 1: a second dense probe from an English translation of the query,
+        # fused with the native one. Only the *query* is re-embedded — 25 short strings
+        # against a corpus forward pass that is already paid for — so this arm is nearly
+        # free to measure and would not be free to run.
+        #
+        # `q_en` is a human translation (see the fixture header): this measures the
+        # ceiling of the idea, not the router model's Russian. A case with no `q_en`
+        # keeps its native ranking, so the English-only fixtures are unaffected and the
+        # comparison is like-for-like everywhere.
+        translated = [c for c in cases if c.get("q_en")]
+        xl_rank: dict[str, list[int]] = dict(dense_rank)
+        if translated:
+            en_raw = np.vstack([emb.encode([qp + c["q_en"]], batch=1)[0] for c in translated])
+            for c, qv in zip(translated, Embedder.finish(en_raw, cand.truncate_to), strict=True):
+                xl_rank[c["id"]] = rrf(dense_rank[c["id"]], rank_of(qv))
 
         # Every fusion strategy, scored against the same rankings. Free — the embedding
         # is already paid for, and it is the only way to see whether RRF's "no tuned
@@ -881,9 +934,14 @@ def main() -> int:
         ranked = {
             c["id"]: fusions(dense_rank[c["id"]], lex_rank[c["id"]], bm25, c["q"]) for c in cases
         }
+        # The translated arm scored through the *same* fusion, so the only difference
+        # between `rrf` and `rrf_xl` is the second probe.
+        for c in cases:
+            ranked[c["id"]]["dense_xl"] = xl_rank[c["id"]]
+            ranked[c["id"]]["rrf_xl"] = rrf(xl_rank[c["id"]], lex_rank[c["id"]])
         fused: dict[str, dict[str, float]] = {}
         fused_misses: dict[str, list[str]] = {}
-        for strategy in ("dense", "rrf", "rrf_w2", "gated"):
+        for strategy in ("dense", "rrf", "rrf_w2", "gated", "dense_xl", "rrf_xl"):
             scores, missed = score_set(cases, chunks, lambda c, r=ranked, s=strategy: r[c["id"]][s])
             fused[strategy] = scores
             fused_misses[strategy] = missed
@@ -907,14 +965,26 @@ def main() -> int:
             fusion={k: v["recall@5"] for k, v in fused.items()},
         )
         results.append(res)
-        for strategy in ("dense", "rrf", "rrf_w2", "gated"):
+        for strategy in ("dense", "rrf", "rrf_w2", "gated", "dense_xl", "rrf_xl"):
             scores = fused[strategy]
             best = max(fused[s]["recall@5"] for s in fused)
             colour = G if scores["recall@5"] >= best else ""
             print(
-                f"  {strategy:<7}r@1 {scores['recall@1']:.0%}  {colour}r@5 "
+                f"  {strategy:<8}r@1 {scores['recall@1']:.0%}  {colour}r@5 "
                 f"{scores['recall@5']:.0%}{X if colour else ''}  r@10 {scores['recall@10']:.0%}"
                 f"   misses: {fused_misses[strategy]}"
+            )
+        # OQ-18 is a question about the Russian subset specifically, so it gets its own
+        # line: an overall number that moved because the English cases improved would be
+        # the wrong evidence entirely.
+        ru_cases = [c for c in cases if c.get("lang") == "ru"]
+        for strategy in ("rrf", "rrf_xl"):
+            ru_scores, ru_missed = score_set(
+                ru_cases, chunks, lambda c, r=ranked, st=strategy: r[c["id"]][st]
+            )
+            print(
+                f"  RU-only {strategy:<7}r@5 {ru_scores['recall@5']:.0%}  "
+                f"r@10 {ru_scores['recall@10']:.0%}   misses: {ru_missed}"
             )
         print(
             f"  query {res.query_ms_p50:.0f} ms p50 / {res.query_ms_p95:.0f} ms p95, "
@@ -922,7 +992,13 @@ def main() -> int:
         )
 
     print(f"\n{B}summary{X}  (dense-only → hybrid with BM25+RRF; gate is recall@5 ≥ 80%)")
-    hdr = f"  {'model':<14}{'dim':>5}{'dense@5':>9}{'hyb@5':>8}{'RU@5':>7}{'lex@5':>7}{'chunks/s':>10}{'idx MB':>8}"
+    # The header named four columns while the row below printed five numbers, so `RU@5`
+    # sat under `rrf_w2` and every reader of this table was off by one. Fixed 2026-08-26;
+    # the widths here are the row's, field for field.
+    hdr = (
+        f"  {'model':<14}{'dim':>5}{'dense@5':>7}{'rrf@5':>7}{'rrf_w2':>8}"
+        f"{'gated':>7}{'RU@5':>7}{'chunks/s':>10}{'idx MB':>8}"
+    )
     print(hdr)
     print("  " + "-" * (len(hdr) - 2))
     for r in results:

@@ -32,8 +32,16 @@ Three numbers come out, and they answer different questions:
    never enter the candidate list at all. If their source files are the ones truncating,
    this is a chunking bug being read as a retrieval one — which is much cheaper to fix.
 
-Reuses `eval_embeddings.py`'s corpus walk and chunker rather than re-implementing them: a
-second copy of the chunker would make this measure something the shipped index does not do.
+**The denominator that matters is the *embedded* chunk.** `ContentKind.CONFIG` is indexed
+lexically and never embedded (`indexer.py`: `if embedder is not None and doc.semantic`), so
+a truncated `tsconfig.json` chunk costs BM25 nothing and the embedder nothing — it was
+never going to be a vector. The first version of this script reported one rate over all
+chunks, which made config's 88% overflow look like a retrieval problem. Both rates are
+printed now, and the semantic one is the headline.
+
+It uses the **shipped** chunker (`oracle.rag.chunking`) and cross-checks it against
+`eval_embeddings.py`'s copy, because a measurement of a second chunker measures the second
+chunker. The corpus walk is still the harness's — there is only one of those.
 """
 
 from __future__ import annotations
@@ -88,6 +96,32 @@ def _load_eval() -> Any:
     return module
 
 
+def shipped_chunks(docs: list[Any]) -> list[Any]:
+    """Chunk the corpus with `oracle.rag.chunking` — the code the index actually runs.
+
+    The harness carries its own copy of the chunker so that every embedding candidate
+    saw byte-identical chunks while the model was being chosen (OQ-02). That was right
+    then and it is a drift hazard now: two chunkers means a truncation number that
+    describes whichever one you happened to call. This calls the shipped one and the
+    caller warns if the counts disagree."""
+    from oracle.rag.chunking import chunk_document
+    from oracle.rag.collections import ContentKind, Document
+
+    out: list[Any] = []
+    for doc in docs:
+        shipped = Document(
+            collection=doc.collection,
+            project=doc.project,
+            path=doc.path,
+            abs_path=doc.abs_path,
+            kind=ContentKind(doc.kind),
+            size=len(doc.text),
+            mtime_ns=0,
+        )
+        out.extend(chunk_document(shipped, doc.text, obsidian=doc.collection == "notes"))
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="bge-m3", help="tokenizer to measure against")
@@ -119,8 +153,18 @@ def main() -> int:
     ev = _load_eval()
     print(f"{DIM}walking the corpus…{RESET}")
     docs = ev.load_corpus(verbose=True)
-    chunks = [c for d in docs for c in ev.chunk_doc(d)]
+    chunks = shipped_chunks(docs)
+    harness = sum(len(ev.chunk_doc_legacy(d)) for d in docs)
     print(f"  {len(docs)} documents, {len(chunks)} chunks")
+    if harness != len(chunks):
+        # The harness now calls the shipped chunker (`chunk_doc`); `chunk_doc_legacy` is
+        # the pre-2026-08-25 copy, kept so older `--models` runs stay reproducible. A
+        # difference here is expected and is only worth printing as the size of the
+        # change the repair made.
+        print(
+            f"{DIM}  (the pre-2026-08-25 chunker produced {harness} chunks on this "
+            f"corpus; the shipped one now produces {len(chunks)}){RESET}"
+        )
 
     print(f"{DIM}tokenizing with {args.model}…{RESET}")
     lengths = [len(tok.encode(c.text).ids) for c in chunks]
@@ -128,16 +172,23 @@ def main() -> int:
     over = [n for n in lengths if n > args.limit]
     total_tokens = sum(lengths)
     lost_tokens = sum(n - args.limit for n in over)
+    # The honest denominator: config is indexed lexically and never embedded, so a
+    # truncated config chunk costs retrieval nothing.
+    embedded = [(c, n) for c, n in zip(chunks, lengths, strict=True) if c.semantic]
+    emb_over = [n for _c, n in embedded if n > args.limit]
+    emb_tokens = sum(n for _c, n in embedded)
+    emb_lost = sum(n - args.limit for n in emb_over)
     by_kind: Counter[str] = Counter()
     over_by_kind: Counter[str] = Counter()
     for chunk, n in zip(chunks, lengths, strict=True):
-        by_kind[chunk.doc.kind] += 1
+        by_kind[str(chunk.doc.kind)] += 1
         if n > args.limit:
-            over_by_kind[chunk.doc.kind] += 1
+            over_by_kind[str(chunk.doc.kind)] += 1
 
-    # Per-file truncation, so the fixture question can be answered.
+    # Per-file truncation, so the fixture question can be answered. Embedded chunks
+    # only: a fixture is a question about what dense retrieval can reach.
     worst: dict[str, dict[str, Any]] = {}
-    for chunk, n in zip(chunks, lengths, strict=True):
+    for chunk, n in embedded:
         row = worst.setdefault(
             chunk.doc.path, {"chunks": 0, "over": 0, "max": 0, "tokens": 0, "lost": 0}
         )
@@ -148,22 +199,32 @@ def main() -> int:
             row["over"] += 1
             row["lost"] += n - args.limit
 
-    rate = len(over) / len(chunks) if chunks else 0.0
+    from oracle.rag.chunking import MAX_CHARS
+
+    rate = len(emb_over) / len(embedded) if embedded else 0.0
+    all_rate = len(over) / len(chunks) if chunks else 0.0
     chars = [len(c.text) for c in chunks]
-    over_chars = [n for n in chars if n > ev.MAX_CHARS]
+    over_chars = [n for n in chars if n > MAX_CHARS]
     print()
     print(
-        f"  chunks over MAX_CHARS ({ev.MAX_CHARS}): {len(over_chars)}/{len(chunks)} "
+        f"  chunks over MAX_CHARS ({MAX_CHARS}): {len(over_chars)}/{len(chunks)} "
         f"({len(over_chars) / max(len(chunks), 1):.1%}), longest {max(chars, default=0)} chars"
     )
-    print(f"  chunks over {args.limit} tokens: {len(over)}/{len(chunks)} ({rate:.1%})")
-    if over:
+    print(
+        f"  EMBEDDED chunks over {args.limit} tokens: {len(emb_over)}/{len(embedded)} "
+        f"({rate:.1%})   <- the number that matters"
+    )
+    print(
+        f"  all chunks, including lexical-only config: {len(over)}/{len(chunks)} ({all_rate:.1%})"
+    )
+    if emb_over:
         print(
-            f"  of those: median {statistics.median(over):.0f} tokens, "
-            f"max {max(over)}, mean overshoot {statistics.mean(over) - args.limit:.0f}"
+            f"  of the embedded ones: median {statistics.median(emb_over):.0f} tokens, "
+            f"max {max(emb_over)}, mean overshoot {statistics.mean(emb_over) - args.limit:.0f}"
         )
     print(
-        f"  tokens never embedded: {lost_tokens}/{total_tokens} ({lost_tokens / max(total_tokens, 1):.2%})"
+        f"  embedded tokens never seen: {emb_lost}/{emb_tokens} "
+        f"({emb_lost / max(emb_tokens, 1):.2%})"
     )
     print("  by kind: " + ", ".join(f"{k} {over_by_kind[k]}/{by_kind[k]}" for k in sorted(by_kind)))
 
@@ -206,8 +267,14 @@ def main() -> int:
         for expected in case.get("expect_any", []):
             row = resolve(expected)
             if row is None:
-                print(f"    {YELLOW}{case['id']}: {expected} — NOT IN THE CORPUS{RESET}")
-                fixture_rows.append({"case": case["id"], "path": expected, "in_corpus": False})
+                # Either genuinely absent, or a config file: those are indexed lexically
+                # and never embedded, so they have no row in an embedded-chunk table.
+                # Saying "NOT IN THE CORPUS" for a Dockerfile would be a lie.
+                print(
+                    f"    {YELLOW}{case['id']}: {expected} — no embedded chunks "
+                    f"(lexical-only, or absent){RESET}"
+                )
+                fixture_rows.append({"case": case["id"], "path": expected, "embedded": False})
                 continue
             flag = RED if row["over"] else GREEN
             if row["over"]:
@@ -248,10 +315,16 @@ def main() -> int:
                     "limit": args.limit,
                     "documents": len(docs),
                     "chunks": len(chunks),
-                    "over_limit": len(over),
-                    "rate": rate,
+                    "chunks_embedded": len(embedded),
+                    "over_limit_all": len(over),
+                    "over_limit_embedded": len(emb_over),
+                    "rate_embedded": rate,
+                    "rate_all": all_rate,
                     "tokens_total": total_tokens,
                     "tokens_lost": lost_tokens,
+                    "tokens_embedded": emb_tokens,
+                    "tokens_embedded_lost": emb_lost,
+                    "harness_chunks": harness,
                     "by_kind": {
                         k: {"chunks": by_kind[k], "over": over_by_kind[k]} for k in by_kind
                     },

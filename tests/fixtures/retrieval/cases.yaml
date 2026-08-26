@@ -18,11 +18,25 @@
 #   crosslang  — Russian question, English source
 #
 # Used by: scripts/eval_embeddings.py (OQ-02) and the retrieval quality gate.
+#
+# `q_en` — the English probe for OQ-18's lever 1 (query translation), added 2026-08-26.
+#
+# These are **human translations**, and that is the point rather than a shortcut. The
+# experiment they serve is "can a second English probe reach the answer at all", and
+# answering it with a resident 0.8B model's output would measure two things at once: the
+# idea, and that model's Russian. A human translation is the CEILING. If recall does not
+# clear the gate with these, translation is dead whatever does the translating, and the
+# implementation is never worth writing. If it does clear it, the next and much cheaper
+# question is whether the router model translates well enough — measured separately.
+#
+# They are not used by retrieval and never reach the shipped system: `q` is what a person
+# actually types.
 
 cases:
   # ---- Russian question, English codebase: the hard case ------------------
   - id: ru-token-refresh
     q: "как работает refresh токена в Asterim"
+    q_en: "how does token refresh work in Asterim"
     lang: ru
     kind: crosslang
     collection: projects
@@ -30,6 +44,7 @@ cases:
 
   - id: ru-jwt-secret-storage
     q: "где хранится секрет для подписи jwt и почему не в обычной таблице настроек"
+    q_en: "where is the jwt signing secret stored and why not in the ordinary settings table"
     lang: ru
     kind: crosslang
     collection: projects
@@ -39,6 +54,7 @@ cases:
 
   - id: ru-own-yaml-parser
     q: "почему для пайплайнов написан свой парсер yaml вместо библиотеки"
+    q_en: "why was a custom yaml parser written for pipelines instead of using a library"
     lang: ru
     kind: crosslang
     collection: projects
@@ -46,6 +62,7 @@ cases:
 
   - id: ru-two-users-one-agent
     q: "что происходит если два человека пишут одному агенту одновременно"
+    q_en: "what happens if two people write to the same agent at the same time"
     lang: ru
     kind: crosslang
     collection: projects
@@ -53,6 +70,7 @@ cases:
 
   - id: ru-feature-entitlement
     q: "как проверяется что у аккаунта есть право на функцию"
+    q_en: "how is it checked that an account is entitled to a feature"
     lang: ru
     kind: crosslang
     collection: projects
@@ -62,6 +80,7 @@ cases:
 
   - id: ru-relay-encryption
     q: "шифрование трафика между рабочей станцией и телефоном через релей"
+    q_en: "encryption of traffic between the workstation and the phone through the relay"
     lang: ru
     kind: crosslang
     collection: projects
@@ -72,6 +91,7 @@ cases:
 
   - id: ru-vector-search
     q: "приближённый поиск ближайших соседей и векторный поиск"
+    q_en: "approximate nearest neighbour search and vector search"
     lang: ru
     kind: crosslang
     collection: notes
@@ -79,6 +99,7 @@ cases:
 
   - id: ru-finetuning
     q: "что такое дообучение предобученной модели на своих данных"
+    q_en: "what is fine-tuning a pretrained model on your own data"
     lang: ru
     kind: crosslang
     collection: notes
@@ -198,6 +219,7 @@ cases:
 
   - id: ru-pairing-bruteforce
     q: "что мешает подобрать код сопряжения устройства перебором"
+    q_en: "what prevents brute-forcing the device pairing code"
     lang: ru
     kind: crosslang
     collection: projects
@@ -205,6 +227,7 @@ cases:
 
   - id: ru-air-gap
     q: "как полностью запретить приложению самому ходить в интернет"
+    q_en: "how to completely prevent the application from reaching the internet on its own"
     lang: ru
     kind: crosslang
     collection: projects
@@ -212,6 +235,7 @@ cases:
 
   - id: ru-event-retention
     q: "сколько времени хранятся события и что происходит когда их слишком много"
+    q_en: "how long are events retained and what happens when there are too many of them"
     lang: ru
     kind: crosslang
     collection: projects
@@ -219,6 +243,7 @@ cases:
 
   - id: ru-shutdown-order
     q: "в каком порядке всё закрывается при остановке сервера"
+    q_en: "in what order is everything shut down when the server stops"
     lang: ru
     kind: crosslang
     collection: projects
@@ -226,6 +251,7 @@ cases:
 
   - id: ru-kill-process-tree
     q: "как убить не только сам процесс но и всех его потомков"
+    q_en: "how to kill not only the process itself but all of its descendants"
     lang: ru
     kind: crosslang
     collection: projects
@@ -233,6 +259,7 @@ cases:
 
   - id: ru-local-discovery
     q: "как другой процесс на этой же машине узнаёт адрес и токен сервера"
+    q_en: "how does another process on the same machine discover the server address and token"
     lang: ru
     kind: crosslang
     collection: projects
@@ -240,6 +267,7 @@ cases:
 
   - id: ru-migrations
     q: "как база понимает какую версию схемы она сейчас имеет"
+    q_en: "how does the database know which schema version it currently has"
     lang: ru
     kind: crosslang
     collection: projects
@@ -247,6 +275,7 @@ cases:
 
   - id: ru-command-approval
     q: "кто решает что опасную команду надо показать человеку перед запуском"
+    q_en: "who decides that a dangerous command must be shown to a human before it runs"
     lang: ru
     kind: crosslang
     collection: projects
@@ -254,6 +283,7 @@ cases:
 
   - id: ru-terminal-reattach
     q: "почему после переоткрытия терминала виден предыдущий вывод"
+    q_en: "why is previous output visible after reattaching to the terminal"
     lang: ru
     kind: crosslang
     collection: projects
@@ -261,6 +291,7 @@ cases:
 
   - id: ru-workspace-permissions
     q: "как проверяются права пользователя внутри рабочего пространства"
+    q_en: "how are user permissions checked inside a workspace"
     lang: ru
     kind: crosslang
     collection: projects
@@ -268,6 +299,7 @@ cases:
 
   - id: ru-audit-trail
     q: "где записывается кто и что сделал для последующего разбора"
+    q_en: "where is it recorded who did what, for later review"
     lang: ru
     kind: crosslang
     collection: projects
@@ -275,6 +307,7 @@ cases:
 
   - id: ru-symbol-extraction
     q: "как из исходников вытаскиваются имена классов и функций"
+    q_en: "how are class and function names extracted from source files"
     lang: ru
     kind: crosslang
     collection: projects
@@ -283,6 +316,7 @@ cases:
   # ---- Russian question, English notes vault ------------------------------
   - id: ru-bias-variance
     q: "почему слишком простая модель ошибается так же как слишком сложная"
+    q_en: "why does a model that is too simple err as much as one that is too complex"
     lang: ru
     kind: crosslang
     collection: notes
@@ -290,6 +324,7 @@ cases:
 
   - id: ru-cross-validation
     q: "как оценить качество модели когда данных совсем мало"
+    q_en: "how to evaluate model quality when there is very little data"
     lang: ru
     kind: crosslang
     collection: notes
@@ -297,6 +332,7 @@ cases:
 
   - id: ru-learning-rate
     q: "что будет если шаг обучения выбрать слишком большим"
+    q_en: "what happens if the learning rate is set too large"
     lang: ru
     kind: crosslang
     collection: notes
@@ -304,6 +340,7 @@ cases:
 
   - id: ru-nonlinearity
     q: "зачем между слоями сети нужна нелинейность"
+    q_en: "why is a nonlinearity needed between network layers"
     lang: ru
     kind: crosslang
     collection: notes
@@ -311,6 +348,7 @@ cases:
 
   - id: ru-model-degrades
     q: "модель работала хорошо а через полгода стала хуже, почему"
+    q_en: "the model worked well and six months later got worse, why"
     lang: ru
     kind: crosslang
     collection: notes

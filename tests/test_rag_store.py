@@ -83,6 +83,31 @@ class TestBinding:
         KnowledgeStore(path, DIM).bind("e5-base", DIM)
         KnowledgeStore(path, DIM).bind("e5-base", DIM)
 
+    def test_a_different_chunker_refuses_too(self, tmp_path: Path) -> None:
+        """A boundary change is the same class of problem as a model change: the vectors
+        mean something else now. Incremental indexing does not rebuild rows it already
+        has, so without this an index ends up half cut one way and half the other — and
+        nothing fails, retrieval just quietly gets worse (measured 2026-08-26)."""
+        path = tmp_path / "knowledge.db"
+        KnowledgeStore(path, DIM).bind("e5-base", DIM)
+        store = KnowledgeStore(path, DIM)
+        store.db.execute("UPDATE meta SET value = '1' WHERE key = 'chunker_version'")
+        store.db.commit()
+        store.close()
+        with pytest.raises(SchemaMismatch, match="delete it and reindex"):
+            KnowledgeStore(path, DIM).bind("e5-base", DIM)
+
+    def test_the_chunker_version_is_recorded(self, tmp_path: Path) -> None:
+        """A guard nobody writes is a guard nobody has: assert the row exists, so a
+        future `bind()` that stops writing it fails here rather than in six months."""
+        from oracle.rag.chunking import CHUNKER_VERSION
+
+        path = tmp_path / "knowledge.db"
+        store = KnowledgeStore(path, DIM)
+        store.bind("e5-base", DIM)
+        row = store.db.execute("SELECT value FROM meta WHERE key = 'chunker_version'").fetchone()
+        assert row is not None and row["value"] == str(CHUNKER_VERSION)
+
 
 class TestReplacement:
     def test_reindexing_a_shrunken_document_drops_the_old_chunks(
