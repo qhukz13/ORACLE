@@ -45,11 +45,12 @@ templates:
           - "the change is limited to the files the investigation named"
         depends_on: [A]
         expected_outcome: diff
-      # `verdict` is what makes this a VERIFY task - ORACLE's own baseline comparison,
-      # run by code. The role names who the plan would have asked; the judging is not
-      # delegated (docs/PLANNER.md §4: where code can judge, no model is asked).
+      # `verifier` is the role code holds: this compiles to a VERIFY task and ORACLE's
+      # own baseline comparison judges it, with no model involved (docs/PLANNER.md §4,
+      # "where code can judge, no model is asked"). It said `reviewer` until 2026-08-26,
+      # because the validator rejected the accurate spelling - see PLANNER.md §8.
       - id: C
-        role: reviewer
+        role: verifier
         objective: "Verify B against the baseline: no new test failures, nothing written outside its scope."
         depends_on: [B]
         expected_outcome: verdict

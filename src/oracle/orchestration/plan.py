@@ -122,11 +122,28 @@ def validate(plan: ExecutionPlan, registry: Registry, projects: set[str]) -> lis
                 problems.append(f"{task.id}.depends_on names unknown task {dep!r}")
             if dep == task.id:
                 problems.append(f"{task.id} depends on itself")
-        if task.role not in registry.roles:
+        role = registry.roles.get(task.role)
+        if role is None:
             problems.append(
                 f"{task.id}.role {task.role!r} is not a registered role "
                 f"(known: {', '.join(sorted(registry.roles))})"
             )
+        elif role.deterministic:
+            # `verifier` is held by code, not by a model, so "no agent can hold it" is
+            # true and is not the problem. It is schedulable as exactly the thing code
+            # does — a `verdict`, which compiles to a VERIFY task — and asking a *worker*
+            # for it is what has to be refused.
+            #
+            # Until 2026-08-26 this branch did not exist, so the honest spelling
+            # (`verifier` + `verdict`) was rejected while the misleading one (`reviewer` +
+            # `verdict`, which produces the identical deterministically-judged task) was
+            # accepted. A validator that rejects the accurate description and accepts the
+            # inaccurate one teaches planners to lie.
+            if task.expected_outcome != "verdict":
+                problems.append(
+                    f"{task.id}.role {task.role!r} is deterministic — code holds it, no "
+                    f"model does — so it can only produce a verdict, not {task.expected_outcome!r}"
+                )
         elif not registry.holders_of(task.role):
             problems.append(f"{task.id}.role {task.role!r} has no agent that can hold it")
         if task.project is not None and task.project not in projects:

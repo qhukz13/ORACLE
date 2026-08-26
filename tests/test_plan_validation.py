@@ -127,12 +127,48 @@ def test_an_unknown_role_is_an_error_not_a_lookup_that_missed(registry: Registry
     assert any("'wizard' is not a registered role" in p for p in problems)
 
 
-def test_a_role_no_agent_can_hold_is_rejected(registry: Registry) -> None:
-    """`verifier` is deterministic — no model holds it — so a plan that hands it to a
-    worker is asking for something that cannot be scheduled."""
+def test_a_deterministic_role_cannot_be_handed_to_a_worker(registry: Registry) -> None:
+    """`verifier` is held by code, not by a model. A plan asking a *worker* for it — task
+    A here wants a `diff` — is asking for something that cannot be scheduled."""
     body = raw_plan()
     body["tasks"][0]["role"] = "verifier"  # type: ignore[index]
     problems = validate(plan_of(tasks=body["tasks"]), registry, PROJECTS)
+    assert any("deterministic" in p and "verdict" in p for p in problems)
+
+
+def test_a_deterministic_role_asking_for_a_verdict_is_the_honest_spelling(
+    registry: Registry,
+) -> None:
+    """The inconsistency this fixes (2026-08-26). `reviewer` + `verdict` compiles to a
+    VERIFY task — judged by ORACLE's own baseline comparison, with no model involved — and
+    was accepted, while `verifier` + `verdict`, which describes that accurately, was
+    rejected for having no holder. A validator that refuses the accurate description and
+    accepts the misleading one teaches planners to lie."""
+    body = raw_plan()
+    body["tasks"][1]["role"] = "verifier"  # task B already expects a verdict
+    plan = plan_of(tasks=body["tasks"])
+    assert validate(plan, registry, PROJECTS) == []
+
+    graph = compile_plan(plan, registry, root_id="tk_v")
+    verify = next(t for t in graph.tasks if t.spec.role == "verifier")
+    assert verify.kind is TaskKind.VERIFY
+    # And nobody is nominated to run it, because nobody does.
+    assert verify.agent is None
+
+
+def test_a_role_no_agent_can_hold_is_still_rejected(registry: Registry) -> None:
+    """The non-deterministic case is unchanged: a role that exists but that no agent
+    holds is a plan asking for a worker that does not exist."""
+    thin = Registry(
+        roles=registry.roles,
+        agents={
+            agent_id: agent
+            for agent_id, agent in registry.agents.items()
+            if "coder" not in agent.roles
+        },
+        defaults=registry.defaults,
+    )
+    problems = validate(plan_of(), thin, PROJECTS)
     assert any("no agent that can hold it" in p for p in problems)
 
 
