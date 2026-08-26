@@ -628,6 +628,30 @@ Base surfaces: `--bg-0` (app) → `--bg-1` (panel) → `--bg-2` (raised) → `--
 the risky one and must be verified, not assumed. A light theme is Post-MVP but the token structure
 makes it a values change, not a refactor.
 
+### Verified  `2026-08-26`
+
+It had not been. `a11y.test.tsx` disables axe's `color-contrast` rule — correctly, because happy-dom
+lays nothing out — so the one rule this section singles out as risky was the one rule the audit
+could not check, and nothing else checked it. `contrast.test.ts` now does, as a pure function over
+the token values parsed **out of `styles.css` itself**, so it cannot drift from the stylesheet.
+
+**Amber was fine, and this section guessed wrong about which token was risky.** `--st-wait` measures
+7.22–8.99:1 — comfortably over both bars on every surface. Two others failed:
+
+| token | was | measured | now |
+|---|---|---|---|
+| `--st-halt` | `#b91c1c` | **2.99 / 2.82 / 2.63 / 2.40** — under 3:1 on *every* surface | `#dc2626`, 3.21 worst |
+| `--fg-2` | `#5c6779` | 3.38 / 3.19 / **2.98 / 2.71** — under 3:1 on the two raised surfaces | `#6b7688`, 3.38 worst |
+
+`--st-halt` is the serious one: **the least visible status in the application was the one that means
+everything has stopped.** Raising it narrows the luminance gap to `--st-err`, which is acceptable
+because the table above never asked hue to carry that distinction — halt is *"fully static,
+cross-hatched"* where error is not, and §17 gives the halted state a red-tinted border across the
+whole UI with every control disabled. Colour is the least of four signals.
+
+`--fg-2` is muted decoration rather than body text, so 3:1 is the bar that applies to it — but it was
+under even that on `--bg-2` and `--bg-3`, which are exactly the surfaces cards and inputs use.
+
 ---
 
 ## 15. Motion

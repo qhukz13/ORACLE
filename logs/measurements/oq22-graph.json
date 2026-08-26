@@ -1,0 +1,34 @@
+{
+  "db": "D:\\ORACLE\\data\\knowledge.db",
+  "census": {
+    "documents": 1417,
+    "links": 1179,
+    "by_kind": {
+      "text": 10,
+      "markdown": 519,
+      "pdf": 6,
+      "code": 788,
+      "config": 94
+    },
+    "by_collection": {
+      "notes": 166,
+      "projects": 1251
+    },
+    "unembeddable": 94,
+    "parse_error": 0
+  },
+  "fingerprint": "d1e7634ecc7dd3223ca3688d259d47386a1d71f22c99c0cbf9ee2694b954f079",
+  "explicit_links": {
+    "resolved": 1172,
+    "exact": 0,
+    "basename": 1172,
+    "ambiguous": 3,
+    "dangling": 4,
+    "self": 0,
+    "documents_touched": 157,
+    "by_collection": {
+      "notes": 156,
+      "projects": 1
+    }
+  }
+}

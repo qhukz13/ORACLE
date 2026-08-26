@@ -7,7 +7,11 @@
   --bg-3: #1e2432;
   --fg-0: #d8dee9;
   --fg-1: #9aa5b8;
-  --fg-2: #5c6779;
+  /* Raised from #5c6779 on 2026-08-26: it measured 2.98:1 on --bg-2 and 2.71:1 on --bg-3,
+     under UI.md §14's 3:1 floor for non-text. It is muted decoration, not body text, so 3:1
+     is the bar that applies — but it was under even that on the two raised surfaces, which
+     are exactly where cards and inputs put it. Now 3.38:1 at worst. */
+  --fg-2: #6b7688;
   --line: #232a38;
 
   --st-idle: #64748b;
@@ -16,7 +20,17 @@
   --st-wait: #f59e0b;
   --st-ok: #22c55e;
   --st-err: #ef4444;
-  --st-halt: #b91c1c;
+  /* Raised from #b91c1c (red 700) on 2026-08-26. It measured 2.99 / 2.82 / 2.63 / 2.40:1
+     across the four surfaces — under §14's 3:1 status floor on ALL of them, and it is the
+     token that means HALTED. The least visible status in the app was the one that says
+     everything has stopped.
+
+     Raising it narrows the luminance gap to --st-err, and that is acceptable because §14's
+     own table never asked hue to carry the distinction: halt is `fully static,
+     cross-hatched` where error is not, and §17 gives the halted state a red-tinted border
+     over the whole UI with every control disabled. Colour is the least of the four signals.
+     Now 3.21:1 at worst. */
+  --st-halt: #dc2626;
   --st-ext: #a78bfa;
 
   --m-instant: 80ms;
