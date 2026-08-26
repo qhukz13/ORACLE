@@ -195,6 +195,15 @@ class TurnPipeline:
         #: `None` means pipelines are discovered but not runnable, which is a legitimate
         #: configuration and not an error — the turn says so rather than pretending.
         self.run_pipeline: Callable[[str, str | None, str], None] | None = None
+        #: How `continue <project>` becomes work (PROJECT_STATE.md §5). Assigned after
+        #: the state exists, for the same reason as `run_pipeline` above.
+        #:
+        #: The derivation deliberately does NOT live here. Reading the task table,
+        #: reading the project's own task documents through the gate, and calling a
+        #: planner all belong to the one place allowed to see both the supervisor and
+        #: the things that spend money — which is the daemon, not the router. The router
+        #: decides only *that* the work is unknown and must be looked up.
+        self.continue_work: Callable[[str, str | None, str], None] | None = None
         self.stats = stats or StructuredStats()
         self._on_halt = on_halt
         #: Set when the provider is unreachable. Deterministic paths keep working
@@ -356,6 +365,8 @@ class TurnPipeline:
                     turn_id,
                     trace,
                 )
+            elif cls.intent.intent == "continue":
+                await self._continue_intent(text, cls.resolved_project, session_id, turn_id, trace)
             elif cls.intent.intent == "delegate" and self._delegations is not None:
                 delegated = await self._delegate_intent(
                     text, cls.resolved_project, session_id, turn_id, trace
@@ -610,6 +621,40 @@ class TurnPipeline:
             task=text, project=path, session_id=session_id, turn_id=turn_id, trace=trace
         )
         return True
+
+    async def _continue_intent(
+        self, text: str, project: str | None, session_id: str, turn_id: str, trace: str
+    ) -> None:
+        """ "Continue Asterim." — resolve the project, then hand off to the daemon.
+
+        An unresolvable project **asks**, for the same reason `delegate` does and more
+        so: "continue" carries no description of the work, so a wrong project would send
+        ORACLE to read another repository's task documents and plan against them. There
+        is nothing in the request to notice the mistake by.
+        """
+        name = project or _named_project(text, self._projects)
+        if name is None:
+            known = ", ".join(self._projects) or "none discovered"
+            await self._say(
+                'Continue which project? I won\'t guess — "continue" names no work, so '
+                "I would be reading some other repository's state to decide what to do. "
+                f"Known: {known}.",
+                session_id,
+                turn_id,
+                trace,
+            )
+            return
+        if self.continue_work is None:
+            await self._say(
+                f"I can see {name}, but resuming its unfinished work isn't wired into "
+                "this runtime yet.",
+                session_id,
+                turn_id,
+                trace,
+            )
+            return
+        await self._emit("agent.state", session_id, turn_id, trace, {"state": "planning"})
+        self.continue_work(name, session_id, trace)
 
     async def _escalate(
         self,

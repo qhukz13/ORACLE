@@ -200,6 +200,27 @@ is specifically confusion with `run` and `modify`.
 
 ---
 
+### As built  `P12-T2, 2026-08-26`
+
+`core/unfinished.py`, the `continue` label, and the daemon hook that joins them. Four things
+this section had left open:
+
+| Question | Answer, and why |
+|---|---|
+| What is the cap? | **8 open tasks.** A plan may hold at most `MAX_GRAPH_SIZE` (12) and still needs verify and report steps, so more than this asks for a plan that cannot validate. Asserted one-directionally (`MAX_OPEN_TASKS < MAX_GRAPH_SIZE`) rather than by importing the constant, which keeps `core` from depending upward on the supervisor. Anything dropped is **counted and stated in the objective** — silent truncation reads as "this is everything". |
+| Does taint escalate the tier? | **No, and claiming it did would be theatre.** The graph approval already evaluates as `Provenance.EXTERNAL` at T2, so there is no further escalation available. What the notes buy is **attribution**: `approve_graph` now takes `untrusted_sources`, and the card names the files whose text is inside the objective. That is the fact a person needs in order to read the plan sceptically. |
+| How are the notes read? | Through **`fs.read`**, not `Path.read_text()`. The contract resolves the path against the policy scope, so a project registered outside every scope cannot have its files read by asking ORACLE to continue it. `read_agent_docs` predates this and reads directly; new code does not. |
+| What stops a repaired failure reappearing? | Replanning is append-only ([ADR-0020](DECISIONS.md#adr-0020--the-task-graph-is-a-durable-dag-with-append-only-replanning)), so the query excludes a `FAILED` task that some other row `supersedes`. Without it, every failure ORACLE ever fixed would still be "unfinished" and `continue` would re-propose them forever. |
+
+**The eval was not re-run** — the owner deferred it deliberately. Recorded as
+[OQ-25](OPEN_QUESTIONS.md#oq-25) with the mitigations that were shipped instead, rather than
+left as an unstated gap.
+
+**Not built in T2:** the briefing (T3), the sidebar and inspector (T4), the first real
+end-to-end run (T5).
+
+---
+
 ## 6. The briefing — "what happened while I was away"
 
 `briefed_through_seq` is the whole mechanism. The event log's `seq` is global and gap-free, and
@@ -285,10 +306,11 @@ The subsystem is done when all of these hold:
       direct subprocess path.  `P12-T1`
 - [x] Counters are rebuildable from `tasks`, and a test proves recompute equals the stored value
       after a graph runs.  `P12-T1`
-- [ ] Unfinished work for a project is derived from the task graph, with repo task documents
-      included as tainted evidence and a security test proving they cannot become instructions.
-- [ ] `continue` resolves to a planning call against real project state, and the intent eval is
-      **re-run**, not assumed.
+- [x] Unfinished work for a project is derived from the task graph, with repo task documents
+      included as tainted evidence and a security test proving they cannot become instructions.  `P12-T2`
+- [~] `continue` resolves to a planning call against real project state.  `P12-T2` —
+      **the intent eval is NOT re-run**; deferred by the owner and carried as
+      [OQ-25](OPEN_QUESTIONS.md#oq-25) rather than silently dropped.
 - [ ] The briefing advances `briefed_through_seq` on acknowledgement only, and a test proves an
       unacknowledged briefing survives a restart.
 - [x] Registering a project widens no policy scope — asserted in `tests/security/`.  `P12-T1`

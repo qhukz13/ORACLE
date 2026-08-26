@@ -25,6 +25,7 @@ from oracle.core.project_state import ProjectStore, effective_status, observe
 from oracle.core.projects import discover_projects
 from oracle.core.sessions import SessionStore
 from oracle.core.terminal import TerminalBridge
+from oracle.core.unfinished import derive, objective_of, question_for
 from oracle.delegation.service import DelegationService, PacketInputs
 from oracle.handoff.gather import gather_git_state
 from oracle.integrations.claude import ClaudeCodeAdapter
@@ -389,8 +390,95 @@ async def _build_state(settings: Settings) -> AppState:
         if loaded is not None:
             state.spawn(_run_pipeline(state, loaded, {}, session_id, trace))
 
+    def _start_continue(project: str, session_id: str | None, trace: str) -> None:
+        """The router's `continue` hook, assigned here for the same reason as the
+        pipeline one: the derivation needs the task table, the gate and a planner, and
+        this is the one place allowed to see all three."""
+        state.spawn(_continue_project(state, project, session_id, trace))
+
     state.agent.run_pipeline = _start_pipeline
+    state.agent.continue_work = _start_continue
     return state
+
+
+async def _continue_project(st: AppState, project: str, session_id: str | None, trace: str) -> None:
+    """ "Continue Asterim." — read the state, or ask.
+
+    Three things happen here that cannot happen in the router
+    ([PROJECT_STATE.md §5](../../docs/PROJECT_STATE.md)):
+
+    1. **The project is registered on first use.** Naming a project in a `continue` is
+       the human act that registration requires — not auto-discovery, which is why
+       `discover_projects()` alone never creates a row. Registration happens *before* the
+       derivation, so it also happens when the answer turns out to be a question: the row
+       records that this is a project someone cares about, and `last_touched` stays null
+       because no work was done. Registration grants nothing (ADR-0024).
+    2. **An empty derivation asks.** No open tasks and no task document means the honest
+       answer is a question. Handing a planner a project name and nothing else produces
+       plausible work, and plausible work costs a worktree and a delegation to falsify.
+    3. **Repo task documents are named on the approval card.** They are `local_foreign`,
+       and the honest consequence is **attribution, not escalation**: the graph approval
+       already evaluates as `Provenance.EXTERNAL` at T2 (ADR-0021), so there is no
+       further tier to rise to and claiming one would be theatre. What the person gains
+       is knowing *which file* helped write the objective they are being asked to approve.
+    """
+    # The router only ever hands over a name from `st.projects`, but the invariant is
+    # worth holding locally: a name from anywhere else would become a filesystem path
+    # and then a registry row.
+    if project not in st.projects:
+        log.warning("continue.unknown_project", project=project)
+        return
+    root = (st.settings.projects_root / project).resolve()
+    if not root.is_relative_to(st.settings.projects_root.resolve()):
+        log.warning("continue.escapes_root", project=project)
+        return
+
+    tracked = await st.project_store.by_name(project) or await st.project_store.register(
+        project, root
+    )
+    unfinished = await derive(st.conn, st.executor, tracked.name, tracked.root)
+    objective = objective_of(unfinished)
+
+    if objective is None:
+        await st.eventlog.append(
+            Event(
+                type="message.completed",
+                session_id=session_id,
+                trace_id=trace,
+                actor="assistant",
+                payload={"text": question_for(tracked.name)},
+            )
+        )
+        log.info("continue.nothing_to_do", project=tracked.name)
+        return
+
+    await st.project_store.touch(tracked.id)
+    await st.eventlog.append(
+        Event(
+            type="continue.derived",
+            session_id=session_id,
+            trace_id=trace,
+            actor="system",
+            payload={
+                "project": tracked.name,
+                "open_tasks": len(unfinished.tasks),
+                "dropped": unfinished.dropped,
+                # Named, so the approval card can say WHERE the untrusted half came from
+                # rather than only that there was one.
+                "notes": [n.path for n in unfinished.notes],
+                "tainted": unfinished.tainted,
+            },
+        )
+    )
+    await _plan_and_run(
+        st,
+        objective,
+        session_id,
+        trace,
+        intent="continue",
+        project=tracked.name,
+        untrusted_sources=[n.path for n in unfinished.notes],
+    )
 
 
 async def _prewarm(st: AppState) -> None:
@@ -815,6 +903,7 @@ async def _plan_and_run(
     *,
     intent: str | None = None,
     project: str | None = None,
+    untrusted_sources: list[str] | None = None,
 ) -> None:
     """Plan, ask, compile, ask again, run — and, if something fails, ask once more.
 
@@ -859,6 +948,7 @@ async def _plan_and_run(
         source=ladder.source or PlanSource.PLANNER,
         descents=ladder.descents,
         planner=planner,
+        untrusted_sources=untrusted_sources,
     )
 
 
@@ -872,6 +962,7 @@ async def _run_plan(
     source: PlanSource,
     descents: list[dict[str, Any]] | None = None,
     planner: Planner | None = None,
+    untrusted_sources: list[str] | None = None,
 ) -> None:
     """Compile, ask, run — identical for every rung of the ladder and for a plan a person
     wrote. That sameness is the point: a degraded mode with its own path is a degraded
@@ -902,6 +993,7 @@ async def _run_plan(
         session_id=session_id,
         source=source,
         descents=descents,
+        untrusted_sources=untrusted_sources,
     ):
         log.info("graph.not_approved", root_id=graph.root_id, plan_id=plan_id, source=str(source))
         return

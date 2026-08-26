@@ -373,8 +373,11 @@ index and could start earlier if the phase is split — it shares no code with t
 > [ADR-0024](DECISIONS.md#adr-0024--a-project-is-a-first-class-persistent-entity) ·
 > product rationale: [VISION.md §5](VISION.md#5-what-is-persistent).
 >
-> **T1 done 2026-08-26** — migration `0005`, the registry, `ProjectObservation`, counters and
-> three endpoints ([as built](PROJECT_STATE.md#as-built--p12-t1-2026-08-26)). T2–T5 below.
+> **T1 and T2 done 2026-08-26** — the entity
+> ([as built](PROJECT_STATE.md#as-built--p12-t1-2026-08-26)), then the `continue` intent and
+> unfinished-work derivation ([as built](PROJECT_STATE.md#as-built--p12-t2-2026-08-26)).
+> T3–T5 below. One acceptance item is **knowingly outstanding**: the intent eval was not
+> re-run after an eleventh label was added ([OQ-25](OPEN_QUESTIONS.md#oq-25)).
 
 **Objective.** Make *"continue Asterim"* answerable: ORACLE resolves the project, reads its real
 state, decides what remains, plans, dispatches one worker, verifies with evidence, reports, and
@@ -407,9 +410,9 @@ the tool layer for every observation · the event log's `seq` as the briefing po
 | Project counters | denormalised, rebuildable, never authoritative |
 | API | `GET /api/v1/projects`, `POST /api/v1/projects`, `GET /api/v1/projects/{id}`; the sidebar stops rendering a bare name list |
 
-**Tasks.** T1 the entity (**done**) · T2 the `continue` intent and unfinished-work derivation ·
-T3 the briefing · T4 the sidebar and inspector reading real project state · T5 the first real
-`continue` run, end to end, with a person watching every approval.
+**Tasks.** T1 the entity (**done**) · T2 the `continue` intent and unfinished-work derivation
+(**done**) · T3 the briefing · T4 the sidebar and inspector reading real project state · T5 the
+first real `continue` run, end to end, with a person watching every approval.
 
 **Migration work.** `discover_projects()` becomes a *candidate* source rather than the registry.
 Existing `memory_facts`/`memory_attempts` rows are keyed by project **name**; they are 0 rows today,

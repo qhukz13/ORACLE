@@ -10,13 +10,30 @@ Two properties get most of the attention here, because both are easy to lose lat
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import contextlib
+from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from oracle.api.app import create_app
+from oracle.api.app import AppState, _build_state, _continue_project, create_app
 from oracle.config import Settings
+
+#: A policy that actually covers the temporary projects tree. Written out rather than
+#: reusing `config/policy.yaml`, which names `C:/Projects` — a test that silently
+#: depended on the developer's own directories would pass here and nowhere else.
+POLICY = """
+version: 1
+scopes:
+  projects:
+    roots:
+      - {{ path: "{root}", mode: rw }}
+  deny_always:
+    - "**/*.env"
+tools:
+  fs.read: {{ tier: T0, scopes: [projects] }}
+"""
 
 
 @pytest.fixture
@@ -137,3 +154,158 @@ def test_status_still_reports_the_raw_candidate_list(client: TestClient) -> None
     *tracks*, not about what it is allowed to be asked about."""
     body = client.get("/api/v1/status").json()
     assert set(body["projects"]) == {"Asterim", "GameRecs", "New folder"}
+
+
+# -- the continue hook, over the real daemon state ------------------------------
+#
+# `_continue_project` is where the router, the task table, the gate and the planner meet,
+# and none of the unit suites reach it. These drive it against a real `AppState` — no
+# model involved, because every path that matters here happens before a planner is asked
+# anything, and `llm_enabled=False` keeps it that way.
+
+
+@contextlib.asynccontextmanager
+async def _daemon(settings: Settings) -> AsyncIterator[AppState]:
+    """A real `AppState`, built in **this** test's event loop.
+
+    `TestClient` runs the app's lifespan on its own portal, so a tool call made from a
+    pytest-asyncio test creates the toolhost subprocess on one loop and awaits it on
+    another — `got Future attached to a different loop`. These drive the daemon directly
+    instead, which is also closer to what they are about: the seam between the router's
+    hook and the supervisor, not HTTP.
+    """
+    st = await _build_state(settings)
+    try:
+        yield st
+    finally:
+        await st.host.stop()
+        await st.conn.close()
+
+
+async def _texts(st: AppState) -> str:
+    events = await st.eventlog.read_range(0, st.eventlog.last_seq, 500)
+    return " ".join(str(e.payload.get("text", "")) for e in events if e.type == "message.completed")
+
+
+async def _derived(st: AppState) -> list[dict]:
+    events = await st.eventlog.read_range(0, st.eventlog.last_seq, 500)
+    return [dict(e.payload) for e in events if e.type == "continue.derived"]
+
+
+async def test_continue_registers_a_project_on_first_use(populated: Settings) -> None:
+    """Naming a project in a `continue` is the human act registration requires. It is not
+    auto-discovery: `discover_projects()` alone still creates nothing."""
+    async with _daemon(populated) as st:
+        assert await st.project_store.by_name("Asterim") is None
+
+        await _continue_project(st, "Asterim", None, "trace-1")
+
+        tracked = await st.project_store.by_name("Asterim")
+        assert tracked is not None
+        assert tracked.name == "Asterim"
+
+
+async def test_continue_with_nothing_to_do_asks_and_plans_nothing(
+    populated: Settings,
+) -> None:
+    """The load-bearing refusal, end to end. An empty project produces a question and no
+    `continue.derived` — because nothing was derived."""
+    async with _daemon(populated) as st:
+        await _continue_project(st, "Asterim", None, "trace-2")
+
+        assert "won't invent work" in await _texts(st)
+        assert await _derived(st) == []
+
+
+async def test_a_project_that_asks_is_not_marked_touched(populated: Settings) -> None:
+    """`last_touched` means "ORACLE did something here". Asking a question is not that,
+    and the briefing would be wrong if it were."""
+    async with _daemon(populated) as st:
+        await _continue_project(st, "Asterim", None, "trace-3")
+
+        tracked = await st.project_store.by_name("Asterim")
+        assert tracked is not None and tracked.last_touched is None
+
+
+async def test_an_unknown_project_never_becomes_a_row(populated: Settings) -> None:
+    """The router only hands over names it resolved, but the invariant is held locally
+    too: a name from anywhere else would become a filesystem path and then a registry
+    row."""
+    async with _daemon(populated) as st:
+        await _continue_project(st, "../Secret", None, "trace-4")
+        await _continue_project(st, "NeverDiscovered", None, "trace-5")
+
+        assert await st.project_store.all(include_archived=True) == []
+
+
+async def test_a_project_outside_the_policy_scope_yields_no_notes(
+    populated: Settings,
+) -> None:
+    """**Registration grants nothing, proved end to end.**
+
+    This fixture's projects live under `tmp_path` while the loaded policy is the real
+    `config/policy.yaml`, whose scopes point elsewhere. So the `TODO.md` exists, ORACLE
+    knows the project, and `fs.read` is still denied — which is the whole security
+    property of ADR-0024 observed from outside rather than asserted in a unit test.
+
+    It also means the derivation is empty, so ORACLE asks. A denied read is not a reason
+    to invent work.
+    """
+    (populated.projects_root / "Asterim" / "TODO.md").write_text(
+        "- port the auth module", encoding="utf-8"
+    )
+    async with _daemon(populated) as st:
+        await _continue_project(st, "Asterim", None, "trace-6")
+
+        assert await _derived(st) == []
+        assert "won't invent work" in await _texts(st)
+
+
+@pytest.fixture
+def in_scope(populated: Settings, tmp_path: Path) -> Settings:
+    """The same tree, with a policy that actually covers it.
+
+    Written out rather than reusing `config/policy.yaml` because the real one names
+    `C:/Projects`, and a test that silently depended on the developer's own directories
+    would pass here and nowhere else.
+    """
+    policy = tmp_path / "policy.yaml"
+    policy.write_text(
+        POLICY.format(root=populated.projects_root.as_posix()),
+        encoding="utf-8",
+    )
+    return populated.model_copy(update={"policy_path": policy})
+
+
+async def test_a_repo_task_document_is_derived_and_named(in_scope: Settings) -> None:
+    """The secondary source, reaching the event that records provenance.
+
+    Stops before the planner — `llm_enabled=False` — which is exactly the seam worth
+    checking: what ORACLE knew, and where it came from, *before* anything was asked of a
+    model.
+    """
+    (in_scope.projects_root / "Asterim" / "TODO.md").write_text(
+        "- port the auth module", encoding="utf-8"
+    )
+    async with _daemon(in_scope) as st:
+        await _continue_project(st, "Asterim", None, "trace-7")
+
+        derived = await _derived(st)
+        assert len(derived) == 1
+        assert derived[0]["project"] == "Asterim"
+        assert derived[0]["notes"] == ["TODO.md"]
+        assert derived[0]["tainted"] is True
+        assert derived[0]["open_tasks"] == 0
+
+        tracked = await st.project_store.by_name("Asterim")
+        assert tracked is not None and tracked.last_touched is not None
+
+
+async def test_a_denied_env_file_is_never_a_note(in_scope: Settings) -> None:
+    """`deny_always` outranks the scope, and nothing about the continue path may soften
+    it. Belt and braces: `.env` is not in `TASK_DOC_NAMES` either."""
+    (in_scope.projects_root / "Asterim" / ".env").write_text("SECRET=1", encoding="utf-8")
+    async with _daemon(in_scope) as st:
+        await _continue_project(st, "Asterim", None, "trace-8")
+
+        assert await _derived(st) == []

@@ -36,6 +36,7 @@ doc, delete the marker.
 | [OQ-22](#oq-22) | Does the knowledge graph hold its budgets at corpus scale? | measured 2026-08-26 | Phase 11 (graph view only) | **3 of 4 answered — build it, narrower; canvas-vs-SVG still needs a real window** |
 | [OQ-23](#oq-23) | Does a failure-carrying prompt produce a *different* plan? | `EXPERIMENT NEEDED` | nothing — replanning ships bounded | opened 2026-08-25 |
 | [OQ-24](#oq-24) | Does observing every project fit the glance budget? | `EXPERIMENT NEEDED` | Phase 12 (the sidebar and the briefing) | opened 2026-08-26 |
+| [OQ-25](#oq-25) | Did adding the `continue` label move intent accuracy? | `TO VERIFY` | nothing — but it is a regression risk carried knowingly | opened 2026-08-26 |
 
 ---
 
@@ -859,3 +860,35 @@ count against a cold and a warm toolhost, on this machine, with a repository the
 **The answer is not a cache.** If the fan-out misses, observe **lazily per row** — the row that
 is on screen, when it is on screen. Caching would make the sidebar wrong the moment someone
 switches branches in their editor, which is the failure this whole design is shaped to avoid.
+
+---
+
+### OQ-25
+**Did adding the `continue` label move intent accuracy?** `TO VERIFY` · opened 2026-08-26 ·
+**deliberately deferred by the owner**, recorded rather than skipped.
+
+P12-T2 added an eleventh `IntentLabel`. Accuracy was measured at **93.3%** and single-tool
+selection at **100%** on a 30-case fixture set with ten labels
+([OQ-01](#oq-01)); neither number has been re-measured since.
+
+**The named risk is `continue` vs `run` and `modify`.** To a 0.8B classifier *"run the Asterim
+tests"* and *"continue Asterim"* differ by one word, and both name a project. `run` is the
+expensive confusion: it would send a `continue` to tool selection, which picks one existing
+command instead of reading the project's state.
+
+**What was done instead of measuring**, so the deferral is not a blank cheque:
+
+- the system prompt states the boundary explicitly rather than leaving it inferable —
+  *"continue: resume unfinished work on a project. No specific task is named"*, plus a paired
+  example contrasting it with `run`;
+- four few-shots, one of them Russian, matching what every other label carries;
+- a test asserts the prompt teaches the boundary and that the Russian example exists, so a
+  future edit cannot quietly delete the mitigation.
+
+None of that is a number. **A wrong route here is recoverable** — the user sees the intent on
+the turn and can rephrase — which is why this blocks nothing.
+
+**To resolve:** run `scripts/eval_intent.py` against the fixture set, add `continue` cases to it
+first, and record the result the way OQ-01 was recorded. Note that `make eval` is documented in
+[TESTING.md §8](TESTING.md) and **defined nowhere** — that has to be fixed or the doc corrected
+before this can be run the documented way.

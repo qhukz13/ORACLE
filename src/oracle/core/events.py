@@ -45,6 +45,13 @@ CRITICAL_TYPES: Final[frozenset[str]] = frozenset(
         # per-step event type and a consumer needs no new vocabulary to render one.
         "pipeline.started",
         "pipeline.finished",
+        # Where a `continue` objective came from: how many open tasks ORACLE found, and
+        # which of the project's own files were quoted into it (PROJECT_STATE.md §5).
+        # Critical rather than coalescable because it is the provenance record for a
+        # planning decision — the approval card that follows says the objective is
+        # partly untrusted, and this is the event that says how it got that way. One
+        # per `continue`, so it costs the queue nothing.
+        "continue.derived",
         "error",
         "system.degraded",
     }

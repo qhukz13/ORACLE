@@ -375,6 +375,7 @@ async def approve_graph(
     session_id: str | None = None,
     source: PlanSource = PlanSource.PLANNER,
     descents: list[dict[str, Any]] | None = None,
+    untrusted_sources: list[str] | None = None,
 ) -> bool:
     """The graph approval card: one decision over the whole shape (SECURITY.md §10).
 
@@ -390,7 +391,15 @@ async def approve_graph(
 
     The tier does *not* soften for a template. A plan ORACLE wrote is still a plan, and
     the tasks in it still egress; pricing it lower because we trust the author would make
-    the author the control, which is the thing the gate exists not to be."""
+    the author the control, which is the thing the gate exists not to be.
+
+    `untrusted_sources` names files whose contents went into the *objective* — a
+    project's own `TODO.md`, say, when the objective was derived by `continue`
+    (PROJECT_STATE.md §5). It changes **attribution, not tier**: the plan already arrives
+    as `EXTERNAL`, so there is no further escalation available and claiming one would be
+    theatre. What it buys is that the person deciding can see the objective was partly
+    written by a file rather than by them, and which file — which is the fact they need
+    in order to read the plan sceptically."""
     verdict = engine.evaluate(
         GRAPH_TOOL,
         capabilities=frozenset({Capability.AGENT_DELEGATE}),
@@ -419,6 +428,10 @@ async def approve_graph(
             "authored_by": str(source),
             "rung": RUNG[source],
             "descents": list(descents or []),
+            # Files whose text is inside the objective. Attribution, not a tier change:
+            # the plan is already EXTERNAL. Always a list, never absent, so a client
+            # cannot read "no key" as "trusted".
+            "untrusted_sources": list(untrusted_sources or []),
             "note": (
                 f"{PROVENANCE_NOTE[source]} approving runs the graph; each delegation "
                 "still asks separately before anything leaves this machine"

@@ -178,6 +178,24 @@ retry cannot launch a pipeline twice.
 
 ---
 
+### `continue.derived` — where a continue objective came from  `BUILT 2026-08-26`
+
+Emitted once per `continue`, before planning. **Critical**, not coalescable: it is the
+provenance record for a planning decision, and the approval card that follows says the
+objective is partly untrusted without saying how it got that way.
+
+```json
+{"project": "Asterim", "open_tasks": 3, "dropped": 0,
+ "notes": ["docs/current_task.md"], "tainted": true}
+```
+
+`notes` names the project's own files that were quoted into the objective
+([PROJECT_STATE.md §5](PROJECT_STATE.md#5-unfinished-work--where-continue-gets-its-list)).
+`dropped` is how many open tasks did not fit the cap — present so a client can say
+"3 of 40" rather than implying it saw everything.
+
+---
+
 ### `GET /api/v1/projects` — the registry  `BUILT 2026-08-26`
 
 Two lists, and the split is the point ([PROJECT_STATE.md §3](PROJECT_STATE.md#3-the-model)):
