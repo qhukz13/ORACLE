@@ -427,3 +427,63 @@ kbd {
 .pc-omitted-label { color: var(--fg-2); font-size: 10px; letter-spacing: .08em; }
 .pc-omitted ul { margin: 4px 0 0; padding-left: 18px; color: var(--fg-1); }
 .pc-note { margin: 8px 0 0; font-size: 11px; }
+
+/* ── Execution tree ────────────────────────────────────────────────────────
+   docs/UI.md#6b. Every `tt-*` class was unstyled until 2026-08-26 — the component
+   shipped at P7-T3 and the stylesheet never learned about it, so a running graph
+   rendered as an unformatted list. The styling carries three distinctions that are
+   part of the design rather than decoration:
+
+     · evidence and the worker's claim look different, because they ARE different;
+     · `skipped` does not read like `cancelled`, and `timeout` does not read like
+       `failed` — §14's status colours, not one grey for "not ok";
+     · a superseded attempt is visibly subordinate to its replacement, because the
+       lineage is the explanation of what the graph cost. */
+.task-trees { display: flex; flex-direction: column; gap: 10px; margin: 8px 0; }
+.tt { background: var(--bg-1); border: 1px solid var(--line); border-radius: 3px;
+  padding: 8px 12px; font-size: 12px; }
+.tt-graph-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.tt-root { color: var(--fg-0); font-weight: 700; font-family: ui-monospace, monospace; }
+.tt-count, .tt-elapsed { color: var(--fg-1); }
+.tt-cost { color: var(--st-ext); }
+
+.tt-tasks { margin: 6px 0 0; padding-left: 0; list-style: none;
+  display: flex; flex-direction: column; gap: 6px; }
+.tt-task { padding: 4px 0 4px 8px; border-left: 2px solid var(--line); }
+.tt-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+/* The longest-path column. A number, because "stage 3" is a fact about what must finish
+   first and a bar chart would imply a duration nobody measured. */
+.tt-stage { color: var(--fg-2); font-variant-numeric: tabular-nums;
+  min-width: 1.4em; text-align: right; }
+.tt-id { color: var(--fg-0); font-weight: 700; font-family: ui-monospace, monospace; }
+.tt-kind, .tt-role { color: var(--fg-1); font-size: 11px; letter-spacing: .06em; }
+.tt-agent { color: var(--st-ext); }
+.tt-status { color: var(--fg-1); }
+.tt-attempt { color: var(--st-wait); font-size: 11px; }
+
+/* §14's vocabulary, applied. A status that renders as "not ok" grey has thrown away the
+   distinction ORCHESTRATION §2 spent a whole enum on. */
+.tt-running { border-left-color: var(--st-run); }
+.tt-running .tt-status { color: var(--st-run); }
+.tt-succeeded { border-left-color: var(--st-ok); }
+.tt-succeeded .tt-status { color: var(--st-ok); }
+.tt-failed { border-left-color: var(--st-err); }
+.tt-failed .tt-status { color: var(--st-err); }
+.tt-timeout { border-left-color: var(--st-err); }
+.tt-timeout .tt-status { color: var(--st-err); }
+.tt-waiting { border-left-color: var(--st-wait); }
+.tt-waiting .tt-status { color: var(--st-wait); font-weight: 700; }
+.tt-cancelled .tt-status, .tt-skipped .tt-status { color: var(--fg-2); }
+
+.tt-objective { margin-top: 2px; color: var(--fg-0); }
+.tt-deps { margin-top: 2px; color: var(--fg-2); font-size: 11px; }
+.tt-summary { margin-top: 2px; color: var(--fg-1); }
+/* The two that must never look alike. Evidence is what ORACLE measured and is safe to act
+   on; the claim is what the worker said about its own work and gates nothing. */
+.tt-evidence { margin-top: 2px; color: var(--st-ok); font-family: ui-monospace, monospace; }
+.tt-claim { margin-top: 2px; color: var(--fg-2); font-style: italic; }
+
+.tt-superseded { margin-top: 4px; }
+.tt-superseded > summary { color: var(--st-wait); font-size: 11px; cursor: pointer; }
+.tt-superseded .tt-task { opacity: .7; }

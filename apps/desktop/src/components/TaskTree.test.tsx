@@ -51,7 +51,10 @@ describe("TaskTree", () => {
     renderTree();
     expect(screen.getByText("look")).toBeTruthy();
     expect(screen.getByText("after look")).toBeTruthy();
-    expect(screen.getByText("4 tasks")).toBeTruthy();
+    // The header now says how deep the graph is as well as how wide, because "4 tasks" does
+    // not distinguish four things running at once from four things in a queue.
+    expect(screen.getByText(/4 tasks/)).toBeTruthy();
+    expect(screen.getByText(/stages?/)).toBeTruthy();
   });
 
   it("explains a skipped task instead of just labelling it", () => {

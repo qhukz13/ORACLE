@@ -10,14 +10,26 @@
  *   surface needs a mouse is one where the safety surface gets clicked without reading.
  *
  * axe runs against the real rendered DOM. It cannot see contrast on elements it cannot
- * lay out (happy-dom has no layout engine), so colour-contrast is disabled here and the
- * palette is fixed in `styles.css` against the tokens in docs/UI.md#14 instead.
+ * lay out (happy-dom has no layout engine), so colour-contrast is disabled here — and
+ * because that left §14's one explicitly "risky" rule unchecked by anything, it is now
+ * checked as arithmetic instead: `contrast.test.ts` parses the tokens out of `styles.css`
+ * and does the WCAG sums, no DOM required. It found `--st-halt` under 3:1 on every surface.
+ *
+ * The list below covered 4 of 12 components until 2026-08-26. An audit that skips most of
+ * the interface is a statement about the auditor, so the rest are here now — added *before*
+ * Phase 11's new surfaces land, so the audit is a standing gate rather than a phase artifact.
  */
 
 import { render } from "@testing-library/react";
 import axe from "axe-core";
 import { describe, expect, it } from "vitest";
 import { CommandPalette } from "./components/CommandPalette";
+import { DelegationPanel } from "./components/DelegationPanel";
+import { GraphCard } from "./components/GraphCard";
+import { KnowledgeHealth } from "./components/KnowledgeHealth";
+import { MemoryView } from "./components/MemoryView";
+import { PipelineCard } from "./components/PipelineCard";
+import { TaskTree } from "./components/TaskTree";
 import { ConfirmationCenter } from "./components/ConfirmationCenter";
 import { TerminalDock } from "./components/TerminalDock";
 import { ToolCard } from "./components/ToolCard";
@@ -98,6 +110,177 @@ describe("no serious or critical accessibility violations", () => {
         onResize={() => {}}
         onOpen={() => {}}
         onClose={() => {}}
+      />,
+    );
+    expect(await violations(container)).toEqual([]);
+  });
+  // The seven that had no case until 2026-08-26. Each renders the shape the app actually
+  // produces, not an empty one — an axe pass over a component with nothing in it is a pass
+  // over an empty div.
+
+  it("task tree", async () => {
+    const { container } = render(
+      <TaskTree
+        graphs={[
+          {
+            rootId: "tk_root",
+            tasks: [
+              {
+                taskId: "tk_root-a",
+                kind: "tool",
+                status: "succeeded",
+                dependsOn: [],
+                objective: "dev.lint (oracle-selfcheck/lint)",
+                role: "operator",
+                summary: "dev.lint ok",
+                evidence: { observed: { passed: 41, failed: 0 } },
+              },
+              {
+                taskId: "tk_root-b",
+                kind: "delegation",
+                status: "failed",
+                dependsOn: ["tk_root-a"],
+                objective: "cover the 401 case",
+                role: "tester",
+                agent: "claude",
+                attempt: 2,
+                maxAttempts: 2,
+                summary: "tests 40/41",
+                claim: "everything passes",
+              },
+            ],
+          },
+        ]}
+        onCancelTask={() => {}}
+        onCancelGraph={() => {}}
+      />,
+    );
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it("graph approval card", async () => {
+    const { container } = render(
+      <GraphCard
+        preview={{
+          objective: "continue development on Asterim",
+          summary: "four tasks",
+          authored_by: "planner",
+          rung: 1,
+          risks: ["the retry policy is guessed"],
+          tasks: [
+            {
+              task_id: "A",
+              kind: "delegation",
+              role: "coder",
+              agent: "claude",
+              objective: "implement retry logic",
+              egresses: true,
+            },
+          ],
+          note: "approving runs the graph",
+        }}
+      />,
+    );
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it("pipeline approval card", async () => {
+    const { container } = render(
+      <PipelineCard
+        preview={{
+          pipeline: "oracle-selfcheck",
+          source: "project",
+          path: "config/pipelines/oracle-selfcheck.yaml",
+          project: "ORACLE",
+          params: { security_only: false },
+          steps: [
+            {
+              step: "types",
+              tool: "dev.execute",
+              args: { path: "C:/Projects/ORACLE", program: "uv", args: ["run", "mypy"] },
+              tier: "T2",
+              rule: "tools.dev.execute.tier",
+              asks: true,
+            },
+          ],
+          omitted: [{ step: "tests", reason: "when: not params.security_only" }],
+          note: "approving runs every step listed above",
+        }}
+      />,
+    );
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it("delegation panel", async () => {
+    const { container } = render(
+      <DelegationPanel
+        delegations={[
+          {
+            taskId: "dlg_1",
+            task: "add a retry to the token refresh",
+            adapter: "claude_cli",
+            state: "awaiting_egress",
+            feed: [{ kind: "thinking", text: "reading TokenService.ts", tool: null, fromSubagent: false }],
+          },
+        ]}
+        onDiscard={() => {}}
+      />,
+    );
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it("memory view", async () => {
+    const { container } = render(
+      <MemoryView
+        facts={[
+          {
+            id: "f1",
+            kind: "preference",
+            scope: "project",
+            scopeRef: "Asterim",
+            key: "test-runner",
+            value: "prefers vitest over jest",
+            source: "user_stated",
+            confidence: 0.9,
+            effectiveConfidence: 0.85,
+            stale: false,
+            evidence: ["said so on 2026-08-25"],
+            origin: "chat",
+            createdAt: "2026-08-25T00:00:00Z",
+            lastConfirmedAt: "2026-08-25T00:00:00Z",
+            hitCount: 3,
+            supersededBy: "",
+          },
+        ]}
+        onForget={() => {}}
+      />,
+    );
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it("knowledge health", async () => {
+    // Built, tested, and imported by nothing until Phase 11 mounts it — ADR-0023 puts the
+    // re-layout action here, so it needs to be audited before it becomes reachable.
+    const { container } = render(
+      <KnowledgeHealth
+        data={{
+          built: true,
+          model: "bge-m3",
+          path: "D:/ORACLE/data/knowledge.db",
+          fileBytes: 141180928,
+          chunks: 14586,
+          vectors: 13674,
+          collections: [
+            {
+              id: "notes",
+              documents: 166,
+              lastIndexed: "2026-08-24T15:32:03Z",
+              bytes: 105847097,
+            },
+          ],
+          failures: [],
+        }}
+        onReindex={() => {}}
       />,
     );
     expect(await violations(container)).toEqual([]);
