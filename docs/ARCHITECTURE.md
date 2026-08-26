@@ -4,6 +4,9 @@
 > tests); the supervisor arc ([ORCHESTRATION.md](ORCHESTRATION.md), [PLANNER.md](PLANNER.md)) is
 > design. Decisions here are binding unless superseded by a new ADR in [DECISIONS.md](DECISIONS.md).
 
+> **What ORACLE is *for*** — the product stated as a day rather than as a diagram — is
+> [VISION.md](VISION.md). This document is how it is shaped.
+
 ## 1. What ORACLE is
 
 A **local supervisor of agents** — an operating runtime, not a chatbot with tools. It receives
@@ -67,7 +70,7 @@ Written down so scope creep is a visible violation, not a drift.
 ```
 
 **All four clients are peers.** None has a privileged path. This is the single most important
-structural decision in the project: it means adding voice (Phase 13) or mobile (Phase 12) requires
+structural decision in the project: it means adding voice (Phase 15) or mobile (Phase 14) requires
 *zero* changes to the agent core, and it means the desktop shell can be replaced or dropped without
 losing functionality. See [ADR-0007](DECISIONS.md#adr-0007--clients-are-peers-of-one-local-api).
 
@@ -347,7 +350,7 @@ src/oracle/
   memory/          facts, preferences, attempts                           (P9 — MEMORY.md)
 apps/
   desktop/         Tauri shell (thin) + React frontend                    [built]
-  mobile/          PWA                                                    (P12)
+  mobile/          PWA                                                    (P14)
 tests/             46 files, ~558 tests; tests/security/ is the merge gate
 ```
 

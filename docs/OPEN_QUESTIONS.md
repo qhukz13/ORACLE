@@ -17,7 +17,7 @@ doc, delete the marker.
 | [OQ-03](#oq-03) | How long will Pascal keep GPU acceleration? | `UNKNOWN` | risk, not a phase | monitoring |
 | [OQ-04](#oq-04) | Does `realpath` resolve Windows junctions? | ~~`TO VERIFY`~~ | Phase 2 | **RESOLVED 2026-08-21 — yes; but `is_symlink()` lies** |
 | [OQ-05](#oq-05) | Does `agy -p` emit stdout when piped? | ~~`EXPERIMENT NEEDED`~~ | Phase 6 (Antigravity only) | **RESOLVED 2026-08-21 — yes, with `--output-format`** |
-| [OQ-06](#oq-06) | Can a PWA install over a self-signed cert? | `TO VERIFY` | Phase 12 (push only) | open |
+| [OQ-06](#oq-06) | Can a PWA install over a self-signed cert? | `TO VERIFY` | Phase 14 (push only) | open |
 | [OQ-07](#oq-07) | Is the memory subsystem dual- or quad-channel? | `UNKNOWN` | CPU-fallback planning | open |
 | [OQ-08](#oq-08) | Does FTS5 `unicode61` handle Russian acceptably? | ~~`TO VERIFY`~~ | Phase 5 | **RESOLVED 2026-08-22 — yes; no stemmer, no camelCase split** |
 | [OQ-09](#oq-09) | `pywinpty` on Python 3.12 + ConPTY behaviour | ~~`TO VERIFY`~~ | Phase 3 | **RESOLVED 2026-08-21 — works; readiness must be measured, not slept** |
@@ -323,7 +323,7 @@ tokens** to answer "say hello" (large injected system prompt), so it is a poor c
 ---
 
 ### OQ-06
-**Can a PWA install and receive push over a self-signed certificate?** `TO VERIFY` · bounds **Phase 12**
+**Can a PWA install and receive push over a self-signed certificate?** `TO VERIFY` · bounds **Phase 14**
 
 Browsers require a secure context for service workers. A self-signed cert is untrusted by default,
 which likely blocks PWA installation and Web Push.
@@ -331,7 +331,7 @@ which likely blocks PWA installation and Web Push.
 **Check.** Serve the PWA over the self-signed cert; attempt install and service-worker registration on
 the actual phone. Then repeat with a locally-installed CA.
 
-**Does not block Phase 12** — v1 ships in-app WS notifications only, and says so plainly
+**Does not block Phase 14** — v1 ships in-app WS notifications only, and says so plainly
 ([MOBILE.md §5](MOBILE.md#the-open-problem--oq-06)). It only decides whether background push is
 achievable later.
 

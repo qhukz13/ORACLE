@@ -141,7 +141,7 @@ Stated so nobody assumes coverage that doesn't exist:
 - Actual model *quality* of prose answers — judged by use, not by a metric.
 - The real Claude/Antigravity CLIs in CI — costly, non-deterministic, and rate-limited. Contract tests
   against recorded fixtures cover the integration; **the fixtures can go stale**, which is why
-  quarterly re-verification is a standing item ([ROADMAP P14](ROADMAP.md#phase-14--hardening--continuous)).
+  quarterly re-verification is a standing item ([ROADMAP P17](ROADMAP.md#phase-17--hardening--continuous)).
 - Voice accuracy — manual.
 - Visual design — visual regression catches layout breakage, not whether it looks good.
 

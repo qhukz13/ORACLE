@@ -6,6 +6,13 @@
 > The previous roadmap's Phases 0–6 are **built** and are recorded below as the foundation, not
 > re-scheduled as future work. Sequencing keeps the original discipline: every phase ends with
 > something usable, and nothing executes a side effect before the machinery that governs it exists.
+>
+> **Amended 2026-08-26** against [VISION.md](VISION.md)
+> ([dev log](../logs/development/2026-08-26-vision-realignment.md)): a **residency arc** (P12–P13)
+> was inserted, the local tier stack was promoted out of the idea backlog to P16, and Mobile, Voice
+> and Hardening were renumbered accordingly. Phases 0–11 are unchanged — the audit found the
+> architecture already supports the vision; what it lacked was a persistent project entity and a
+> reason to be running.
 
 ## Where the project actually is
 
@@ -63,13 +70,23 @@ The supervisor-arc equivalent is the long-term goal, stated once:
   P9     Memory & context engine
  CAPABILITY ARC
   P10    Pipelines (on the task graph)          ← DONE 2026-08-26
-  P11    Execution visualisation & advanced UI
-  P12    Mobile
+  P11    Execution visualisation & advanced UI  ← IN PROGRESS
+ RESIDENCY ARC                                    added 2026-08-26 — VISION.md
+  P12    Project state & the continue loop
+  P13    Residency, boot & the briefing
+  P14    Mobile
  EXPERIMENTAL
-  P13    Voice
+  P15    Voice
+  P16    Local tier ladder                        GPU-CONDITIONAL, unscheduled
  CONTINUOUS
-  P14    Hardening (standing, began at P2)
+  P17    Hardening (standing, began at P2)
 ```
+
+**The residency arc was inserted 2026-08-26** and the three phases after it were renumbered
+(Mobile P12→P14, Voice P13→P15, Hardening P14→P17). The reason is
+[VISION.md](VISION.md): the product is *"I turn on my computer, ORACLE is already there, and I can
+simply tell it what I want done"*, and neither half of that sentence is true today. Mobile and voice
+are amplifiers of a loop that does not yet close; project state and residency **are** the loop.
 
 **Why this order.** The spike (P6-T5) is deliberately first and deliberately tiny: the planner arc
 rests on one unverified assumption — that `agy --json-schema` reliably returns a valid structured
@@ -80,7 +97,17 @@ earlier, because P7/P8 need only the `Attempt` record (built in P7 as a table wr
 subsystem) while full memory competes with nothing until context quality becomes the bottleneck —
 which [OQ-18](OPEN_QUESTIONS.md#oq-18) says it already is for retrieval, so P9 carries that too.
 Pipelines move *after* the graph exists so a pipeline is a compiled task graph rather than a
-parallel executor. Mobile, voice, orbit keep their old relative order and their old reasons.
+parallel executor.
+
+**The residency arc's placement, 2026-08-26.** P12 before P13 because the briefing is per-project
+and its resume pointer lives on the project row. Both before mobile and voice because those are
+*additional clients* of a loop that does not yet close — and because a phone is most useful exactly
+when the desktop is unattended, which is only true once ORACLE keeps running unattended. P12 also
+carries an unblock the capability arc needs: `tasks` is **0 rows**, so P11's orbit, timeline and
+queue all render activity that has never happened, and the first real `continue` run is what
+produces it. The orbit keeps its go/no-go test ([OQ-14](OPEN_QUESTIONS.md#oq-14)) and its old
+reasons; what changes is that it can finally be judged against real data instead of a picture we
+drew ourselves.
 
 ---
 
@@ -339,25 +366,177 @@ index and could start earlier if the phase is split — it shares no code with t
 
 ---
 
-## Phase 12 — Mobile  **[Capability arc]**
+## Phase 12 — Project state & the continue loop  **[Residency arc]**
+
+> **This is the phase the product is waiting on.** Design:
+> [PROJECT_STATE.md](PROJECT_STATE.md) · decision:
+> [ADR-0024](DECISIONS.md#adr-0024--a-project-is-a-first-class-persistent-entity) ·
+> product rationale: [VISION.md §5](VISION.md#5-what-is-persistent).
+
+**Objective.** Make *"continue Asterim"* answerable: ORACLE resolves the project, reads its real
+state, decides what remains, plans, dispatches one worker, verifies with evidence, reports, and
+records the result against the project.
+
+**Why here and not later.** Three otherwise-unrelated problems collapse into this one phase:
+
+1. The vision's headline utterance does not route — there is no `continue` intent, and no state for
+   it to read if there were.
+2. `tasks` is **0 rows**. Every view in P11 renders supervisor activity that has never happened, and
+   [OQ-14](OPEN_QUESTIONS.md#oq-14) cannot be judged against a picture we drew ourselves.
+3. `memory_facts` and `memory_attempts` are keyed by project and are also **0 rows** — P9 shipped a
+   subsystem with no entity to attach to.
+
+The first real `continue` run produces the data that answers all three.
+
+**Reuses (no new machinery).** The task graph and scheduler (P7) · the planner ladder and TaskSpec
+(P8) · memory bands, already project-scoped (P9) · `core/projects.py` detection, unchanged in role ·
+the tool layer for every observation · the event log's `seq` as the briefing pointer.
+
+**New work.**
+
+| | |
+|---|---|
+| Migration `0005` | `projects` table; index on `tasks(project, status)` |
+| `core/projects.py` grows a registry | register / rename / archive; identity is the row id, not the directory name |
+| `ProjectObservation` | read-through-tools reader for branch, ahead/behind, dirty count, last commit; `error` is a field, never an exception |
+| Unfinished-work derivation | from the task graph first; repo task documents as `local_foreign` evidence only |
+| `continue` intent label | + fixtures, + **a re-run of the intent eval** |
+| Project counters | denormalised, rebuildable, never authoritative |
+| API | `GET /api/v1/projects`, `GET /api/v1/projects/{id}`; the sidebar stops rendering a bare name list |
+
+**Migration work.** `discover_projects()` becomes a *candidate* source rather than the registry.
+Existing `memory_facts`/`memory_attempts` rows are keyed by project **name**; they are 0 rows today,
+so the backfill is empty — this phase is the last cheap moment to change that key, and taking it
+later means writing a migration against real data.
+
+**Tests.** Registry operations preserve `id` across rename · a deleted root renders `MISSING` and
+degrades nothing else · counters recomputed from `tasks` equal stored values after a graph runs ·
+security: no direct subprocess path in the observer, repo task documents cannot become instructions,
+**registering a project widens no policy scope**.
+
+**Acceptance criteria.**
+
+- [ ] `continue <project>` produces a plan from *real* state, or asks a question when state is empty
+      — it never invents work.
+- [ ] One real end-to-end run completes and writes rows to `tasks` with evidence, timings and cost.
+- [ ] The sidebar's `Asterim  2 tasks  branch main +3` line renders from real data.
+- [ ] Observed state is never persisted — asserted by a test, not by convention.
+- [ ] `make check` green, security suite grown.
+
+**Definition of Done.** A person says "continue Asterim", walks away, and comes back to a completed
+or gated task graph whose every number came from the machine rather than from a fixture.
+
+**Risks.** The intent eval regresses when a label is added (measured surface — re-run it, do not
+assume) · the observation fan-out misses the glance budget (`EXPERIMENT NEEDED`; the answer is lazy
+per-row reads, never a cache) · unfinished-work derivation over-collects and the first plan is
+enormous (bound it, and prefer asking).
+
+---
+
+## Phase 13 — Residency, boot & the briefing  **[Residency arc]**
+
+> Decision: [ADR-0025](DECISIONS.md#adr-0025--oracle-is-a-resident-service-the-window-is-a-client) ·
+> product rationale: [VISION.md §6](VISION.md#6-what-happens-when-the-pc-boots).
+
+**Objective.** ORACLE is running before I look at it, and when I look it tells me what changed.
+
+**Reuses.** Crash recovery, already built and already correct — interrupted graphs gate, they never
+auto-resume · `ARCHITECTURE.md §8` degradation, already the reason Ollama being down is a supported
+state · `since_seq`, already global and gap-free · the global HALT hotkey, already specified as
+window-independent.
+
+**New work.** `oracled` installed as a Windows service or scheduled task, starting
+**degraded-capable** rather than eagerly · a boot health phase over Ollama, both databases, the
+index, agent CLIs and policy · the briefing surface, advancing `briefed_through_seq` **on
+acknowledgement only** · the shell attaches to a running daemon instead of supervising a sidecar.
+
+**Depends on.** P12 — the briefing is per-project and the resume pointer lives on the project row.
+
+**Tests.** An unacknowledged briefing survives a restart · a service that died overnight is the
+first line of the next briefing · HALT works with no window open · boot with Ollama down reaches
+ONLINE and says which capability is missing · no interrupted worker is ever auto-resumed (this test
+already exists and must keep passing under service start).
+
+**Acceptance criteria.**
+
+- [ ] Reboot the machine; ORACLE is online without anyone starting it.
+- [ ] Within 3–5 seconds of the window opening: what ran, what finished, what failed, what is
+      waiting, what is next.
+- [ ] The briefing does not clear itself on render.
+- [ ] Boot animation ≤ ~400 ms.
+- [ ] Closing the window does not stop work; reopening it loses nothing.
+
+**Risks.** A background service crashing invisibly (mitigated by making it brief itself) · autostart
+holding a GPU-resident model from boot on a 4 GB card (mitigated by degraded-capable start) ·
+Windows service permissions interacting with Job Objects — `TO VERIFY` before this phase, cheaply.
+
+---
+
+## Phase 14 — Mobile  **[Capability arc]**
 
 Unchanged in scope and design ([MOBILE.md](MOBILE.md)): PWA, TLS + QR pairing + device tokens,
 `since_seq` resume, approve/observe/ask subset, remote HALT, **T3 desktop-only**. The phone talks
 to ORACLE, never to workers — the supervisor architecture strengthens this: task trees and worker
 status are already API objects by P7/P11. Old Phase 8 acceptance criteria carry over verbatim.
 
+*Renumbered from Phase 12 on 2026-08-26; scope untouched.* It benefits from the residency arc rather
+than depending on it: a phone is most useful precisely when the desktop is unattended, which is only
+true once ORACLE keeps running while unattended.
+
 ---
 
-## Phase 13 — Voice  **[Experimental]**
+## Phase 15 — Voice  **[Experimental]**
 
 Unchanged ([old roadmap Phase 10](DECISIONS.md#adr-0007--clients-are-peers-of-one-local-api)
 reasoning): a separate client process of the same API; zero core changes is the acceptance test;
 TTS re-evaluated at implementation time (Piper archived). Still explicitly after the core
 orchestration works — implementing voice before P8 lands is the named anti-goal it always was.
 
+*Renumbered from Phase 13 on 2026-08-26; scope untouched.*
+
 ---
 
-## Phase 14 — Hardening  **[Continuous]**
+## Phase 16 — Local tier ladder  **[Experimental · GPU-CONDITIONAL, unscheduled]**
+
+> Decision: [ADR-0026](DECISIONS.md#adr-0026--the-local-tier-ladder-is-capability-shaped-and-gpu-conditional).
+> Promoted 2026-08-26 from the idea backlog, where it sat unscheduled since 2026-08-23.
+
+**Objective.** A capability-tiered local ladder — trivial extraction, summarisation, RAG answers,
+private work — so that work which never needs to leave the machine, does not.
+
+**Why it is a phase and not a config change.** The tiers in the vision are described by *capability*
+("classification", "summaries", "local/private tasks"), which is durable and can be designed now.
+The parameter counts are perishable and depend on hardware that does not exist yet. ADR-0004's own
+history is the argument: its original choice was `2b` "based on arithmetic", and **that was wrong** —
+`2b` splits 36/64 CPU/GPU at every context length. Only measurement caught it.
+
+**`ASSUMPTION` — no GPU model, VRAM figure or arrival date has been stated.** Until one is, this
+phase is not scheduled and [ADR-0004](DECISIONS.md#adr-0004--two-tier-local-model-router--reasoner)
+stands as written.
+
+**What a GPU change re-opens** — as measurements to re-run, not settings to edit:
+
+| Question | Today's answer, and why it was that |
+|---|---|
+| Which model routes? | `qwen3.5:0.8b` — the largest that is 100% GPU-resident at 16k ([OQ-01](OPEN_QUESTIONS.md#oq-01)) |
+| Where do embeddings run? | CPU, so the router keeps the GPU ([ADR-0014](DECISIONS.md#adr-0014--embeddings-on-cpu-gpu-reserved-for-the-router)) |
+| Is the context budget still split by call type? | Yes — forced by measured prompt-processing rates |
+| Is tool pre-filtering still load-bearing? | Yes — ~1,200 tokens of schemas costs ~730 ms per turn |
+| Can a local model author plans? | Not evaluated. **Same `ExecutionPlan` fixtures as [OQ-20](OPEN_QUESTIONS.md#oq-20)** — not impression |
+
+**Standing rule, hardware-independent.** *Bigger is not better per task.* Model swap time dominates
+inference time on this class of machine, so a resident small model beats a swapped large one for
+routing. Tier selection is a function of (task shape, residency, privacy) — never of "which model is
+smartest".
+
+**New work when scheduled.** A second `LLMProvider` implementation if the runtime changes · tier
+selection alongside the existing capability registry, which already selects by role rather than by
+vendor · per-tier fixtures · the residency/eviction question · a re-run of the intent eval on
+whatever routes.
+
+---
+
+## Phase 17 — Hardening  **[Continuous]**
 
 The standing workstream, begun at P2, now including: quarterly re-verification of **both** vendor
 CLI contracts · the MCP 2026-07-28 migration watch ([OQ-21](OPEN_QUESTIONS.md#oq-21)) · the Claude
@@ -365,24 +544,8 @@ Agent SDK re-evaluation trigger ([OQ-19](OPEN_QUESTIONS.md#oq-19)) · cost-per-r
 the Pascal/CUDA watch (OQ-03) · security-suite growth with every new surface · backup/restore ·
 performance budgets as tests.
 
----
-
-## Idea backlog — three-tier local model stack  *(recorded 2026-08-23, unscheduled)*
-
-Carried forward unchanged from the previous roadmap; nothing in the replan schedules it, and item
-3 (prompt discipline for small models) is now partially absorbed by the TaskSpec renderer rules.
-
-| Tier | Model | Role |
-|---|---|---|
-| Light | Qwen 2.5 3B | routing, classification, short deterministic transforms |
-| Default | Qwen3 14B | the turn pipeline, tool calls, packet/prompt drafting |
-| Heavy | Qwen3 27B | hard local work; browser search via a DeepSeek-style harness, if adaptable |
-
-Implies, when scheduled: `LMStudioProvider` behind `LLMProvider` · escalation routing with
-per-tier fixtures · the residency/eviction question · a feasibility spike for the browser harness
-(touches the P2 gate — browsing is on the not-planned list and needs a design pass to move).
-A 14B default would also make the **local model a planner-ladder candidate** above deterministic
-templates — evaluate with the same ExecutionPlan fixtures, not by impression.
+*Renumbered from Phase 14 on 2026-08-26; scope untouched. Its number never implied its order — it
+began at P2 and never stops.*
 
 ---
 

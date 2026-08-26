@@ -1,6 +1,13 @@
 # ORACLE — Interface Specification
 
 > A serious developer tool that happens to look good. Not a film prop.
+>
+> **What the interface is *for* is [VISION.md](VISION.md)**; this document is how it is built. The
+> spec was re-audited against the owner's restated vision on 2026-08-26 and found to already
+> describe it — §1–§21 were kept, one surface was added (§7b, the briefing), and no design language
+> was revised. `TO VERIFY` — the vision's visual references were **not attached to that session and
+> are not in the repository**, so §1, §14 and §15 stand as previously written rather than as
+> confirmed against them.
 
 ## 1. Visual philosophy
 
@@ -160,6 +167,12 @@ WORKSPACE                         ⌃B
   auth.service.ts
   ROADMAP.md
 ```
+
+**Where these numbers come from.** Task counts, git branch and ahead/behind, and per-project
+activity are [PROJECT_STATE.md](PROJECT_STATE.md) — a **Phase 12** subsystem that does not exist
+yet. Until it does, the sidebar renders a bare list of directory names, which is what
+`GET /api/v1/status` returns today. The distinction that governs this row is that document's §2:
+`2 tasks` is stored, `branch main +3` is read fresh from git and never cached.
 
 Rules: sections collapse and persist · counts are live · **"Waiting on me" is the only sidebar item
 allowed to demand attention** (amber, and it sorts to the top when non-empty) · the agent section
@@ -324,6 +337,62 @@ project/task/tool/level.
 `[inspect]` opens the exact context or result that was used. **This is the debugging surface for the
 agent itself** — when ORACLE does something strange, this is where I find out why. Retention matches
 the event log; older entries are summarised per turn.
+
+---
+
+## 7b. The briefing — **Phase 13**
+
+> *"What happened while I wasn't looking?"* — the timeline answers this exhaustively, which is the
+> wrong shape for the question. Added 2026-08-26 from [VISION.md §2](VISION.md#2-the-day--the-acceptance-test);
+> design in [PROJECT_STATE.md §6](PROJECT_STATE.md#6-the-briefing--what-happened-while-i-was-away).
+
+The timeline (§7) is the debugging surface: every event, in order, filterable. The briefing is the
+**glance** surface: the delta since I last acknowledged, grouped by project, bounded in size, and
+readable in the 3–5 seconds the vision allocates to it.
+
+It occupies the centre stage on first paint after a period away, and demotes to a command-bar badge
+once acknowledged.
+
+```
+SINCE YESTERDAY 18:04                                        [ dismiss all ]
+
+  Asterim                                              4 tasks · 38m · $0.42
+  ✓ 3 completed      fix pipeline timeout · regression tests · update docs
+  ✗ 1 failed         verify: 3 tests still failing            [inspect] [retry]
+
+  ORACLE                                                          1 task · 6m
+  ⏸ waiting on you   git.push → origin/phase6-integration      [review] ← amber
+
+  System
+  ⚠ restarted 04:12  Ollama unreachable for 21m, recovered      [logs]
+```
+
+### Rules
+
+| Rule | Why |
+|---|---|
+| **Advances on acknowledgement, never on render** | A briefing that clears itself on sight is a notification, and notifications are how people miss things. Glancing and walking away must not consume it. |
+| **Grouped by project, always** | "What happened" is only meaningful scoped to a thing. Ungrouped, it is the timeline with worse ordering. |
+| **Bounded** | Away for a week, this is not 40,000 events. Counts, outcomes, cost — and a link into the timeline for the rest. |
+| **`waiting on you` sorts to the top and is the only loud element** | Same rule as the sidebar (§4) and the core (§3). One attention channel, one meaning. |
+| **Every line is actionable or it is deleted** | `[inspect]`, `[retry]`, `[review]`, `[logs]` open something real. A line with no affordance is a log entry in a costume. |
+| **A dead daemon briefs itself** | If ORACLE crashed overnight, that is the first line. A background service that fails silently is the main risk of [ADR-0025](DECISIONS.md#adr-0025--oracle-is-a-resident-service-the-window-is-a-client), and this is the mitigation. |
+| **Empty is a real state** | Nothing happened → "Nothing ran since 18:04." Not a placeholder, not a skeleton, not a fabricated summary. |
+
+### Where the text comes from
+
+The counts, outcomes, timings and cost are **arithmetic over the task rows** — no model, no
+latency, no possibility of a hallucinated summary of my own work. Prose summarisation is a later
+enhancement belonging to the local mid-tier ([VISION.md §3](VISION.md#3-who-does-what)), and the
+deterministic template stays as the fallback permanently, because it is the version that is always
+correct.
+
+### Accessibility
+
+Briefing entries are a list of headed groups, each with real buttons — not a canvas and not a
+graphic. It is the surface most likely to be read by someone who has just sat down and is not yet
+looking carefully, so it carries the same icon + label + colour rule as everything else (§14) and
+must survive the axe audit like the rest.
 
 ---
 

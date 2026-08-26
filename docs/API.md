@@ -87,7 +87,7 @@ never produces duplicates or holes. If `since_seq` is older than retention, the 
 ### Inbound MCP (P6-T3)
 
 Two loopback endpoints a *delegated agent's* bridge process calls, authorised by a delegation
-capability rather than by being on the box ([INTEGRATIONS.md §4](INTEGRATIONS.md#4-oracle-as-an-mcp-server)):
+capability rather than by being on the box ([INTEGRATIONS.md §4](INTEGRATIONS.md#4-oracle-as-an-mcp-server--supported)):
 
 | Route | Body | Notes |
 |---|---|---|

@@ -10,7 +10,7 @@ Format per record: Decision · Context · Options · Chosen · Why · Trade-offs
 | [0001](#adr-0001--orchestrator-not-a-monolithic-agent) | Orchestrator, not a monolithic agent | accepted, extended by 0019 |
 | [0002](#adr-0002--python-312-managed-by-uv) | Python 3.12 managed by `uv` | accepted |
 | [0003](#adr-0003--tool-execution-in-a-separate-process) | Tool execution in a separate process | accepted, **confirmed in implementation** |
-| [0004](#adr-0004--two-tier-local-model-router--reasoner) | Two-tier local model (router + reasoner) | accepted, benchmarked |
+| [0004](#adr-0004--two-tier-local-model-router--reasoner) | Two-tier local model (router + reasoner) | accepted, benchmarked · **conditional on 4 GB VRAM — see 0026** |
 | [0005](#adr-0005--one-policy-gate-risk-tiers-taint-tracking) | One policy gate, risk tiers, taint tracking | accepted |
 | [0006](#adr-0006--sqlite-only-storage-two-files-sqlite-vec--fts5) | SQLite-only storage, two files (sqlite-vec + FTS5) | accepted |
 | [0007](#adr-0007--clients-are-peers-of-one-local-api) | Clients are peers of one local API | accepted |
@@ -30,6 +30,9 @@ Format per record: Decision · Context · Options · Chosen · Why · Trade-offs
 | [0021](#adr-0021--planner-output-is-untrusted-input) | Planner output is untrusted input | accepted 2026-08-24 |
 | [0022](#adr-0022--external-agent-frameworks-evaluated-not-adopted) | External agent frameworks: evaluated, not adopted | accepted 2026-08-24 |
 | [0023](#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered) | The knowledge graph is simulated-then-frozen, canvas-rendered | accepted 2026-08-24 |
+| [0024](#adr-0024--a-project-is-a-first-class-persistent-entity) | A project is a first-class persistent entity | accepted 2026-08-26 |
+| [0025](#adr-0025--oracle-is-a-resident-service-the-window-is-a-client) | ORACLE is a resident service; the window is a client | accepted 2026-08-26 |
+| [0026](#adr-0026--the-local-tier-ladder-is-capability-shaped-and-gpu-conditional) | The local tier ladder is capability-shaped and GPU-conditional | accepted 2026-08-26, **conditions 0004** |
 
 ---
 
@@ -235,7 +238,7 @@ to have an API, which makes the system scriptable and testable.
 be secured even for loopback use.
 
 **Consequences.** Zero business logic in the Tauri shell — enforced in review. The PTY lives in the
-backend so the phone can attach to the same terminal. **Phase 13 (voice) acceptance includes "zero changes to
+backend so the phone can attach to the same terminal. **Phase 15 (voice) acceptance includes "zero changes to
 `packages/core` to add voice"**, which is the test of whether this decision actually held.
 
 ---
@@ -730,3 +733,153 @@ simulates; semantic (embedding-kNN) edges are computed offline and default off. 
 layout budgets are measured at Phase 11 under [OQ-22](OPEN_QUESTIONS.md#oq-22) before the view is
 built on them. The view inherits the orbit's go/no-go honesty gate: if it does not answer
 questions the list cannot, it is cut, and that outcome gets an ADR.
+
+---
+
+## ADR-0024 — A project is a first-class persistent entity
+
+**Context.** [VISION.md §2](VISION.md#2-the-day--the-acceptance-test) makes *"continue Asterim"* the
+product's headline utterance. Today a project is a directory name produced by
+`core/projects.py:discover_projects()` and validated against the intent classifier so a hallucinated
+name cannot become a filesystem path. `memory_facts`, `memory_attempts` and `TaskSpec` are all
+*keyed* by a project string, but there is no entity those keys refer to — nothing records what a
+project is, what was last done to it, what remains open, or what it cost. The sidebar mock in
+[UI.md §4](UI.md#4-sidebar) already draws numbers that no subsystem can produce.
+
+**Options.** (a) Leave projects derived; answer "continue" by handing the planner a directory
+listing. (b) Persist a full project model including git state, build commands and file inventory.
+(c) Persist only what ORACLE itself knows, and read everything git knows on demand. (d) Adopt a
+project-management schema (boards, assignees, estimates).
+
+**Chosen.** (c) — a `projects` table holding **relational state only**, with **observed state read
+fresh through the tool layer** on every use. Design in [PROJECT_STATE.md](PROJECT_STATE.md).
+
+**Why.** (a) fails on the measurement that matters: a planner given a project name and no state
+produces plausible work, and plausible work is unfalsifiable — it costs a worktree and a delegation
+to discover it was invented. (b) creates a cache that lies: a stored branch name is wrong the moment
+I switch branches in my editor, silently, with no event to correct it — and `git status` on a warm
+repository costs single-digit milliseconds, so the cache buys nothing and forfeits correctness. This
+is the same reasoning that put the event log rather than a projection at the centre of the runtime
+([ADR-0010](#adr-0010--event-sourced-runtime)). (d) solves a problem nobody has: the unit of work is
+already a task in the graph.
+
+The governing rule: **if git knows it, do not store it; if only ORACLE knows it, store it.**
+
+**Trade-offs.** Observing N projects for a briefing is N git calls through the toolhost process
+boundary — a fan-out that is measured, not assumed (`EXPERIMENT NEEDED` in
+[PROJECT_STATE.md §4](PROJECT_STATE.md#4-observed-state-the-reader)); if it misses the glance
+budget the answer is lazy per-row observation, never a cache. Denormalised counters on the row are
+a second copy of facts in `tasks` — accepted because the briefing has a 3–5 second budget, and
+bounded by the rule that they are a **projection**: recompute is always correct, the counter is
+never authoritative.
+
+**Consequences.** Migration `0005`, plus an index on `tasks(project, status)` that does not exist
+today. `discover_projects()` becomes a *candidate* source; registration is an explicit human act, so
+`New folder` and `docs.zip` do not appear in the briefing. Project identity is the row id, not the
+directory name, so renaming a directory does not orphan its facts and attempts. A new `continue`
+intent label is required, and adding a label to a **measured** surface (93.3% intent accuracy over a
+30-case fixture set) means re-running that eval rather than assuming it holds. **Registering a
+project widens no policy scope** — scopes stay in `config/policy.yaml` where a human edits them and
+git records it, asserted in `tests/security/`; otherwise "discover projects" would be privilege
+escalation with a friendly name. Repository task documents (`TODO.md`, `current_task.md`) are read
+as `local_foreign` evidence that taints the turn and never as instructions
+([SECURITY.md §6](SECURITY.md#6-prompt-injection-and-taint-tracking)).
+
+---
+
+## ADR-0025 — ORACLE is a resident service; the window is a client
+
+**Context.** [VISION.md §2](VISION.md#2-the-day--the-acceptance-test) opens with *"I turn on the PC.
+ORACLE is already running. I did not launch it."* Today `oracled` is started by hand and the UI is
+started by hand. Autostart appears in the repository only as a *justification for choosing Tauri*
+([TECH_STACK.md §5](TECH_STACK.md#5-desktop-shell),
+[ADR-0008](#adr-0008--tauri-2-for-the-desktop-shell)) — a capability cited, never a subsystem
+designed. Meanwhile [ADR-0007](#adr-0007--clients-are-peers-of-one-local-api) already establishes
+that clients are peers of one local API and the shell holds zero business logic.
+
+**Options.** (a) Autostart the Tauri shell, which supervises the Python backend as a sidecar.
+(b) Autostart `oracled` as a Windows service or scheduled task; the window is an ordinary client
+that may or may not be open. (c) Keep manual start and treat residency as a later concern.
+
+**Chosen.** (b).
+
+**Why.** (a) makes the window the thing that is resident, which contradicts ADR-0007 and produces a
+specific bad behaviour: closing the window would stop the work. If ORACLE is only running while I am
+looking at it, then "it keeps working while I do something else" is false and the briefing has
+nothing to brief. (b) makes the *state holder* resident and the *view* optional, which is the same
+split that already makes mobile and voice cheap. (c) is what is happening now; it is listed to
+record that it was rejected rather than deferred, because every other item in the vision's morning
+sequence depends on this one being true.
+
+The sidecar mechanism is not lost — it inverts. The shell, when it starts, attaches to a running
+`oracled`; if none is running it may start one. That is a strictly larger set of working
+configurations than the sidecar arrangement, and it is what the browser client already requires.
+
+**Trade-offs.** A background service on Windows is harder to observe than a window: a crash at 04:00
+is invisible until someone looks. Mitigated by the health surface and the briefing — a service that
+died is *itself* the first line of the next briefing. Autostart also means ORACLE holds a GPU-
+resident model and two SQLite handles from boot; on a 32 GB / 4 GB-VRAM machine that is a real cost
+and the service must therefore start **degraded-capable** (Ollama absent is a supported state today,
+[ARCHITECTURE.md §8](ARCHITECTURE.md#8-degradation--what-happens-when-a-piece-is-missing)) rather
+than eagerly loading everything.
+
+**Consequences.** Boot is a designed sequence with a health phase, not an `uvicorn` invocation.
+**No interrupted worker is ever auto-resumed** — the existing recovery rule stands and is
+load-bearing here: a prior agent still alive gates, an agent gone mid-run gates
+([ASTERIM_REUSE.md](ASTERIM_REUSE.md)); "resume safe background work" means ORACLE resumes, not the
+agent. The briefing needs a resume pointer, which is `briefed_through_seq` on the project row
+(ADR-0024) rather than a new mechanism, because the event log's `seq` is already global and gap-free.
+HALT must work against a service with no window open, which the global hotkey already implies. The
+boot animation budget is set at ~400 ms and stated as a rule: it is a tax paid every morning, and
+the correct length of an animation seen 3,000 times is one that is not noticed.
+
+---
+
+## ADR-0026 — The local tier ladder is capability-shaped and GPU-conditional
+
+**Context.** The owner has stated an intent to run ~14B and ~27B local models "once the new GPU
+arrives". [ADR-0004](#adr-0004--two-tier-local-model-router--reasoner) is a direct consequence of
+this machine's **4 GB of VRAM** (GTX 1050 Ti, Pascal): `qwen3.5:0.8b` beat `2b` by measurement
+because `2b` splits 36/64 CPU/GPU at every context length, embeddings were pushed to CPU
+([ADR-0014](#adr-0014--embeddings-on-cpu-gpu-reserved-for-the-router)), context length became a
+hardware decision, and tool pre-filtering became load-bearing because ~1,200 tokens of tool schemas
+costs ~730 ms of latency per turn. A three-tier local stack has sat in the roadmap's idea backlog,
+unscheduled, since 2026-08-23. **No GPU model, VRAM figure or date has been stated.**
+
+**Options.** (a) Add the tiers to the routing config now, gated by availability. (b) Re-open
+ADR-0004 as soon as hardware lands and re-measure the whole local stack. (c) Design the *routing
+abstraction* now — capability tiers with a selection rule — and schedule the *model choices* as a
+measured spike conditional on hardware. (d) Skip local mid-tiers; escalate to Claude.
+
+**Chosen.** (c).
+
+**Why.** The tiers in the vision are described by **capability**, not by parameter count — "trivial
+extraction", "summarisation", "private work". That is the durable part and it can be designed today:
+it is the same shape as the existing capability registry, which already selects an agent by role
+rather than by vendor ([PLANNER.md §5](PLANNER.md#5-agent-selection)). The parameter counts are the
+perishable part. (a) is the trap: writing `qwen3:14b` into a config against unknown hardware is an
+assumption wearing a configuration's clothes, and ADR-0004's own history is the argument — the
+original choice there was `2b` "based on arithmetic", and **that was wrong**, corrected only by
+measurement. (d) forfeits the entire local/private lane, which is a stated product requirement, and
+sends summarisation of my own notes to a cloud API.
+
+**Bigger is not better per task.** A 27B model that must be swapped from disk is *worse* than a
+resident 0.8B for routing, because on this class of hardware model swap time dominates inference
+time — that is ADR-0004's central finding and it survives any GPU upgrade. Tier selection is
+therefore a function of (task shape, residency, privacy), never of "which model is smartest".
+
+**Trade-offs.** Designing an abstraction before its implementers exist risks designing the wrong
+one. Bounded by keeping it identical in shape to the agent registry that already works, and by
+refusing to name models until they can be measured. The local tiers remain unscheduled work, which
+means the vision's "local 14B summarising a report" stays aspirational and every document that
+mentions it says so.
+
+**Consequences.** ADR-0004 is **not superseded** — it stands, and it stands *conditionally*: its
+context section is the 4 GB machine, and it must be re-opened, not amended, when that changes. A
+hardware change re-opens at minimum: which model routes, whether embeddings return to the GPU
+(ADR-0014), whether the context budget is still split by call type, and whether a local model
+becomes a planner-ladder candidate above deterministic templates — **evaluated with the same
+`ExecutionPlan` fixtures used for [OQ-20](OPEN_QUESTIONS.md#oq-20), not by impression.** Until a GPU
+is stated, the tier phase carries an `ASSUMPTION` marker and is not scheduled. The
+`LLMProvider` seam already accommodates a second provider (LM Studio, llama.cpp) without touching
+callers, so no refactor is pre-emptively required.

@@ -23,7 +23,10 @@ your code. Heavy reasoning is delegated to agents that are good at it; ORACLE's 
 
 ## Status
 
-★ **Phases 0–10 are built.** Next: [Phase 11 — Execution visualisation & the knowledge graph](docs/ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc).
+★ **Phases 0–10 are built.** In progress: [Phase 11 — Execution visualisation](docs/ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc).
+Next: [Phase 12 — Project state & the continue loop](docs/ROADMAP.md#phase-12--project-state--the-continue-loop--residency-arc),
+the phase that makes *"continue Asterim"* answerable. What the product is meant to *be* is
+[docs/VISION.md](docs/VISION.md).
 
 ORACLE runs, routes, acts, retrieves, delegates, plans and remembers. Ask it to check a repository
 and it runs `git.status` and shows you the card. Ask it to push and it stops and shows you the
@@ -42,14 +45,21 @@ a real ConPTY inside a Job Object that the HALT key can kill.
 | Supervision | task graphs, a planner tier with a fallback ladder, bounded replanning, crash recovery |
 | Isolation | every tool runs in a separate low-privilege process inside a Job Object |
 
-What is not there yet: the execution tree and knowledge-graph views, the orbital view, mobile,
-and voice. One item is deliberately reserved for a person rather than an agent: a supervised
-live run of the Phase 8 scenario on a real project with every preview human-approved.
+What is not there yet: **a persistent notion of a project** (a project is still a directory name —
+[docs/PROJECT_STATE.md](docs/PROJECT_STATE.md)), **residency** (nothing starts ORACLE at boot, and
+nothing tells you what happened overnight), the knowledge-graph and orbital views, mobile, and voice.
+
+And the caveat that outranks the others: **the supervisor arc has never run for real.** `tasks` is
+0 rows and `memory_facts` is 0 rows — everything Phases 7–9 ship is exercised by tests and fixtures
+only. One item is deliberately reserved for a person rather than an agent: a supervised live run on
+a real project with every preview human-approved.
 
 Read `docs/` first — this repository is design-first and the documents lead the code.
 
 | Question | File |
 |---|---|
+| What is this *for*, as a day rather than a diagram? | [docs/VISION.md](docs/VISION.md) |
+| Where is the code actually, warts included? | [docs/current_state.md](docs/current_state.md) |
 | What is this and how is it shaped? | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | What am I supposed to build right now? | [docs/current_task.md](docs/current_task.md) |
 | What happened last? | [docs/current_report.md](docs/current_report.md) |
@@ -93,7 +103,9 @@ constrains the model choice more than anything else in the design.
 | Disk | C: 39.8 GB free (tight), D: 187 GB free, E: 190 GB free |
 | OS | Windows 10 Pro 19045 |
 
-**4 GB of VRAM is the binding constraint of this entire project.** See
+**4 GB of VRAM is the binding constraint of this entire project.** A GPU upgrade has been
+mentioned but not specified; when one lands it re-opens ADR-0004 as a set of measurements to re-run,
+not settings to edit ([ADR-0026](docs/DECISIONS.md#adr-0026--the-local-tier-ladder-is-capability-shaped-and-gpu-conditional)). See
 [docs/TECH_STACK.md](docs/TECH_STACK.md#3-local-llm) for what actually fits and
 [ADR-0004](docs/DECISIONS.md#adr-0004--two-tier-local-model-router--reasoner).
 

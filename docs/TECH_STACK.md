@@ -394,7 +394,7 @@ channel), raw TCP (rebuilding HTTP badly).
 |---|---|---|
 | **Claude Code** | `claude -p --bare --output-format stream-json` + `--json-schema`, `--resume`, `--allowedTools`; installed here (v2.1.234) | **Supported** |
 | **Anthropic API** | Messages API via `anthropic` SDK, for cheap non-agentic calls | **Supported** |
-| **MCP (inbound)** | ORACLE exposes its guarded tools as an MCP server so delegated agents call back in instead of running raw shell. **Built P6-T3 with no new dependency**: four JSON-RPC methods over stdio, pinned by tests that drive raw frames. `mcp==2.0.0` was installed and verified working first — it costs **24 packages** (`cryptography`, `pywin32`, `opentelemetry-api`, `jsonschema`…) in the daemon's trusted base, which is not a trade worth making for a wire format this small. Take the SDK if a client ever rejects the hand-rolled surface; that measurement is the justification ([INTEGRATIONS.md §4](INTEGRATIONS.md#4-oracle-as-an-mcp-server)) | **Supported** |
+| **MCP (inbound)** | ORACLE exposes its guarded tools as an MCP server so delegated agents call back in instead of running raw shell. **Built P6-T3 with no new dependency**: four JSON-RPC methods over stdio, pinned by tests that drive raw frames. `mcp==2.0.0` was installed and verified working first — it costs **24 packages** (`cryptography`, `pywin32`, `opentelemetry-api`, `jsonschema`…) in the daemon's trusted base, which is not a trade worth making for a wire format this small. Take the SDK if a client ever rejects the hand-rolled surface; that measurement is the justification ([INTEGRATIONS.md §4](INTEGRATIONS.md#4-oracle-as-an-mcp-server--supported)) | **Supported** |
 | **Antigravity** | `agy -p --output-format stream-json` (+ `--json-schema` for planning) — the non-TTY stdout bug is default-text-mode only, resolved by always passing `--output-format` ([OQ-05](OPEN_QUESTIONS.md#oq-05), resolved) | **Supported** — adapter is P6-T5; planner role pending [OQ-20](OPEN_QUESTIONS.md#oq-20) |
 | **Handoff Packet** | Write a self-contained task to disk; collect results via git diff | **Fallback** — works with any agent, including ones that don't exist yet |
 
@@ -406,13 +406,13 @@ the Claude Agent SDK were evaluated and not adopted — reasons and revisit-trig
 
 ---
 
-## 10. Voice (Phase 13 — deliberately unresolved)
+## 10. Voice (Phase 15 — deliberately unresolved)
 
 The landscape moved: `VERIFIED 2026-08-21` **Piper TTS was archived in October 2025**, so the obvious
 default is gone. Recommending it now would be exactly the stale assumption this document exists to
 prevent.
 
-Current shape of the decision, to be made at Phase 13, not before:
+Current shape of the decision, to be made at Phase 15, not before:
 
 - **STT**: `faster-whisper` (CTranslate2, int8, CPU) or `whisper.cpp`. Russian needs `small` or better;
   `tiny/base` are inadequate for it. 24 threads should manage near real-time at `small`.

@@ -7,112 +7,121 @@
 
 ## Task
 
-**P11-T5 — the centre stage becomes switchable, and the task inspector**
+**P12-T1 — the `projects` table and the registry**
 
-**Phase:** [11 — execution visualisation & advanced UI](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc) · **Scope:** Capability arc
+**Phase:** [12 — project state & the continue loop](ROADMAP.md#phase-12--project-state--the-continue-loop--residency-arc) · **Scope:** Residency arc
 **Status:** `SET` · **Set:** 2026-08-26
-**Done in Phase 11 so far:** T1, T3, T4 — see below.
+**Design:** [PROJECT_STATE.md](PROJECT_STATE.md) · **Decision:** [ADR-0024](DECISIONS.md#adr-0024--a-project-is-a-first-class-persistent-entity) · **Why:** [VISION.md §5](VISION.md#5-what-is-persistent)
 
 ---
 
-## Where Phase 11 is
+## Why this and not P11-T5
 
-| Task | State |
-|---|---|
-| **T1 — OQ-22 measurements** | **done.** Three of four answered; the graph is worth building, narrower than §11b describes. [dev log](../logs/development/2026-08-26-oq22-knowledge-graph.md) |
-| **T2 — OQ-14, the orbit go/no-go** | **blocked on data, not on effort.** See below. |
-| **T3 — execution tree, backend** | **done.** `task.*` carries `depends_on`, objective, role, agent, attempt, timings and cost. |
-| **T4 — execution tree, view** | **done.** `graph/rank.ts` longest-path columns (property-tested over 200 DAGs), stage/role/agent/attempt on each row, elapsed and cost in the header, the `tt-*` stylesheet the component never had, per-row accessible button names, and seven new axe cases. |
-| **T5 — switchable stage + inspector** | **this task.** |
-| T6/T7/T8 — knowledge graph | after T5; T1 says build it |
-| T9/T10 — timeline, search | first to be cut |
+P11-T5 (switchable centre stage + task inspector) was set this morning and is **not cancelled** —
+it is unblocked, small and specified, and it is the next UI task. It yielded because of what the
+vision audit found ([dev log](../logs/development/2026-08-26-vision-realignment.md)):
 
-**T2 is not skipped, it is unanswerable today.** OQ-14's test is *"cover every label and it must
-still be possible to say what ORACLE is doing"*, and ROADMAP defends scheduling it late by citing
-"months of real event data". The `tasks` table is **empty** and the event log holds ~300 events, so
-building the orbit in order to judge it would be judging it against a picture we drew ourselves.
-**The cheapest unblock is a person running `oracle-selfcheck` once** — local, no egress, one card,
-~5 minutes — which produces a real six-task graph with real evidence, timings and cost. Until then
-T2 stays open and this file says so.
+- `tasks` is **0 rows**. T5 moves `TaskTree` into its own view and opens tasks in the inspector.
+  Both render supervisor activity that has never happened, and the phase has already shipped one
+  component — `TaskTree` — that is green on a fixture the running app cannot produce.
+- P12 is the brief's own "smallest milestone that proves the architecture", **and** the run that
+  fills `tasks` with real rows. Doing it first means T5 is judged against real data rather than
+  against fixtures we wrote.
+
+Do T5 immediately after this phase's first real run, not before.
+
+---
 
 ## This task
 
-`App.tsx` renders `TaskTree` unconditionally above the chat log and has
-`type Stage = "chat" | "events" | "memory"` toggled by two buttons. UI.md §2 asks for `Ctrl+1..4`
-across Orbit / Chat / Timeline / Tasks, and §6b for *"selecting any of them opens this tree in the
-inspector"*.
+Build the durable half of a project. Nothing about `continue` yet, nothing about the UI yet — the
+entity first, because everything else in the phase reads from it.
 
-1. **Widen `Stage`** to the §2 set, minus Orbit until T2 answers. Bind `Ctrl+1..4`; keep `Ctrl+5`
-   free for the knowledge graph if T7 ships.
-2. **Move `TaskTree`** out of the always-on stack into its own view.
-3. **`Inspector` grows a task branch** beside its `Turn` branch. Its own header already says *"when
-   tasks arrive it grows a task above the turn"*.
-4. **Mount `KnowledgeHealth`.** It is built, tested, has 11 passing tests — and is imported by
-   nothing. ADR-0023 puts the graph re-layout action on it, so T6 needs it reachable.
-5. **The evidence links §6b asks for** (`[worktree] [diff] [logs]`) need a *target* and an *action*,
-   and the action is a gated tool call. They belong here, with the inspector, rather than as dead
-   buttons on a row.
+1. **Migration `0005`** — the `projects` table per [PROJECT_STATE.md §3](PROJECT_STATE.md#3-the-model),
+   plus an index on `tasks(project, status)` that does not exist today and is what makes the
+   counters cheap to rebuild.
+2. **Registry operations** in `core/projects.py` — register, rename, archive. `discover_projects()`
+   keeps its job and becomes a **candidate** source; a candidate becomes a row only when a human
+   registers it or ORACLE first works in it. *(The projects root holds `New folder`, `docs.zip` and
+   `Kaggle`; auto-registering everything would fill the briefing with things that are not projects,
+   and the briefing's whole value is that it is short.)*
+3. **Identity is the row id, not the directory name.** Renaming `Asterim/` on disk must not orphan
+   its facts and attempts.
+4. **`ProjectObservation`** — the read-fresh reader for branch / ahead / behind / dirty count / last
+   commit, going **through the tool layer** (`git.status`, `git.log`, `fs.stat` — all T0). `error`
+   is a field, not an exception: a deleted root renders `MISSING` and nothing else degrades.
+5. **Counters** — denormalised on the row, rebuildable from `tasks`, and **never authoritative**. A
+   counter that disagrees with the task table is a projection bug; the repair is recompute.
+6. **API** — `GET /api/v1/projects`, `GET /api/v1/projects/{id}`. The sidebar stops rendering a bare
+   name list from `/api/v1/status`.
+
+**Not in this task:** the `continue` intent, unfinished-work derivation, the briefing, the sidebar
+rewrite. They are T2–T5 and each depends on this one.
+
+---
 
 ## Acceptance criteria
 
-- [ ] `Ctrl+1..4` switch the centre stage; the binding is tested, not assumed.
-- [ ] `TaskTree` lives in the Tasks view rather than above the chat.
-- [ ] Selecting a task opens it in the inspector.
-- [ ] `KnowledgeHealth` is mounted and reachable.
-- [ ] Evidence affordances open something real, or are not rendered.
+- [ ] Migration `0005` applies cleanly and is reversible in the sense the other migrations are.
+- [ ] Register / rename / archive are tested, and **`id` survives a rename**.
+- [ ] A project whose root has been deleted renders `MISSING`; the API, sidebar and briefing all
+      still work.
+- [ ] `ProjectObservation` reads through the tool layer, and **`tests/security/` asserts there is no
+      direct subprocess path** from it.
+- [ ] **`tests/security/` asserts that registering a project widens no policy scope.** Scopes live
+      in `config/policy.yaml` where a human edits them and git records it. If registration could
+      widen a scope, "discover projects" would be privilege escalation with a friendly name.
+- [ ] Observed state is never persisted — asserted by a test, not by convention.
+- [ ] Counters recomputed from `tasks` equal the stored values.
 - [ ] `make check` green.
 
-## Accessibility — structured so it cannot be an afterthought
+## Watch for
 
-Three choices make "the list view offers every graph action" true by construction:
-
-1. **One action registry, two renderers.** `graph/actions.ts` defines the actions once; canvas and
-   list both render from it, and a vitest asserts the two reachable sets are **equal**. Adding a
-   canvas action without a list action fails the build.
-2. **`GraphListView` is built in T7, not bolted on after**, sharing the canvas's filter state.
-3. **`a11y.test.tsx` grew in T4**, before the remaining surfaces land — 4 of 12 components to 11,
-   each rendering the shape the app actually produces. `Inspector` is the one still uncovered and
-   should gain a case in T5, since T5 is what puts a task in it.
-
-**Done in T4:** `contrast.test.ts` verifies UI.md §14 as arithmetic over tokens parsed out of
-`styles.css`. Amber was fine (7.22–8.99:1) and the section guessed wrong about which token was
-risky — `--st-halt`, the colour that means HALTED, was under 3:1 on **every** surface. Both it and
-`--fg-2` were raised.
+- **The backfill is empty and that is a one-time gift.** `memory_facts` and `memory_attempts` are
+  keyed by project *name* and both hold **0 rows**, so re-keying to the row id costs nothing today
+  and costs a data migration later. Take it now.
+- **Measure the observation fan-out.** `EXPERIMENT NEEDED` — 13 candidate directories × one git call
+  each, against the 3–5 second glance budget of [VISION.md §2](VISION.md#2-the-day--the-acceptance-test).
+  If it misses, the answer is **lazy per-row reads, never a cache** (PROJECT_STATE.md §2).
+- **Repo task documents are `local_foreign`.** `TODO.md` and `current_task.md` in someone else's
+  repository are evidence to show a planner, never instructions. `read_agent_docs()` already models
+  the handling — extend it, do not invent a second path.
 
 ---
 
 ## Carried over, not forgotten
 
+- **P11-T5** — the switchable centre stage, `Ctrl+1..4`, `TaskTree` in its own view, the inspector's
+  task branch, mounting `KnowledgeHealth` (built, 11 passing tests, imported by nothing), and real
+  evidence affordances. Full spec is in this file's previous revision — `git log -p docs/current_task.md`.
+- **P11-T2 — OQ-14, the orbit go/no-go.** Still blocked on data, still unblocked most cheaply by a
+  person running `oracle-selfcheck` once (~5 min, local, no egress, one approval card). Staged and
+  unfired: the approval expires in 180 s, and firing it unattended writes a *refused* run into the
+  very table the run exists to populate.
 - **P9-T3b — the scheduled OQ-18 corpus run.** Windows task `ORACLE-OQ18-eval` fires **2026-08-27
-  07:12** (~3 h) and writes `logs/measurements/oq18-translated.{txt,json}`. On collection: compose
-  `dense_mt` against `dense_xl` for the shipped path, confirm or flip `Settings.translate_queries`,
-  decide `en-relay-dockerfile`, resolve OQ-18, and state the answer-key correction wherever
-  pre-2026-08-26 recall numbers are quoted. Then remove the task with `Unregister-ScheduledTask`.
+  07:12** (~3 h) → `logs/measurements/oq18-translated.{txt,json}`. On collection: compose `dense_mt`
+  against `dense_xl`, confirm or flip `Settings.translate_queries`, decide `en-relay-dockerfile`,
+  resolve OQ-18, and state the answer-key correction wherever pre-2026-08-26 recall numbers are
+  quoted. Then `Unregister-ScheduledTask`.
 - **The `chunker_version` guard does not fire on the indexes it was written for.** `bind()` raises
-  only when a key is *present and different*, then writes the current value in — so an index built
-  before the key existed passes and is stamped by whatever binds it first. Already happened to the
-  live index: **57% of its 14,586 rows exceed the shipped 1200-char cap, longest 4,055** — the v1
-  signature. Decide whether a missing version should refuse; the database wants a reindex either way.
-- **Phase 11's other half has no data.** The `tasks` table is **empty** — 0 rows, 0 roots, 0
-  superseded — and the event log holds 302 events over 5 days. The execution tree, orbit, timeline
-  and queue all render supervisor activity that has never happened outside a test. ROADMAP defends
-  scheduling OQ-14 late by citing "months of real event data"; there are none.
-  **The cheapest unblock is `oracle-selfcheck`** — local, no egress, six steps, one approval card,
-  ~5 minutes — which produces a real six-task graph with real evidence. The Phase 8 scenario is
-  richer (it is the only thing that exercises `supersedes` lineage) but costs tokens and egress.
-  **Both are T2-or-above and are a person's to run, not an agent's.** T3/T4 can be built against
-  fixtures; their acceptance criteria cannot be judged without one real run.
-- **A merge-gate test that fails under CPU starvation.**
-  `test_a_long_burst_arrives_complete` lost 189 lines of a ConPTY burst twice on 2026-08-26 under
-  full load, and at `HEAD` too. Idle it passes in 6 s. If it reappears, decide whether the reader
-  drops output under starvation or the deadline is too tight — different repairs.
-- **`make perf` and `make eval` are documented in TESTING.md §8 and defined nowhere.** Phase 11's
-  acceptance depends on budgets being assertable, so add the targets or correct the doc.
-- **`TaskTree.test.tsx` is green on a fixture the app cannot produce.** `store.ts` never populates
-  `dependsOn`, so `TaskTree`'s `after {deps}` line is dead in the running app. Fixtures should be
-  recorded from the wire, not hand-written.
-- **A memory friction**: a correction typed while a graph runs is refused, because "never mid-plan"
-  is implemented literally. The fix, when somebody hits it, is a queue — not an exception.
-- **Band 6 is not on the interactive answer path.** P9-T2 measured why. Revisit only with a number.
+  only when a key is *present and different*, then writes the current value in — so a pre-key index
+  passes and is stamped by whatever binds it first. Already happened live: **57% of 14,586 rows
+  exceed the 1200-char cap, longest 4,055.** Decide whether a missing version should refuse; the
+  database wants a reindex either way.
+- **A merge-gate test that fails under CPU starvation.** `test_a_long_burst_arrives_complete` lost
+  189 lines of a ConPTY burst twice on 2026-08-26 under full load. Idle it passes in 6 s. Whether
+  the reader drops output under starvation or the deadline is too tight — different repairs.
+- **`make perf` and `make eval`** are documented in TESTING.md §8 and defined nowhere.
+- **`TaskTree.test.tsx` is green on a fixture the app cannot produce** — `store.ts` never populates
+  `dependsOn`. Fixtures should be recorded from the wire. P12's first real run is the chance to.
+- **Palette results are not discoverable to assistive tech** — `<li role="option">` with `onClick`,
+  no `role="combobox"`, no `aria-activedescendant`. Relevant to P11's "the list view offers every
+  graph action" criterion.
+- **A correction typed while a graph runs is refused**, because "never mid-plan" is implemented
+  literally. The fix, when somebody hits it, is a queue — not an exception.
 - **Scheduled pipeline runs** are post-MVP; PIPELINES.md §5's "nothing above T1 unattended" is not
   enforced because nothing schedules anything. The hook exists: `check(..., max_tier=Tier.T1)`.
+- **The visual references for the UI vision were never attached** and are not in the repository.
+  UI.md §1/§14/§15 are marked `TO VERIFY` against them. One pass to close, once they exist.
+- **Branch.** `phase6-integration` is now ~55 commits ahead of a stale `origin/main` that sits at
+  Phase 5-era work. Whether to merge or rename is still a decision nobody has made.

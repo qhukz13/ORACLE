@@ -4,7 +4,7 @@ How ORACLE delegates real work to Claude Code, Antigravity, and anything that co
 verifies what came back.
 
 > All CLI facts below were checked against primary documentation on **2026-08-21** and are marked
-> `VERIFIED`. Vendor CLIs drift; re-verify quarterly ([ROADMAP P14](ROADMAP.md#phase-14--hardening--continuous)).
+> `VERIFIED`. Vendor CLIs drift; re-verify quarterly ([ROADMAP P17](ROADMAP.md#phase-17--hardening--continuous)).
 
 ## 1. Integration tiers
 
