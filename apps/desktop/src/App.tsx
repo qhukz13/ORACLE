@@ -199,6 +199,13 @@ export default function App() {
 
   // Global keys. HALT is deliberately reachable from every state and never touches the
   // model (docs/API.md, `halt`).
+  //
+  // It is `Ctrl+Alt+Shift+H`, and the awkwardness is the feature: UI.md §16 asks for four
+  // keys "so it cannot be hit by accident". This was bound to **`F1`** until 2026-08-26,
+  // which is the opposite of that — one key, the universal help key, sitting next to Esc.
+  // HALT cancels every running task, terminates every job object and puts policy into
+  // deny-all until a human resumes it; reaching for help and stopping the machine instead
+  // is not a keybinding, it is a trap. `F1` is now free for the cheat sheet §16 says it is.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
@@ -213,7 +220,7 @@ export default function App() {
       } else if ((e.ctrlKey || e.metaKey) && e.key === "`") {
         e.preventDefault();
         setDock((v) => !v);
-      } else if (e.key === "F1") {
+      } else if (e.ctrlKey && e.altKey && e.shiftKey && e.key.toLowerCase() === "h") {
         e.preventDefault();
         halt();
       }
@@ -259,7 +266,7 @@ export default function App() {
         >
           {stage === "memory" ? "Chat" : "Memory"}
         </button>
-        <button className="halt" onClick={halt} title="F1">
+        <button className="halt" onClick={halt} title="HALT — Ctrl+Alt+Shift+H">
           HALT
         </button>
       </header>
