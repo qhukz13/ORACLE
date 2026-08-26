@@ -16,6 +16,12 @@ Three properties make the comparison fair, and each was a deliberate choice:
     tokenizer, this script would be measuring two things at once.
   * **The distractor set is the whole corpus**, not the fixture files. Recall against a
     hand-picked 20-document corpus is not a measurement of anything.
+  * **Minus the answer key.**  `ADDED 2026-08-26` ORACLE indexes ORACLE, and
+    `tests/fixtures/retrieval/cases.yaml` lists every fixture question beside its
+    expected path — so it was the strongest lexical match for 37 of the 38 queries that
+    measure this system, and took a top-5 slot from each of them. `ANSWER_KEY` drops
+    those documents from a ranking before it is scored. ORACLE's *prose* docs stay in;
+    see the constant for why the line is drawn there.
   * **Hybrid is reported alongside dense.** The shipped retriever is dense + BM25 + RRF
     (RAG.md §5), so a model that loses on dense alone but wins in fusion is the one to
     ship. Dense-only is reported too, because it isolates the embedding.
@@ -32,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import math
 import os
@@ -116,6 +123,28 @@ TEXT_EXT = {".txt", ".rst"}
 CONFIG_EXT = {".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".xml", ".env.example"}
 # Extensionless files worth reading. Dockerfile.relay is a fixture answer.
 NAMED = {"Dockerfile", "Makefile", "Justfile"}
+
+#: Documents that must not be allowed to occupy a top-5 slot when scoring, because they
+#: contain the questions being asked.  `MEASURED 2026-08-26, P9-T3`
+#:
+#: ORACLE indexes ORACLE — deliberately, and that is right for the product: a question
+#: about ORACLE should reach ORACLE's own documentation. It is fatal for the
+#: *measurement*, because `tests/fixtures/retrieval/cases.yaml` holds all 38 fixture
+#: questions verbatim next to their expected answer paths, and is therefore the single
+#: strongest lexical match for **37 of the 38 queries that measure this system**.
+#:
+#: That is the answer key sitting in the exam hall. It costs the lexical half one of its
+#: five slots on nearly every English fixture, and it is why `en-relay-dockerfile` — the
+#: one fixture whose answer is a config file that only BM25 can reach — is recorded as
+#: a structural miss. It is not structural. It is fourth, behind the fixture file and
+#: two documents *about* the fixture file.
+#:
+#: Excluded here rather than in `config/collections.yaml`, and the distinction is the
+#: whole point: the corpus is not wrong, the scoring was. ORACLE's prose documentation
+#: stays in — `docs/RAG.md` quoting a fixture question is a real document a real query
+#: could really want, and pretending otherwise would be scoring against a corpus nobody
+#: has. What comes out is only the file whose purpose is to list the answers.
+ANSWER_KEY = ("ORACLE/tests/fixtures/",)
 
 
 @dataclass
@@ -657,6 +686,52 @@ class Embedder:
 
 
 # ---------------------------------------------------------------------------
+# The forward pass, saved
+# ---------------------------------------------------------------------------
+
+
+def corpus_fingerprint(
+    chunks: list[Chunk], sem_idx: list[int], key: tuple[str, str, bool], max_len: int
+) -> str:
+    """What a saved vector file has to agree with before it may be reused.
+
+    Everything the pooled array is a function of: the exact texts embedded, in order, and
+    the model that embedded them. A chunker change, a corpus edit, a `--sample`, a
+    different ONNX file or a different truncation length all move this.
+
+    It is a hash rather than a version stamp on purpose. A stamp records what somebody
+    remembered to bump; this records what was actually embedded, and this question has
+    already lost two days to a number computed over chunks the system does not produce.
+    """
+    h = hashlib.sha256()
+    h.update(f"{key}|{max_len}|{len(sem_idx)}|".encode())
+    for i in sem_idx:
+        h.update(chunks[i].text.encode("utf-8"))
+        h.update(b"\x00")
+    return h.hexdigest()
+
+
+def save_vectors(path: str, raw: np.ndarray, fingerprint: str) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(path, vectors=raw, fingerprint=np.array(fingerprint))
+
+
+def load_vectors(path: str, fingerprint: str) -> np.ndarray | None:
+    """The saved pass, or None — and a loud None, never a quiet wrong answer."""
+    f = Path(path)
+    if not f.exists():
+        print(f"{Y}  no saved vectors at {path}; embedding from scratch{X}")
+        return None
+    data = np.load(f, allow_pickle=False)
+    stored = str(data["fingerprint"])
+    if stored != fingerprint:
+        print(f"{R}  {path} was built from a different corpus or model; ignoring it{X}")
+        print(f"{D}    saved {stored[:16]}…  wanted {fingerprint[:16]}…{X}")
+        return None
+    return np.asarray(data["vectors"])
+
+
+# ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
 
@@ -697,6 +772,17 @@ def rrf(*rankings: list[int], k: int = 60, weights: tuple[float, ...] | None = N
     return sorted(score, key=lambda i: -score[i])
 
 
+#: Every arm printed per model, in the order a reader should compare them: the two
+#: retrievers alone, the fusion variants, then the two translated probes.
+#:
+#: **None of these is "the shipped path" on its own**, and that has cost this question two
+#: corrections already. `retrieve()` picks per query: a Russian question loses its lexical
+#: terms to the script rule and runs `dense` (or `dense_mt`, if translation is on), while
+#: an English one runs `gated`. The composition is done in the dev log from the miss
+#: lists, which is why every arm prints its misses rather than only its score.
+STRATEGIES = ("dense", "rrf", "rrf_w2", "gated", "dense_xl", "rrf_xl", "dense_mt", "rrf_mt")
+
+
 def fusions(dense: list[int], lexical: list[int], bm25: BM25, query: str) -> dict[str, list[int]]:
     """Every fusion strategy under comparison, for one query.
 
@@ -717,6 +803,36 @@ def fusions(dense: list[int], lexical: list[int], bm25: BM25, query: str) -> dic
     }
 
 
+def second_probe(
+    emb: Embedder,
+    cand: Candidate,
+    prefix: str,
+    cases: list[dict[str, Any]],
+    texts: dict[str, str],
+    dense_rank: dict[str, list[int]],
+    rank_of: Any,
+) -> dict[str, list[int]]:
+    """Native dense ranking fused with a second dense probe from `texts` (OQ-18 lever 1).
+
+    Only the *query* is re-embedded — 25 short strings against a corpus forward pass that
+    is already paid for — so an arm is nearly free to measure and would not be free to
+    run. A case with no entry in `texts` keeps its native ranking, so the English-only
+    fixtures are unaffected and the comparison stays like-for-like everywhere.
+
+    Two arms use this and the difference between them is the whole of P9-T3: `q_en` is a
+    **human** translation and measures the ceiling of the idea; `--translations` is what
+    the resident router model actually produced and measures the mechanism.
+    """
+    out = dict(dense_rank)
+    picked = [c for c in cases if texts.get(c["id"])]
+    if not picked:
+        return out
+    raw = np.vstack([emb.encode([prefix + texts[c["id"]]], batch=1)[0] for c in picked])
+    for c, qv in zip(picked, Embedder.finish(raw, cand.truncate_to), strict=True):
+        out[c["id"]] = rrf(dense_rank[c["id"]], rank_of(qv))
+    return out
+
+
 def hit(chunks: list[Chunk], ranked: list[int], expect: list[str], n: int) -> bool:
     seen_files: list[str] = []
     for idx in ranked:
@@ -728,13 +844,26 @@ def hit(chunks: list[Chunk], ranked: list[int], expect: list[str], n: int) -> bo
     return any(any(e in f or f.endswith(e) for e in expect) for f in seen_files[:n])
 
 
-def score_set(cases, chunks, rank_fn) -> tuple[dict[str, float], list[str]]:
+def without_answer_key(chunks: list[Chunk], ranked: list[int]) -> list[int]:
+    """The ranking with `ANSWER_KEY` documents dropped.
+
+    Applied to the *ranking* rather than to the corpus so a saved forward pass stays
+    valid: removing a document can only shift the entries below it up, which is exactly
+    what a smaller corpus would have produced for recall@k. BM25's idf shifts by three
+    documents in seventeen thousand, which is below the resolution of a 38-case gate.
+    """
+    return [i for i in ranked if not chunks[i].doc.path.startswith(ANSWER_KEY)]
+
+
+def score_set(cases, chunks, rank_fn, *, answer_key: bool = False) -> tuple[dict, list[str]]:
     at1 = at5 = at10 = 0
     misses: list[str] = []
     by_kind: Counter[str] = Counter()
     kind_n: Counter[str] = Counter()
     for c in cases:
         ranked = rank_fn(c)
+        if not answer_key:
+            ranked = without_answer_key(chunks, ranked)
         kind_n[c["kind"]] += 1
         if hit(chunks, ranked, c["expect_any"], 1):
             at1 += 1
@@ -775,6 +904,27 @@ def main() -> int:
         "winner is then confirmed on the full corpus.",
     )
     ap.add_argument("--no-prefix", action="store_true", help="drop E5 query:/passage: prefixes")
+    ap.add_argument(
+        "--translations",
+        default="",
+        help="a JSON file from scripts/translate_fixtures.py. Adds the `dense_mt`/`rrf_mt` "
+        "arms: the same second probe as `dense_xl`, but embedding what the resident router "
+        "model produced instead of the human translation in the fixture file.",
+    )
+    ap.add_argument(
+        "--save-vectors",
+        default="",
+        help="write the pooled corpus vectors to an .npz beside their fingerprint. The "
+        "forward pass is ~2 hours of CPU and every question asked of it since has been "
+        "about the QUERY half; saving it makes the next one cost minutes.",
+    )
+    ap.add_argument(
+        "--load-vectors",
+        default="",
+        help="reuse an .npz from --save-vectors. Refuses on a fingerprint mismatch rather "
+        "than scoring stale vectors — a silently wrong reuse here is exactly the class of "
+        "error this question has already been bitten by four times.",
+    )
     ap.add_argument("--out", default="")
     args = ap.parse_args()
 
@@ -804,6 +954,19 @@ def main() -> int:
     )
 
     cases = yaml.safe_load(FIXTURES.read_text(encoding="utf-8"))["cases"]
+
+    # The model-translated arm. Absent, `dense_mt` is identical to `dense` and prints as
+    # such — a missing file must not silently become a second copy of the human arm.
+    model_translations: dict[str, str] = {}
+    if args.translations:
+        payload = json.loads(Path(args.translations).read_text(encoding="utf-8"))
+        model_translations = {
+            r["id"]: r["q_en_model"] for r in payload["translations"] if r.get("q_en_model")
+        }
+        print(
+            f"{B}translations{X}  {payload.get('model')}: {len(model_translations)} of "
+            f"{payload.get('cases')} usable, {payload.get('failures')} failed"
+        )
 
     # A fixture whose expected file never made it into the corpus measures the walker,
     # not the model. Fail loudly rather than silently scoring 0.
@@ -851,6 +1014,14 @@ def main() -> int:
     lex_rank = {c["id"]: bm25.search(c["q"], 50) for c in cases}
     lex_scores, lex_misses = score_set(cases, chunks, lambda c: lex_rank[c["id"]])
     print(f"  recall@5 {lex_scores['recall@5']:.0%}   misses: {lex_misses}")
+    # The lexical half is where the answer key does its damage, so its size is reported
+    # where it happens: how many of the 38 queries put a fixture file in their top 5.
+    keyed = sum(
+        1
+        for c in cases
+        if len(without_answer_key(chunks, lex_rank[c["id"]])[:12]) < len(lex_rank[c["id"]][:12])
+    )
+    print(f"{D}  answer-key documents in the lexical candidates of {keyed}/{len(cases)} queries{X}")
 
     results: list[Result] = []
     # (model_dir, onnx_file, prefixed) -> pooled-but-not-yet-truncated vectors. A
@@ -875,9 +1046,15 @@ def main() -> int:
         qp = "" if args.no_prefix else cand.query_prefix
         key = (cand.model_dir, cand.onnx_file, not args.no_prefix)
 
+        fingerprint = corpus_fingerprint(chunks, sem_idx, key, args.max_len)
+        cached = load_vectors(args.load_vectors, fingerprint) if args.load_vectors else None
         if key in pooled:
             raw, cps, enc_s, model_mb = pooled[key]
             print(f"{D}  reusing the {cand.model_dir} forward pass ({enc_s:.0f}s){X}")
+        elif cached is not None:
+            raw, cps, enc_s, model_mb = cached, 0.0, 0.0, emb.model_bytes / 1e6
+            pooled[key] = (raw, cps, enc_s, model_mb)
+            print(f"{G}  loaded {len(raw)} corpus vectors from {args.load_vectors}{X}")
         else:
             t0 = time.perf_counter()
             raw = emb.encode([pp + chunks[i].text for i in sem_idx], batch=args.batch)
@@ -889,6 +1066,9 @@ def main() -> int:
                 f"  embedded {len(sem_idx)} chunks in {enc_s:.1f}s → {G}{cps:.1f} chunks/s{X} "
                 f"(load {emb.load_s:.1f}s, model {model_mb:.0f} MB)"
             )
+            if args.save_vectors:
+                save_vectors(args.save_vectors, raw, fingerprint)
+                print(f"{D}  saved the forward pass to {args.save_vectors}{X}")
         vecs = Embedder.finish(raw, cand.truncate_to)
 
         if key in query_pool:
@@ -912,21 +1092,23 @@ def main() -> int:
         for c, qv in zip(cases, Embedder.finish(qraw, cand.truncate_to), strict=True):
             dense_rank[c["id"]] = rank_of(qv)
 
-        # OQ-18 lever 1: a second dense probe from an English translation of the query,
-        # fused with the native one. Only the *query* is re-embedded — 25 short strings
-        # against a corpus forward pass that is already paid for — so this arm is nearly
-        # free to measure and would not be free to run.
-        #
-        # `q_en` is a human translation (see the fixture header): this measures the
-        # ceiling of the idea, not the router model's Russian. A case with no `q_en`
-        # keeps its native ranking, so the English-only fixtures are unaffected and the
-        # comparison is like-for-like everywhere.
-        translated = [c for c in cases if c.get("q_en")]
-        xl_rank: dict[str, list[int]] = dict(dense_rank)
-        if translated:
-            en_raw = np.vstack([emb.encode([qp + c["q_en"]], batch=1)[0] for c in translated])
-            for c, qv in zip(translated, Embedder.finish(en_raw, cand.truncate_to), strict=True):
-                xl_rank[c["id"]] = rrf(dense_rank[c["id"]], rank_of(qv))
+        # OQ-18 lever 1, in two arms that differ only in who did the translating.
+        #   `_xl` — the `q_en` human translations in the fixture file: the CEILING.
+        #   `_mt` — whatever `--translations` holds, which is the resident router model's
+        #           output as recorded by `scripts/translate_fixtures.py`: the MECHANISM.
+        # Reporting them side by side is the point. The ceiling alone is what P9-T2 had,
+        # and shipping on it would have been shipping on a number no running system can
+        # produce.
+        xl_rank = second_probe(
+            emb,
+            cand,
+            qp,
+            cases,
+            {c["id"]: c["q_en"] for c in cases if c.get("q_en")},
+            dense_rank,
+            rank_of,
+        )
+        mt_rank = second_probe(emb, cand, qp, cases, model_translations, dense_rank, rank_of)
 
         # Every fusion strategy, scored against the same rankings. Free — the embedding
         # is already paid for, and it is the only way to see whether RRF's "no tuned
@@ -939,9 +1121,11 @@ def main() -> int:
         for c in cases:
             ranked[c["id"]]["dense_xl"] = xl_rank[c["id"]]
             ranked[c["id"]]["rrf_xl"] = rrf(xl_rank[c["id"]], lex_rank[c["id"]])
+            ranked[c["id"]]["dense_mt"] = mt_rank[c["id"]]
+            ranked[c["id"]]["rrf_mt"] = rrf(mt_rank[c["id"]], lex_rank[c["id"]])
         fused: dict[str, dict[str, float]] = {}
         fused_misses: dict[str, list[str]] = {}
-        for strategy in ("dense", "rrf", "rrf_w2", "gated", "dense_xl", "rrf_xl"):
+        for strategy in STRATEGIES:
             scores, missed = score_set(cases, chunks, lambda c, r=ranked, s=strategy: r[c["id"]][s])
             fused[strategy] = scores
             fused_misses[strategy] = missed
@@ -965,7 +1149,7 @@ def main() -> int:
             fusion={k: v["recall@5"] for k, v in fused.items()},
         )
         results.append(res)
-        for strategy in ("dense", "rrf", "rrf_w2", "gated", "dense_xl", "rrf_xl"):
+        for strategy in STRATEGIES:
             scores = fused[strategy]
             best = max(fused[s]["recall@5"] for s in fused)
             colour = G if scores["recall@5"] >= best else ""
@@ -978,7 +1162,7 @@ def main() -> int:
         # line: an overall number that moved because the English cases improved would be
         # the wrong evidence entirely.
         ru_cases = [c for c in cases if c.get("lang") == "ru"]
-        for strategy in ("rrf", "rrf_xl"):
+        for strategy in ("dense", "rrf", "dense_xl", "dense_mt"):
             ru_scores, ru_missed = score_set(
                 ru_cases, chunks, lambda c, r=ranked, st=strategy: r[c["id"]][st]
             )
@@ -986,6 +1170,24 @@ def main() -> int:
                 f"  RU-only {strategy:<7}r@5 {ru_scores['recall@5']:.0%}  "
                 f"r@10 {ru_scores['recall@10']:.0%}   misses: {ru_missed}"
             )
+        # The same arms scored the way this project scored them until 2026-08-26: with
+        # `tests/fixtures/retrieval/cases.yaml` — the file listing all 38 questions and
+        # their answers — still eligible for a top-5 slot. Printed so every number
+        # recorded before today stays comparable to the numbers recorded after it, and
+        # so the size of the leak is a figure rather than an assertion. See ANSWER_KEY.
+        leak = {
+            s: score_set(cases, chunks, lambda c, r=ranked, st=s: r[c["id"]][st], answer_key=True)[
+                0
+            ]["recall@5"]
+            for s in STRATEGIES
+        }
+        moved = [s for s in STRATEGIES if abs(leak[s] - fused[s]["recall@5"]) > 1e-9]
+        print(
+            f"{D}  with the answer key eligible (pre-2026-08-26 scoring): "
+            + "  ".join(f"{s} {leak[s]:.0%}" for s in STRATEGIES)
+            + (f"  → moved: {moved}" if moved else "  → moved nothing")
+            + X
+        )
         print(
             f"  query {res.query_ms_p50:.0f} ms p50 / {res.query_ms_p95:.0f} ms p95, "
             f"index {res.index_mb:.0f} MB"

@@ -88,6 +88,9 @@ ignore = ["S101"]
 # that is the point — nothing else may proceed while a human decides whether ~20 planning
 # calls leave the machine. Same one-shot-CLI reasoning as verify_mcp_live.py above.
 "scripts/verify_agy_planning.py" = ["E501", "ASYNC240", "ASYNC250"]
+# Same one-shot-CLI reasoning: it reads the fixture file and writes one JSON result from
+# an async main, and there is no event loop with anything else on it to starve.
+"scripts/translate_fixtures.py" = ["E501", "ASYNC240"]
 # ASYNC240: tool handlers do blocking file I/O on purpose. They execute inside the
 # toolhost child, which handles exactly one invocation at a time and has no event loop
 # to starve (ADR-0003). Making them async-file-aware would add noise to every handler

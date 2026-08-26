@@ -1,0 +1,184 @@
+{
+  "model": "qwen3.5:0.8b",
+  "cases": 25,
+  "failures": 5,
+  "ms_p50": 1642.8,
+  "ms_max": 1895.5,
+  "translations": [
+    {
+      "id": "ru-token-refresh",
+      "q": "как работает refresh токена в Asterim",
+      "q_en_human": "how does token refresh work in Asterim",
+      "q_en_model": "How does a token refresh work in Asteris?",
+      "ms": 1869.3
+    },
+    {
+      "id": "ru-jwt-secret-storage",
+      "q": "где хранится секрет для подписи jwt и почему не в обычной таблице настроек",
+      "q_en_human": "where is the jwt signing secret stored and why not in the ordinary settings table",
+      "q_en_model": "Where does JWT signing secret reside? Why isn't it in standard settings?",
+      "ms": 1712.5
+    },
+    {
+      "id": "ru-own-yaml-parser",
+      "q": "почему для пайплайнов написан свой парсер yaml вместо библиотеки",
+      "q_en_human": "why was a custom yaml parser written for pipelines instead of using a library",
+      "q_en_model": "Why does YAML parser exist for pipelines instead of using a library?",
+      "ms": 1386.2
+    },
+    {
+      "id": "ru-two-users-one-agent",
+      "q": "что происходит если два человека пишут одному агенту одновременно",
+      "q_en_human": "what happens if two people write to the same agent at the same time",
+      "q_en_model": "What happens if two people write to one agent at the same time?",
+      "ms": 1453.2
+    },
+    {
+      "id": "ru-feature-entitlement",
+      "q": "как проверяется что у аккаунта есть право на функцию",
+      "q_en_human": "how is it checked that an account is entitled to a feature",
+      "q_en_model": "How can we verify that an account has access to a function?",
+      "ms": 1878.6
+    },
+    {
+      "id": "ru-relay-encryption",
+      "q": "шифрование трафика между рабочей станцией и телефоном через релей",
+      "q_en_human": "encryption of traffic between the workstation and the phone through the relay",
+      "q_en_model": "Encryption of traffic between a working station and a phone via relay",
+      "ms": 1524.5
+    },
+    {
+      "id": "ru-vector-search",
+      "q": "приближённый поиск ближайших соседей и векторный поиск",
+      "q_en_human": "approximate nearest neighbour search and vector search",
+      "q_en_model": "Approximate nearest neighbor search and vector search",
+      "ms": 1365.7
+    },
+    {
+      "id": "ru-finetuning",
+      "q": "что такое дообучение предобученной модели на своих данных",
+      "q_en_human": "what is fine-tuning a pretrained model on your own data",
+      "q_en_model": "What does pretraining on your own data mean for a pretrained model?",
+      "ms": 1657.2
+    },
+    {
+      "id": "ru-pairing-bruteforce",
+      "q": "что мешает подобрать код сопряжения устройства перебором",
+      "q_en_human": "what prevents brute-forcing the device pairing code",
+      "q_en_model": null,
+      "ms": 1677.7
+    },
+    {
+      "id": "ru-air-gap",
+      "q": "как полностью запретить приложению самому ходить в интернет",
+      "q_en_human": "how to completely prevent the application from reaching the internet on its own",
+      "q_en_model": null,
+      "ms": 1648.7
+    },
+    {
+      "id": "ru-event-retention",
+      "q": "сколько времени хранятся события и что происходит когда их слишком много",
+      "q_en_human": "how long are events retained and what happens when there are too many of them",
+      "q_en_model": "How long do events persist in memory? What happens when they are too many?",
+      "ms": 1751.6
+    },
+    {
+      "id": "ru-shutdown-order",
+      "q": "в каком порядке всё закрывается при остановке сервера",
+      "q_en_human": "in what order is everything shut down when the server stops",
+      "q_en_model": "When does all connections close when a server stops?",
+      "ms": 1448.2
+    },
+    {
+      "id": "ru-kill-process-tree",
+      "q": "как убить не только сам процесс но и всех его потомков",
+      "q_en_human": "how to kill not only the process itself but all of its descendants",
+      "q_en_model": "How to kill not just the process itself but also all its descendants?",
+      "ms": 1642.8
+    },
+    {
+      "id": "ru-local-discovery",
+      "q": "как другой процесс на этой же машине узнаёт адрес и токен сервера",
+      "q_en_human": "how does another process on the same machine discover the server address and token",
+      "q_en_model": "How does another process on this same machine discover its server address and token?",
+      "ms": 1494.3
+    },
+    {
+      "id": "ru-migrations",
+      "q": "как база понимает какую версию схемы она сейчас имеет",
+      "q_en_human": "how does the database know which schema version it currently has",
+      "q_en_model": null,
+      "ms": 1597.9
+    },
+    {
+      "id": "ru-command-approval",
+      "q": "кто решает что опасную команду надо показать человеку перед запуском",
+      "q_en_human": "who decides that a dangerous command must be shown to a human before it runs",
+      "q_en_model": "Who decides to show a dangerous command before launching it?",
+      "ms": 1806.6
+    },
+    {
+      "id": "ru-terminal-reattach",
+      "q": "почему после переоткрытия терминала виден предыдущий вывод",
+      "q_en_human": "why is previous output visible after reattaching to the terminal",
+      "q_en_model": "Why does a previous output appear after reopening the terminal?",
+      "ms": 1669.7
+    },
+    {
+      "id": "ru-workspace-permissions",
+      "q": "как проверяются права пользователя внутри рабочего пространства",
+      "q_en_human": "how are user permissions checked inside a workspace",
+      "q_en_model": "How are user permissions checked within a workspace?",
+      "ms": 1661.9
+    },
+    {
+      "id": "ru-audit-trail",
+      "q": "где записывается кто и что сделал для последующего разбора",
+      "q_en_human": "where is it recorded who did what, for later review",
+      "q_en_model": "Where to write who did what for subsequent analysis",
+      "ms": 1491.8
+    },
+    {
+      "id": "ru-symbol-extraction",
+      "q": "как из исходников вытаскиваются имена классов и функций",
+      "q_en_human": "how are class and function names extracted from source files",
+      "q_en_model": null,
+      "ms": 1895.5
+    },
+    {
+      "id": "ru-bias-variance",
+      "q": "почему слишком простая модель ошибается так же как слишком сложная",
+      "q_en_human": "why does a model that is too simple err as much as one that is too complex",
+      "q_en_model": "Why does a simple model fail just as much as an overly complex one?",
+      "ms": 1673.9
+    },
+    {
+      "id": "ru-cross-validation",
+      "q": "как оценить качество модели когда данных совсем мало",
+      "q_en_human": "how to evaluate model quality when there is very little data",
+      "q_en_model": null,
+      "ms": 1642.5
+    },
+    {
+      "id": "ru-learning-rate",
+      "q": "что будет если шаг обучения выбрать слишком большим",
+      "q_en_human": "what happens if the learning rate is set too large",
+      "q_en_model": "What happens if you choose a learning step that is too large?",
+      "ms": 1436.5
+    },
+    {
+      "id": "ru-nonlinearity",
+      "q": "зачем между слоями сети нужна нелинейность",
+      "q_en_human": "why is a nonlinearity needed between network layers",
+      "q_en_model": "Why do we need nonlinearity between network layers?",
+      "ms": 1639.4
+    },
+    {
+      "id": "ru-model-degrades",
+      "q": "модель работала хорошо а через полгода стала хуже, почему",
+      "q_en_human": "the model worked well and six months later got worse, why",
+      "q_en_model": "The model performed well for a while but became worse after six months. Why?",
+      "ms": 1515.4
+    }
+  ]
+}
