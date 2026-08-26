@@ -3,139 +3,112 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** **Vision realignment** — audit the whole project against a restated product vision, and
-redesign architecture, documentation and roadmap to match it.
-**Status:** Done. Design only; no implementation code changed. `make check` **green** (7/7).
+**Task:** **P12-T1 — the `projects` table and the registry.** Plus the vision realignment that
+scheduled it, done earlier the same day.
+**Status:** Done. `make check` **green, 7/7** (ruff · mypy · tsc · pytest 131 s · security 133 s ·
+vitest 12 s). **1,133 Python tests**, up 62.
 **Date:** 2026-08-26
-**Dev log:** [`2026-08-26-vision-realignment.md`](../logs/development/2026-08-26-vision-realignment.md)
+**Dev logs:** [P12-T1](../logs/development/2026-08-26-p12t1-project-entity.md) ·
+[vision realignment](../logs/development/2026-08-26-vision-realignment.md)
 
 ---
 
-## The finding
+## What shipped
 
-The owner restated ORACLE's intended product in full — a resident local AI workstation that is
-already running at boot, shows what happened overnight, and answers *"continue Asterim"* by planning
-and dispatching work across Claude, Antigravity and local models without the owner choosing any of
-them — and asked for an audit, a gap analysis, and a redesign.
+A project is no longer a directory name. Migration `0005`,
+[`core/project_state.py`](../src/oracle/core/project_state.py) (550 lines), three endpoints, and 62
+tests — 41 unit, 14 API, 7 security.
 
-**The redesign was mostly unnecessary.** Read against `src/oracle/` (20 packages, ~24,700 lines),
-the desktop client, `config/`, the live databases and all 24 documents, the brief describes what is
-already the recorded architecture: supervisor not chatbot (ADR-0001/0019), task graph and replanning
-(P7–P8, built), planner separate from executor with a *measured* fallback ladder, a capability
-registry a human edits, provider-neutral adapters, 33 deterministic tools, a policy gate with taint
-and a hash-chained audit, an event-sourced runtime, RAG, memory, and clients as peers of one local
-API. UI.md already specifies the orbital core, task states, timeline, agent queue, inspector,
-execution tree, knowledge graph and a full design system. `ASTERIM_REUSE.md` and ADR-0022 already
-did the Asterim audit and the OSS/SDK survey the brief asked for.
-
-**Four gaps were real.**
-
-### 1. There is no Project — and everything rests on it
-
-A project is a **directory name**. `core/projects.py` lists directories and classifies them by
-marker file so a hallucinated name cannot become a filesystem path — good, and it stays. But
-`memory_facts`, `memory_attempts` and `TaskSpec` are all *keyed by* a project string with **no
-entity behind the key**. Nothing records what Asterim is, what was last done to it, what remains, or
-what it cost. UI.md §4 already draws `Asterim  2 tasks  branch main +3`; every number in that line
-comes from a subsystem that does not exist.
-
-New: [PROJECT_STATE.md](PROJECT_STATE.md) ·
-[ADR-0024](DECISIONS.md#adr-0024--a-project-is-a-first-class-persistent-entity) · **Phase 12**.
-
-Its load-bearing idea is a split: **observed state** (branch, dirty count — git owns it, *never*
-store it, because a cached branch name is wrong the moment I switch branches with no event to
-correct it) versus **relational state** (what ORACLE attempted and left unfinished — only ORACLE
-knows it, so it must be stored). *If git knows it, do not store it.*
-
-Also found: **there is no `continue` intent.** The vision's headline utterance routes to `chat` or
-`modify` with low confidence. Adding a label is cheap but touches a **measured** surface (93.3% over
-30 fixtures) and so requires re-running the eval, not assuming it holds.
-
-### 2. Nothing makes ORACLE resident
-
-Autostart appears in the repo exactly twice, both as a *reason for choosing Tauri* — a capability
-cited, never a subsystem designed. No boot sequence, no restore, no health phase, no briefing.
-
-[ADR-0025](DECISIONS.md#adr-0025--oracle-is-a-resident-service-the-window-is-a-client) makes the
-**daemon** resident rather than the shell. Tauri's sidecar arrangement would make the *window* the
-resident thing — which means closing the window stops the work, and then "it keeps working while I
-do something else" is false and the briefing has nothing to brief. **Phase 13**, plus one new UI
-surface ([UI.md §7b](UI.md#7b-the-briefing--phase-13)).
-
-### 3. The vision contradicts a measurement, and the measurement wins
-
-The brief routes **planning to Antigravity**. [OQ-20](OPEN_QUESTIONS.md#oq-20) measured it:
-**12/16 = 75%** valid `ExecutionPlan`s against a 90% gate, ~55k tokens per plan, every hard failure
-at `--effort high` being the agent browsing the filesystem. Claude is the planner; Antigravity is
-`reviewer`/`researcher`, read-only. The architecture was **not** changed to match the diagram — the
-disagreement is recorded with its numbers in [VISION.md §8a](VISION.md#8a-antigravity-is-not-the-planner),
-and noted as a verdict on one CLI on one date, pinned to a fixture.
-
-### 4. New hardware invalidates the binding constraint
-
-The brief names ~14B and ~27B local tiers "once the new GPU arrives". The README says *"4 GB of VRAM
-is the binding constraint of this entire project"*, and ADR-0004 is a consequence of it — `0.8b`
-beat `2b` by measurement, embeddings went to CPU, context length became a hardware decision, tool
-pre-filtering became load-bearing at ~730 ms per turn.
-
-[ADR-0026](DECISIONS.md#adr-0026--the-local-tier-ladder-is-capability-shaped-and-gpu-conditional)
-designs the **capability-tier abstraction** now and schedules the **model choices** as a measured
-spike (Phase 16, unscheduled, `ASSUMPTION` — no GPU, VRAM figure or date has been stated). ADR-0004
-is marked conditional, not superseded. Its own history is the argument: the original choice there
-was `2b` "based on arithmetic", and that was wrong.
-
----
-
-## Why the sequencing changed
-
-`tasks` is **0 rows**. The vision's payload is *visualisation of activity* — orbit, execution tree,
-timeline, briefing — and all four render supervisor activity that has never happened. That already
-bit once: `TaskTree` is green on a fixture the running app cannot produce.
-
-The brief's own "smallest milestone that proves the architecture" is: read project state → gather
-context → ask planner → dispatch one worker → track → collect → update state → display. **That is
-Phase 12**, and it is also the run that fills `tasks` with real evidence. The product goal and the
-engineering unblock are the same action — which is the whole justification for putting the residency
-arc ahead of mobile and voice.
-
----
-
-## What changed
-
-| File | Change |
+| | |
 |---|---|
-| `docs/VISION.md` | **new** — the product as a day, not an architecture; the four disagreements above |
-| `docs/PROJECT_STATE.md` | **new** — the missing subsystem, with acceptance criteria |
-| `docs/DECISIONS.md` | ADR-0024/0025/0026; ADR-0004 marked conditional |
-| `docs/ROADMAP.md` | residency arc as P12–P13; tiers promoted to P16; Mobile→P14, Voice→P15, Hardening→P17 |
-| `docs/UI.md` | §7b briefing; sidebar sourcing note; header records the missing references |
-| `docs/README.md` | index + reading order |
-| 8 docs | every renumbered phase link fixed |
-
-**Deliberately unchanged:** Phases 0–11 · the design language · the orbital spec and its go/no-go ·
-the five rules, the process model, the policy gate · all implementation code.
+| `projects` table | identity, status, description + provenance, `first_seen`/`last_touched`, the briefing pointer, and four counters |
+| Registry | register (idempotent by name) · rename · relocate · archive · touch · `refresh_presence` |
+| `ProjectObservation` | branch, ahead/behind, dirty count, last commit — read fresh through `git.status`/`git.log`, both T0 |
+| Counters | rebuilt from `tasks` by `recount()`; reconciled at boot along with presence |
+| API | `GET /api/v1/projects` · `POST /api/v1/projects?name=` · `GET /api/v1/projects/{id}` |
 
 ---
 
-## Two things the next person should know
+## The rule the design turned on
 
-**The gate is green.** `current_state.md` said gate status was "not established"; it now is —
-7/7 steps, 344 s, at HEAD on `phase6-integration`. That line in `current_state.md` is the one thing
-in it that is now stale.
+> **If git knows it, do not store it. If only ORACLE knows it, store it.**
 
-**The visual references were not attached.** The brief calls them "extremely important" and asks
-that the design language be extracted from them. No images reached the session and none are in the
-repository, so UI.md §1/§14/§15 stand as previously written and are marked `TO VERIFY` at the file
-header. Cheap to close; blocks nothing.
+*Observed state* (branch, dirty count, build commands) belongs to git. Storing it makes a cache that
+lies: switch branches in an editor and the sidebar is wrong, silently, with no event that could
+correct it. *Relational state* (what ORACLE attempted, what it cost, when you last looked) has no
+second copy anywhere, so it must be stored.
+
+**`DATABASE.md` had specified the opposite.** Its pre-build `projects` sketch carried `kind`,
+`has_git`, `test_command`, `build_command` and a README summary — every one of them observed state.
+Corrected in place with the reason attached. Its `facts`/`attempts`/`devices` blocks are **still the
+old sketch** and are now marked `TO VERIFY`; the shipped tables are `memory_facts` and
+`memory_attempts`, and `devices` does not exist.
+
+Three tests defend the rule rather than describe it, because "just cache it, git is slow" arrives
+later and a schema will not resist it on its own — including one that reads `PRAGMA table_info` and
+fails if a column named `branch` or `dirty` ever appears.
+
+---
+
+## Four things worth carrying forward
+
+**The index needed no column.** `TaskSpec.project` lives inside the `spec` JSON, so indexing `tasks`
+by project looked like a column plus a write-path change plus a backfill. It was a **generated
+column** — `json_extract(spec, '$.project') VIRTUAL` — which *is* `spec` rather than a second copy of
+it, so it cannot drift and nothing on the write path changed. Verified on a **copy of the live
+database**, v4 → v5, with `EXPLAIN QUERY PLAN` confirming `SEARCH tasks USING INDEX ix_tasks_project`.
+
+**`PRAGMA table_info` does not list generated columns.** That verification nearly recorded a false
+negative: `table_info` reported no `project` column on a successfully migrated database. Only
+`table_xinfo` shows them (`hidden=2`). Anything that introspects the schema to decide whether a
+migration applied will conclude the opposite of the truth. Pinned as a test.
+
+**Existence is observed state too, and I nearly stored it.** The first version reconciled `MISSING`
+at boot and stopped there — the same stale-cache bug as a cached branch name, one field coarser.
+Every surface now reports `effective_status()`, the stored value corrected by a fresh `is_dir()`.
+`ARCHIVED` is never overridden.
+
+**A vocabulary duplicated on purpose.** `recount()` needs the terminal task statuses, and importing
+`orchestration.models.TERMINAL` would point a dependency upward, which ARCHITECTURE.md §4 forbids.
+So it is duplicated, with `test_terminal_set_matches_orchestration` proving the copies agree.
+
+---
+
+## Deferred, and named rather than hidden
+
+**[OQ-24](OPEN_QUESTIONS.md#oq-24) — the observation fan-out is unmeasured.** So
+`GET /api/v1/projects` runs **no git at all** and omits branch and dirty count; only the per-project
+endpoint observes. The arithmetic says ~13 projects ≈ 1 s against a 3–5 s glance budget, but
+arithmetic is exactly what ADR-0004 got wrong about `qwen3.5:2b`. **If it misses, the answer is lazy
+per-row observation — never a cache**, written into the OQ now while it is obvious.
+
+---
+
+## Security
+
+Both claims are asserted, not documented, in `tests/security/test_project_registration.py`:
+
+- **Registering grants nothing.** A path that raised `PathRejected` before registration still raises
+  it after — which is the question that matters, since comparing scope lists would miss a widening
+  that happened elsewhere.
+- **Observation crosses the gate.** The module is checked against its own AST for a
+  `subprocess`/`os` import and for any call named `run`/`Popen`/`system`/`spawn`, the same way
+  `test_no_shell.py` checks the shell ban. A third test pins that the tools it may ask for are a
+  **subset of `{git.status, git.log}`**, so an edit adding `git.stash` to "clean the tree before
+  looking" fails rather than mutating someone's working copy on a page-load.
+
+Traversal in the API is refused before any path is built: `name` must be a directory
+`discover_projects()` actually found, with `../Secret`, `C:\Windows` and friends enumerated as tests.
 
 ---
 
 ## Next
 
-**A person, ~5 minutes: run `oracle-selfcheck` once.** Local, no egress, one approval card. It
-produces the first real task graph and unblocks P11-T2's go/no-go. It has been staged and unfired
-since this morning because the approval expires in 180 s and firing it unattended would write a
-*refused* run into the table the run exists to populate.
+**[P12-T2](current_task.md)** — the `continue` intent and unfinished-work derivation. Note the
+warning carried into that file: adding an `IntentLabel` touches a **measured** surface (93.3% over 30
+fixtures), so the eval must be **re-run**, not assumed — and `make eval` is documented in TESTING.md
+§8 and defined nowhere, which puts it on the critical path.
 
-**An agent: [P12-T1](current_task.md)** — the `projects` table and registry. P11-T5 is carried, not
-dropped; see current_task.md for why it yielded.
+**Still a person's job, ~5 minutes:** run `oracle-selfcheck` once. `tasks` is still **0 rows**, so
+P11's orbit, timeline and queue continue to render activity that has never happened. P12-T5 produces
+richer data but costs tokens and egress; the pipeline is local, no egress, one approval card.

@@ -14,13 +14,14 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
-from fastapi import APIRouter, FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 
 from oracle import __version__
 from oracle.config import Settings, get_settings
 from oracle.core.approvals import ApprovalStore
 from oracle.core.eventlog import EventLog
 from oracle.core.events import PROTOCOL_VERSION, ClientCommand, Event, new_id
+from oracle.core.project_state import ProjectStore, effective_status, observe
 from oracle.core.projects import discover_projects
 from oracle.core.sessions import SessionStore
 from oracle.core.terminal import TerminalBridge
@@ -89,6 +90,11 @@ class AppState:
     #: read it at startup; the scheduler that writes to it is created per graph run, and
     #: nothing creates graphs until P8 routes an intent to one.
     task_store: TaskStore
+    #: Projects as durable entities (PROJECT_STATE.md, ADR-0024). Holds only what git
+    #: cannot answer — what ORACLE attempted here, what it cost, where the briefing
+    #: resumes. Branch and dirty count are read fresh through `observe()` and are
+    #: deliberately absent from the row.
+    project_store: ProjectStore
     #: Live task graphs, addressable by root id, so a person can stop one
     #: (ORCHESTRATION.md §3).
     graphs: GraphService
@@ -294,6 +300,7 @@ async def _build_state(settings: Settings) -> AppState:
             log.warning("llm.unavailable", reason=exc.reason, remedy=exc.remedy)
 
     task_store = TaskStore(conn)
+    project_store = ProjectStore(conn)
     memory = MemoryStore(conn, eventlog)
     agent_registry = load_registry(settings.registry_path)
     plan_templates = load_templates(settings.plan_templates_path)
@@ -355,6 +362,7 @@ async def _build_state(settings: Settings) -> AppState:
         terminals=terminals,
         delegations=delegations,
         task_store=task_store,
+        project_store=project_store,
         graphs=GraphService(eventlog, task_store),
         agents=agent_registry,
         templates=plan_templates,
@@ -440,6 +448,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 interrupted=[t.id for t in found.interrupted],
                 action="nothing restarted; a human decides",
             )
+        # Projects, reconciled against the disk and against the task table. Both are
+        # cheap — one `is_dir()` per row, one indexed scan per project — and both repair
+        # rather than trust: a root deleted while the daemon was down becomes MISSING
+        # instead of a crash the first time something renders it, and counters are a
+        # projection whose stored value is never authoritative (PROJECT_STATE.md §3).
+        gone = await st.project_store.refresh_presence()
+        await st.project_store.recount_all()
+        if gone:
+            log.warning("projects.presence_changed", projects=[p.name for p in gone])
         if settings.prewarm_toolhost:
             st.spawn(_prewarm(st))
         _start_indexing(st)
@@ -639,6 +656,116 @@ def _register_routes(app: FastAPI) -> None:
         what it reconciles against on connect."""
         st = state_of(app)
         return await st.graphs.tree(root_id)
+
+    @app.get("/api/v1/projects")
+    async def list_projects(
+        include_archived: bool = Query(False),
+    ) -> dict[str, Any]:
+        """Registered projects, plus the directories that are only candidates.
+
+        The split is the point (PROJECT_STATE.md §3): `discover_projects()` lists what is
+        on disk, and this machine's projects root holds `New folder` and `docs.zip`
+        alongside the real ones. Registration is an explicit human act, so the UI needs to
+        show both — what ORACLE tracks, and what it could be asked to track.
+
+        No `git` runs here. A list of twenty projects would be twenty subprocesses on a
+        page-load, and the fields that would need them (branch, dirty count) belong to the
+        per-project read below, which the sidebar calls lazily per row.
+        """
+        st = state_of(app)
+        tracked = await st.project_store.all(include_archived=include_archived)
+        known = {p.name for p in tracked}
+        return {
+            "projects": [
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "root": str(p.root),
+                    # Corrected by a fresh existence check: a directory deleted since boot
+                    # must not be reported as `idle` (PROJECT_STATE.md §2).
+                    "status": str(effective_status(p)),
+                    "description": p.description,
+                    "description_source": str(p.description_source),
+                    "first_seen": p.first_seen,
+                    "last_touched": p.last_touched,
+                    "briefed_through_seq": p.briefed_through_seq,
+                    "open_tasks": p.open_tasks,
+                    "failed_tasks": p.failed_tasks,
+                    "tokens_spent": p.tokens_spent,
+                    "usd_spent": p.usd_spent,
+                }
+                for p in tracked
+            ],
+            "candidates": [name for name in st.projects if name not in known],
+            "projects_root": str(st.settings.projects_root),
+        }
+
+    @app.post("/api/v1/projects")
+    async def register_project(
+        name: str = Query(..., min_length=1), description: str = Query("")
+    ) -> dict[str, Any]:
+        """Register a discovered directory as a project.
+
+        `name` must be one `discover_projects()` actually found. That is the same rule the
+        intent classifier follows and it is a safety rule, not a convenience: a name that
+        is not in the candidate list would become a filesystem path assembled from a
+        request body. Registration grants nothing — scopes live in `config/policy.yaml`,
+        where a human edits them and git records the edit.
+        """
+        st = state_of(app)
+        if name not in st.projects:
+            raise HTTPException(
+                status_code=404, detail=f"no such directory under the projects root: {name!r}"
+            )
+        root = (st.settings.projects_root / name).resolve()
+        if not root.is_relative_to(st.settings.projects_root.resolve()):
+            # Belt and braces: `name` is already constrained to the discovered list, so
+            # this is unreachable unless that list is ever widened.
+            raise HTTPException(status_code=400, detail="project name escapes the projects root")
+        project = await st.project_store.register(name, root, description=description)
+        return {"id": project.id, "name": project.name, "status": str(project.status)}
+
+    @app.get("/api/v1/projects/{project_id}")
+    async def project_detail(project_id: str) -> dict[str, Any]:
+        """One project: the stored half, and the observed half read fresh.
+
+        `observation` is never cached and never persisted. If it were, the branch name in
+        the sidebar would be wrong the moment someone switched branches in their editor,
+        with no event that could correct it (PROJECT_STATE.md §2).
+        """
+        st = state_of(app)
+        project = await st.project_store.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail=f"no such project: {project_id!r}")
+        obs = await observe(st.executor, project)
+        return {
+            "id": project.id,
+            "name": project.name,
+            "root": str(project.root),
+            "status": str(effective_status(project)),
+            "description": project.description,
+            "description_source": str(project.description_source),
+            "first_seen": project.first_seen,
+            "last_touched": project.last_touched,
+            "briefed_through_seq": project.briefed_through_seq,
+            "open_tasks": project.open_tasks,
+            "failed_tasks": project.failed_tasks,
+            "tokens_spent": project.tokens_spent,
+            "usd_spent": project.usd_spent,
+            "observation": {
+                "branch": obs.branch,
+                "upstream": obs.upstream,
+                "ahead": obs.ahead,
+                "behind": obs.behind,
+                "dirty": obs.dirty,
+                "clean": obs.clean,
+                "last_commit": list(obs.last_commit) if obs.last_commit else None,
+                "kinds": [str(k) for k in obs.detected.kinds] if obs.detected else [],
+                "test": [t.display() for t in obs.detected.test] if obs.detected else [],
+                "agent_docs": list(obs.agent_docs),
+                "error": obs.error,
+            },
+        }
 
     @app.get("/api/v1/memory")
     async def memory_view(

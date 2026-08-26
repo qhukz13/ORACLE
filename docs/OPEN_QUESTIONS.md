@@ -35,6 +35,7 @@ doc, delete the marker.
 | [OQ-21](#oq-21) | When does ORACLE's MCP server need the 2026-07-28 spec? | `UNKNOWN` | none — watch item | monitoring |
 | [OQ-22](#oq-22) | Does the knowledge graph hold its budgets at corpus scale? | measured 2026-08-26 | Phase 11 (graph view only) | **3 of 4 answered — build it, narrower; canvas-vs-SVG still needs a real window** |
 | [OQ-23](#oq-23) | Does a failure-carrying prompt produce a *different* plan? | `EXPERIMENT NEEDED` | nothing — replanning ships bounded | opened 2026-08-25 |
+| [OQ-24](#oq-24) | Does observing every project fit the glance budget? | `EXPERIMENT NEEDED` | Phase 12 (the sidebar and the briefing) | opened 2026-08-26 |
 
 ---
 
@@ -831,3 +832,30 @@ Not questions, but things the design takes as true and would need revisiting if 
 | Claude Code stays available and affordable | Delegation degrades to the Handoff Packet fallback (already built) |
 | Projects mostly live under `C:\Projects` | Scope configuration grows, but nothing structural changes |
 | D:/E: keep ~190 GB free | Models and index need a new home; C: cannot host them |
+
+---
+
+### OQ-24
+**Does observing every project fit the 3–5 second glance budget?** `EXPERIMENT NEEDED` ·
+opened 2026-08-26 · bounds **Phase 12**'s sidebar and briefing.
+
+[VISION.md §2](VISION.md#2-the-day--the-acceptance-test) allocates 3–5 seconds to understanding
+the screen. Observed state is deliberately never cached
+([PROJECT_STATE.md §2](PROJECT_STATE.md#2-the-distinction-that-makes-this-design-work)), so
+showing branch and dirty count for N projects costs **N × (`git.status` + `git.log`)**, each a
+toolhost round trip plus a `git` process. Warm IPC is p50 **27.9 ms** and a `git status` on a warm
+repo is single-digit milliseconds, so the arithmetic suggests ~13 projects ≈ 1 s — but the
+arithmetic is exactly what ADR-0004 got wrong about `qwen3.5:2b`, so it is not an answer.
+
+**What P12-T1 shipped instead of guessing:** `GET /api/v1/projects` runs **no git at all** and
+omits branch and dirty count; only `GET /api/v1/projects/{id}` observes, one project at a time.
+A test asserts the list endpoint exposes no observed state, so the cheap path cannot quietly
+acquire a fan-out later.
+
+**The experiment**, when the sidebar wants those columns: time the fan-out at the real project
+count against a cold and a warm toolhost, on this machine, with a repository the size of
+`Source2DemViewer` (3,915 files in `target/`) in the set.
+
+**The answer is not a cache.** If the fan-out misses, observe **lazily per row** — the row that
+is on screen, when it is on screen. Caching would make the sidebar wrong the moment someone
+switches branches in their editor, which is the failure this whole design is shaped to avoid.

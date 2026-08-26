@@ -1,7 +1,7 @@
 # ORACLE — Project State
 
 > **The subsystem that makes "continue Asterim" answerable.**
-> Design, 2026-08-26. Nothing here is built. Scheduled as
+> Design, 2026-08-26. **T1 is built** — see *As built* below. Scheduled as
 > [Phase 12](ROADMAP.md#phase-12--project-state--the-continue-loop--residency-arc); the decision is
 > [ADR-0024](DECISIONS.md#adr-0024--a-project-is-a-first-class-persistent-entity).
 
@@ -256,24 +256,42 @@ is a *label on work*, never a grant of access. If registering a project could wi
 
 ---
 
+### As built  `P12-T1, 2026-08-26`
+
+Migration `0005`, `core/project_state.py`, three endpoints, 60 tests. What the implementation
+settled that this document had left open:
+
+| Question | Answer, and why |
+|---|---|
+| How is `tasks` indexed by project? | A **generated column**: `project TEXT GENERATED ALWAYS AS (json_extract(spec, '$.project')) VIRTUAL`, then an index on `(project, status)`. A real column would be a second copy of a fact `spec` already holds, and two copies drift; this one *is* `spec`, so it cannot — and nothing on the write path has to remember it. |
+| Is `TERMINAL` imported from orchestration? | **No.** Dependencies point downward and this module must not reach up into the supervisor — the same reason `memory.attempts.from_task` takes an `Any`. The status set is duplicated with a test (`test_terminal_set_matches_orchestration`) proving the copies agree, so the duplication cannot drift silently. |
+| Is existence stored or read? | **Read.** `refresh_presence()` reconciles rows at boot, but every surface reports `effective_status()`, which corrects the stored value with a fresh `is_dir()`. A directory deleted while the daemon runs must not leave the sidebar saying `idle` about something that is gone — that is the same stale-cache failure as a cached branch name, only with a coarser field. |
+| Does the list endpoint observe? | **No git at all.** Branch and dirty count appear only on `GET /api/v1/projects/{id}`. Twenty projects would otherwise be twenty subprocesses on a page-load — see [OQ-24](OPEN_QUESTIONS.md#oq-24), which this deferral opened rather than closed. |
+| Is `Path.is_dir()` in an async method a problem? | It is a **synchronous** stat, extracted into `_present()` so the choice is visible rather than hidden behind a lint exemption. `oracled` runs a busy loop, so this is a real hazard in general — but one stat on a local path costs microseconds and `detect_project` already reads marker files the same way. If it ever grows to stat a tree it moves to `asyncio.to_thread`. |
+
+**Not built in T1, and each depends on this one:** the `continue` intent, unfinished-work
+derivation (§5), the briefing (§6), and the sidebar rewrite.
+
+---
+
 ## 9. Acceptance criteria
 
 The subsystem is done when all of these hold:
 
-- [ ] `projects` table, migration `0005`, and an index on `tasks(project, status)`.
-- [ ] Registering, renaming and archiving a project are testable operations that preserve `id`.
-- [ ] A project whose root is deleted renders as `MISSING`, and nothing else in the app degrades.
-- [ ] `ProjectObservation` reads through the tool layer, and a security test asserts there is no
-      direct subprocess path.
-- [ ] Counters are rebuildable from `tasks`, and a test proves recompute equals the stored value
-      after a graph runs.
+- [x] `projects` table, migration `0005`, and an index on `tasks(project, status)`.  `P12-T1`
+- [x] Registering, renaming and archiving a project are testable operations that preserve `id`.  `P12-T1`
+- [x] A project whose root is deleted renders as `MISSING`, and nothing else in the app degrades.  `P12-T1`
+- [x] `ProjectObservation` reads through the tool layer, and a security test asserts there is no
+      direct subprocess path.  `P12-T1`
+- [x] Counters are rebuildable from `tasks`, and a test proves recompute equals the stored value
+      after a graph runs.  `P12-T1`
 - [ ] Unfinished work for a project is derived from the task graph, with repo task documents
       included as tainted evidence and a security test proving they cannot become instructions.
 - [ ] `continue` resolves to a planning call against real project state, and the intent eval is
       **re-run**, not assumed.
 - [ ] The briefing advances `briefed_through_seq` on acknowledgement only, and a test proves an
       unacknowledged briefing survives a restart.
-- [ ] Registering a project widens no policy scope — asserted in `tests/security/`.
+- [x] Registering a project widens no policy scope — asserted in `tests/security/`.  `P12-T1`
 
 ---
 

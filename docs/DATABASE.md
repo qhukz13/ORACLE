@@ -5,7 +5,7 @@ Two SQLite files, deliberately separate. Rationale in
 
 ```
 D:\ORACLE\data\
-├── oracle.db       operational: sessions, events, tasks, approvals, memory, devices
+├── oracle.db       operational: sessions, events, tasks, projects, approvals, memory
 └── knowledge.db    index: documents, chunks, vectors, symbols   ← DISPOSABLE
 ```
 
@@ -107,16 +107,42 @@ CREATE TABLE approvals (
 
 ### Projects, memory, devices
 
-```sql
-CREATE TABLE projects (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
-  kind TEXT,                        -- node|python|rust|roblox|mixed
-  has_git INTEGER NOT NULL DEFAULT 0,
-  test_command TEXT, build_command TEXT,
-  card_json TEXT,                   -- README/AGENTS.md/CLAUDE.md summary
-  last_seen_at TEXT
-);
+**Corrected 2026-08-26 against the built schema.** The sketch this section used to carry
+stored `kind`, `has_git`, `test_command`, `build_command` and a README summary — that is,
+**everything git and the filesystem already know**. [ADR-0024](DECISIONS.md#adr-0024--a-project-is-a-first-class-persistent-entity)
+rejected exactly that shape: a stored branch or build command is wrong the moment someone
+switches branches or edits their `package.json`, silently, with no event that could correct
+it. Detection is by marker file, on demand ([PROJECT_STATE.md §2](PROJECT_STATE.md#2-the-distinction-that-makes-this-design-work)).
 
+```sql
+-- migration 0005. Relational state only: what ORACLE did here, not what git can answer.
+CREATE TABLE projects (
+  id TEXT PRIMARY KEY,              -- "pj_..."; identity, stable across a rename
+  name TEXT NOT NULL UNIQUE,        -- the label the intent classifier resolves
+  root TEXT NOT NULL,
+  status TEXT NOT NULL,             -- active|idle|archived|missing
+  description TEXT NOT NULL DEFAULT '',
+  description_source TEXT NOT NULL DEFAULT 'user',   -- user|derived (taint provenance)
+  first_seen TEXT NOT NULL,
+  last_touched TEXT,                -- when ORACLE acted here; NOT the last commit
+  briefed_through_seq INTEGER NOT NULL DEFAULT 0,    -- PROJECT_STATE.md §6
+  -- A projection over `tasks`, rebuildable and never authoritative. Present only
+  -- because the briefing has a 3-5 second budget.
+  open_tasks INTEGER NOT NULL DEFAULT 0,
+  failed_tasks INTEGER NOT NULL DEFAULT 0,
+  tokens_spent INTEGER NOT NULL DEFAULT 0,
+  usd_spent REAL NOT NULL DEFAULT 0.0
+);
+CREATE INDEX ix_projects_status ON projects(status, name);
+
+-- The project a task belongs to lives inside `spec` (TaskSpec.project). A GENERATED
+-- column rather than a real one: a real column would be a second copy of a fact `spec`
+-- already holds, and two copies drift. This one cannot -- it *is* `spec`.
+ALTER TABLE tasks ADD COLUMN project TEXT
+  GENERATED ALWAYS AS (json_extract(spec, '$.project')) VIRTUAL;
+CREATE INDEX ix_tasks_project ON tasks(project, status);
+
+-- Named `memory_facts` in the built schema, not `facts`.
 CREATE TABLE facts (                -- MEMORY.md §3
   id TEXT PRIMARY KEY, scope TEXT NOT NULL, scope_ref TEXT,
   key TEXT NOT NULL, value TEXT NOT NULL,
@@ -143,6 +169,12 @@ CREATE TABLE devices (
 
 The partial unique index on `facts` enforces one live fact per `(scope, scope_ref, key)` while keeping
 superseded history — so "why does it believe that?" stays answerable.
+
+`TO VERIFY` — the `facts`, `attempts` and `devices` blocks above are still the pre-build
+sketch. The shipped tables are **`memory_facts`** and **`memory_attempts`** (migration
+0003) and carry extra columns; `devices` is not built at all. Only the `projects` block has
+been reconciled against source. Correct the rest when something next touches them, rather
+than trusting the shape here.
 
 ---
 

@@ -129,9 +129,12 @@ runtime judgement call.
 GET    /health                          liveness; no auth
 GET    /api/v1/status                   agent state, model, versions, degradations
 
-GET    /api/v1/projects                 registry with detected type + git state
-GET    /api/v1/projects/{id}
-POST   /api/v1/projects/{id}/scan
+GET    /api/v1/projects                 BUILT 2026-08-26: tracked projects + candidates.
+                                        Deliberately NO git state — see below
+POST   /api/v1/projects?name=           BUILT 2026-08-26: register a discovered directory
+GET    /api/v1/projects/{id}            BUILT 2026-08-26: the row + a fresh observation
+POST   /api/v1/projects/{id}/scan       PLANNED — and probably never: there is nothing to
+                                        scan into, because observed state is not stored
 
 GET    /api/v1/sessions                 list
 GET    /api/v1/sessions/{id}/events     paged history (?since_seq=&limit=)
@@ -172,6 +175,41 @@ POST   /api/v1/resume                   clears HALT; desktop only
 Conventions: cursor pagination (`?cursor=&limit=`, `limit` capped at 200) · `ETag`/`If-None-Match` on
 project and collection reads · `Idempotency-Key` required on every POST that starts work, so a mobile
 retry cannot launch a pipeline twice.
+
+---
+
+### `GET /api/v1/projects` — the registry  `BUILT 2026-08-26`
+
+Two lists, and the split is the point ([PROJECT_STATE.md §3](PROJECT_STATE.md#3-the-model)):
+
+- **`projects`** — rows ORACLE tracks. Registration is an explicit human act, so this stays
+  short enough to brief.
+- **`candidates`** — directories `discover_projects()` found that nobody has registered.
+  The real projects root on this machine holds `New folder` and `docs.zip` next to the real
+  ones; auto-registering everything would fill the briefing with them.
+
+**This endpoint runs no `git`.** A sidebar with twenty projects would otherwise be twenty
+subprocesses on a page-load. `status` is the stored value corrected by a fresh `is_dir()` —
+a directory deleted since boot reports `missing` immediately rather than at the next
+restart, because existence is observed state too.
+
+`POST /api/v1/projects?name=` registers. `name` **must be one `discover_projects()` actually
+found**; anything else is a 404. That is a safety rule, not a convenience — a name outside
+the candidate list would be a filesystem path assembled from a request. Registering is
+idempotent by name, and it **grants nothing**: scopes live in `config/policy.yaml` where a
+human edits them and git records the edit, asserted in `tests/security/`.
+
+### `GET /api/v1/projects/{id}` — one project  `BUILT 2026-08-26`
+
+The stored row, plus an `observation` object read **fresh on every call** through
+`git.status` and `git.log` (both T0, both across the policy gate). Nothing in it is cached
+or persisted: a cached branch name is wrong the moment someone switches branches, silently,
+with no event that could correct it.
+
+`observation.error` is a **field, not a status code**. A directory that is not a repository,
+a root that has been deleted, and a path the policy engine refuses all return `200` with the
+reason in that field — because every caller of this is a surface that has to render
+something, and a crashed sidebar is worse than a row that says why it is empty.
 
 ---
 
