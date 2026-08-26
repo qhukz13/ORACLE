@@ -248,7 +248,12 @@ class Scheduler:
         self.graph.replace(running)
         await self._persist(running)
         await self._emit("task.updated", running, {"status": str(running.status)})
-        timeout = self.limits.timeout_s.get(task.kind)
+        # The task's own ceiling wins over the per-kind default when it has one. Without
+        # this, a TOOL task running `dev.run_tests` (which declares 630 s) is killed at
+        # the kind default of 120 s and recorded as TIMEOUT — which reads as "the tests
+        # hung" rather than "the scheduler did not wait". ORCHESTRATION.md §3's layering
+        # is tool contract < step < task < graph; this is the `task` level.
+        timeout = task.timeout_s or self.limits.timeout_s.get(task.kind)
         runner = self.runners[task.kind]
         self._running[task.id] = asyncio.create_task(
             asyncio.wait_for(runner(running), timeout=timeout), name=f"task:{task.id}"

@@ -158,6 +158,14 @@ class Task(BaseModel):
     depends_on: tuple[str, ...] = ()
     attempt: int = 1
     max_attempts: int = 1
+    #: Wall-clock ceiling for THIS task, overriding the scheduler's per-kind default.
+    #: `None` means the default, which is what every task authored by a planner uses.
+    #:
+    #: It exists because the per-kind default cannot be right for every tool: TOOL is
+    #: 120 s, and `dev.run_tests` declares 630 s. ORCHESTRATION.md §3 already specifies
+    #: the layering — tool contract < step < task < graph — and this is the level that
+    #: was specified and not built.
+    timeout_s: float | None = None
     #: The failed task this one replaces. Replanning is append-only: nothing is rewritten,
     #: and the UI shows the failed attempt beside its replacement.
     supersedes: str | None = None

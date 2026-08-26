@@ -453,3 +453,81 @@ async def test_the_graph_survives_the_process_that_wrote_it(tmp_path: Path) -> N
         assert reloaded["a"].started_at is not None
     finally:
         await second.close()
+
+
+# -- the task's own ceiling ----------------------------------------------------
+
+
+class TestTaskTimeoutOverridesTheKindDefault:
+    """A defect P7 shipped and Phase 10 uncovered, with the fix pinned around it.
+
+    `Limits.timeout_s[TaskKind.TOOL]` is **120 s**. `dev.run_tests` declares its own
+    timeout as **630 s** and `dev.build` as **930 s**. So a TOOL task running either was
+    killed by the scheduler at two minutes and recorded as `TIMEOUT` — which reads as
+    "the tests hung", not "the scheduler did not wait", and would have been diagnosed as
+    a flaky test suite for as long as it took somebody to compare the two numbers.
+
+    ORCHESTRATION.md §3 already specifies the layering this needs — *tool contract < step
+    < task < graph* — so `Task.timeout_s` is the level that was specified and not built,
+    not a new concept Phase 10 invented for itself.
+    """
+
+    async def test_a_task_may_wait_longer_than_its_kind_default(self) -> None:
+        """The defect, directly: a runner slower than the kind default and faster than
+        the task's own ceiling has to succeed."""
+        slow = task("slow", kind=TaskKind.TOOL)
+        slow = slow.model_copy(update={"timeout_s": 5.0})
+        graph = TaskGraph([slow])
+        order: list[str] = []
+        status = await Scheduler(
+            graph,
+            {TaskKind.TOOL: ok_runner(order, delay=0.15)},
+            limits=Limits(timeout_s={TaskKind.TOOL: 0.05}),
+        ).run()
+        assert status is TaskStatus.SUCCEEDED, "the task's own ceiling must win"
+        assert order == ["slow"]
+
+    async def test_without_one_the_kind_default_still_applies(self) -> None:
+        """The other direction, so the override cannot quietly become "no timeout"."""
+        graph = TaskGraph([task("slow", kind=TaskKind.TOOL)])
+        status = await Scheduler(
+            graph,
+            {TaskKind.TOOL: ok_runner([], delay=0.5)},
+            limits=Limits(timeout_s={TaskKind.TOOL: 0.05}),
+        ).run()
+        # TIMEOUT, not FAILED: the aggregate keeps the distinction the vocabulary makes.
+        assert status is TaskStatus.TIMEOUT
+        assert graph["slow"].status is TaskStatus.TIMEOUT
+
+    async def test_a_task_that_trips_its_own_ceiling_is_timeout_not_failed(self) -> None:
+        """`TIMEOUT != FAILED` is a distinction the status vocabulary makes on purpose
+        (ORCHESTRATION.md §3): a timed-out task may well have done the work."""
+        slow = task("slow", kind=TaskKind.TOOL).model_copy(update={"timeout_s": 0.05})
+        graph = TaskGraph([slow])
+        await Scheduler(
+            graph,
+            {TaskKind.TOOL: ok_runner([], delay=0.5)},
+            limits=Limits(timeout_s={TaskKind.TOOL: 30.0}),
+        ).run()
+        assert graph["slow"].status is TaskStatus.TIMEOUT
+
+    async def test_it_survives_a_round_trip_through_the_store(self, tmp_path: Path) -> None:
+        """A ceiling that is not persisted is a ceiling that changes after a crash, and
+        recovery is the moment a long task most needs it."""
+        from oracle.storage.db import connect, migrate
+
+        conn = await connect(tmp_path / "oracle.db")
+        try:
+            await migrate(conn)
+            store = TaskStore(conn)
+            original = task("slow", kind=TaskKind.TOOL).model_copy(update={"timeout_s": 630.0})
+            await store.save(original)
+            [reloaded] = await store.load_graph(ROOT)
+            assert reloaded.timeout_s == 630.0
+
+            plain = task("plain", kind=TaskKind.TOOL)
+            await store.save(plain)
+            rows = {t.id: t for t in await store.load_graph(ROOT)}
+            assert rows["plain"].timeout_s is None, "no ceiling must stay no ceiling"
+        finally:
+            await conn.close()
