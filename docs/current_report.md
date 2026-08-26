@@ -3,134 +3,138 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** P9-T3 (the translator, measured) and **Phase 10 — Pipelines (built)**.
-**Status:** Phase 10 is done, tested and documented. P9-T3 is **half done**: the translator is
-measured and shipped, the corpus re-scoring is **scheduled for 2026-08-27 07:12** and OQ-18 stays
-open until it lands.
+**Task:** **P11-T1 — OQ-22, measured.** Plus Phase 10 (done earlier the same day) and two defects
+found by looking rather than by anything breaking.
+**Status:** OQ-22 answered on three of four measurements; the fourth needs a real window. The
+knowledge graph is worth building, **narrower than the design describes it**.
 **Date:** 2026-08-26
 
 ---
 
-## Phase 10 — pipelines, built
+## P11-T1 — the knowledge graph, measured before it was drawn
 
-A YAML file becomes a validated `Pipeline`, renders against its parameters, compiles to a task
-graph and runs on P7's scheduler. **No pipeline executor, no `pipeline_runs` table, no new
-`TaskKind`, no new runner**, and exactly two new event types — neither of them a `task.*`, because
-the steps *are* ordinary tasks and `TaskTree` renders a run with no new code.
+`scripts/measure_graph.py` · [dev log](../logs/development/2026-08-26-oq22-knowledge-graph.md) ·
+data in `logs/measurements/oq22-graph.{json,txt}` · corpus fingerprint `e342f8a55a6ce17d`.
 
-The roadmap's extra acceptance criterion is a passing test rather than a claim: a compiled pipeline
-and a hand-written graph of the same steps emit identical event sequences, element for element,
-with no event type unique to either.
+**Measurement 3 ran first**, against OQ-22's own ordering, because the edge model decides the node
+count and the node count is what the rendering question gets asked at.
 
-Two shipped pipelines in [`config/pipelines/`](../config/pipelines/), both priced against the
-**real** `config/policy.yaml` and the **real** tool registry by a test — so a renamed tool or an
-argument a contract does not take fails a test rather than a run. The daemon boots, discovers both,
-and reports them on `/api/v1/status`; the palette offers them by name.
+### The link table is one collection's, and that inverts the design
 
-### Five things the spec could not have known
+Explicit wikilinks touch **157 of 1,420 documents — 11%** — and 156 of those are in one Obsidian
+vault. `links` is populated only from the Obsidian chunker, and exactly one collection sets
+`obsidian: true`, so this is structural rather than incidental.
 
-All five are corrected **in PIPELINES.md**, not worked around in code. A spec that disagrees with
-its implementation is worse than no spec: the next reader cannot tell which half to trust.
+Explicit-only leaves **1,168 of 1,325 embeddable documents orphaned** across 1,264 components, with
+a 2-hop median of **zero**. UI.md §11b and OQ-22 both describe semantic edges as an optional toggle
+that might "ship off"; on this corpus they are the difference between a graph and a scatter of dots.
+Recommended default **k=4, thr=0.85** — 3,103 edges, 189 orphans, a 35% giant component, 2-hop
+median 0.9%.
 
-1. **A P7 defect.** `Limits.timeout_s[TaskKind.TOOL]` is **120 s**; `dev.run_tests` declares 630 s
-   and `dev.build` 930 s. **Any TOOL task running either was killed at two minutes and recorded as
-   `TIMEOUT`** — which reads as "the tests hung", not "the scheduler did not wait". True since P7-T2
-   and invisible because the graphs built before now ran delegations (3600 s) and verifications
-   (900 s). `Task.timeout_s` (migration `0004`) is the `task` level ORCHESTRATION.md §3 already
-   specified. **It is a graph fix and should outlive pipelines.**
-2. **The spec contradicted itself twice.** `on_failure: ask` appears nine lines after "never a
-   prompt mid-run"; §2's example uses `retry: { on: [...] }` twenty lines before §3 says the tool
-   contract decides retryability, not the author. Both refused, by not existing in the enum.
-3. **Three things in the worked example do not exist**: a `project` tool argument (every tool takes
-   a `ScopedPath`), `oracle.report`, and `capture: junit`.
-4. **A policy entry that is a floor, not a price.** `pipe.run: T2` made PIPELINES.md's own
-   `tier = max(tier(step))` rule unimplementable, because `evaluate()` only ever *raises* a tier.
-   Found by a read-only pipeline hanging 180 s and returning `refused` — an approval nobody
-   answered. It is `T0` now, with the reasoning in `policy.yaml`.
-5. **Cancelling marks the rest `CANCELLED`, not `SKIPPED`.** My test asserted the spec and the
-   scheduler was right: `SKIPPED` means *an ancestor failed*, `CANCELLED` means *a person stopped
-   it*, and collapsing them loses the one distinction somebody reading a stopped run needs.
+### One question the view cannot answer, and it is question 1
 
-### The dangerous part
+§11b asks *"where are the bridges between a vault and a project?"*. Across **every** k and **every**
+threshold the graph holds **one** edge joining `notes` to `projects`.
 
-One card authorising six actions and one card nobody reads are the same gesture. Six of the 21
-cases in `tests/security/test_pipeline_authority.py` constrain the grant-minting: bound to the
-digest the card displayed, single-use, per task, T3 refused at validation, revoked in a `finally`.
-A pipeline from `<project>/.oracle/pipelines/` is `local_foreign` — repository content, the same
-trust class as a checked-in `AGENTS.md` — so the gate escalates it and the card says so.
+That is not a threshold wanting tuning. The notes are ML prose; the projects are TypeScript, Rust and
+Python. `bge-m3` is right that they are not about the same things. The promise is **struck from
+UI.md §11b** with the number attached, rather than left to disappoint — a view that reliably finds
+one bridge is a sentence, not a feature.
 
----
+### The cost is reading vectors, not laying them out
 
-## P9-T3 — the translator is measured; the corpus run is not
+| | |
+|---|---:|
+| read 13,771 chunk vectors out of `vec0` | **51.8 s** |
+| pool them + full 1,325² cosine kNN | **0.2 s** |
+| cold layout, 1,420 nodes / 3,103 edges | **27.8 s** (gate 10 min) |
+| peak RSS | **121 MB** (gate 500 MB) |
+| incremental placement p95 | **0.032 ms** (gate 250 ms) |
 
-**Done, and it changes the design:** `qwen3.5:0.8b` translates a fixture question in **1.6 s p50**,
-and **5 of the 25 came back still in Russian** — valid JSON, inside the length cap, and not a
-translation. Unguarded that is the worst failure shape available: the second probe embeds the same
-question twice, RRF fuses a ranking with itself, and every log line says it worked. The shipped
-translator rejects an output that still carries the source script. Raw output is kept in
-[`oq18-translations-unguarded.json`](../logs/measurements/oq18-translations-unguarded.json) so the
-guard can be argued from a number.
+The arithmetic is 0.2% of the work. **`document_vectors` is a required table**, written by
+`store.put()` — without it, incremental indexing spends 52 s against a `< 5 s` budget and gets
+misdiagnosed as slow layout.
 
-A second measurement changed a constant: the same call took **19.7 s with the machine busy**
-against a 20 s budget. A budget that fits only an idle machine is a feature that switches itself
-off under load and says nothing. It is 45 s now — enough for warm-but-loaded, still refusing a cold
-model load.
+Scaling is clean O(N²): extrapolated to ADR-0023's 10k ceiling, ~21 min and ~800 MB — inside the
+time gate, **outside the memory one**. The current corpus does not need Barnes-Hut; a 7x larger one
+would.
 
-**Query translation ships on the Handoff Packet path only**, behind `Settings.translate_queries`.
-`tests/test_rag_degradation.py` asserts the property that let it ship at all: no translator, a
-refusal, a timeout, an empty string — every one thins retrieval to the native probe, so the worst
-case of the mechanism is that it improves nothing.
+### A measurement that measured its own noise, and what fixing it exposed
 
-### The finding that outlives the task
+The stability holdout first returned **0.249 at every fraction** — 5%, 10%, 20% alike. A metric that
+does not respond to its own variable is not measuring it.
 
-**The answer key was in the corpus.** `tests/fixtures/retrieval/cases.yaml` holds all 38 fixture
-questions verbatim beside their expected paths, and `C:/Projects` contains ORACLE — so it is the
-strongest lexical match for **37 of the 38 queries that measure this system**.
+The cause was in the layout: initial positions were seeded by **array index**, so the same document
+started somewhere different depending on how many documents existed and in what order they arrived.
+Seeding from a hash of the node's own id fixed it, and the numbers became monotone
+(**0.477 / 0.410 / 0.336**).
 
-It was found and fixed on 2026-08-22 (commit `b660172`) **in `scripts/index_knowledge.py`**, and
-`scripts/eval_embeddings.py` never got it — which is the script that produced **every number OQ-18
-records**. Two copies of one idea and a fix reaching one of them: the shape of four of the five
-instrument defects this project has found. There is one copy now, imported rather than restated.
+That matters well beyond the measurement. **ADR-0013's whole argument is that a person learns where
+things are**, and array-order seeding breaks it at the source: reindex after adding one file and
+every position shifts. It would have shipped as "the layout is unstable, add more iterations".
 
-So `en-relay-dockerfile` is **not** structurally unreachable, as P9-T2 recorded. It is at
-unique-file rank 4, behind the fixture file and three ORACLE documents *about* the fixture file.
-What actually sinks it is RRF's arithmetic, now pinned by `TestRrfBuriesASingleListDocument`: a
-document one retriever cannot produce scores `1/61` and one both lists hold scores `1/61 + 1/62`,
-so a config file — indexed lexically, never embedded — cannot survive fusion. That is a property of
-the design, not a broken fixture, and weighting RRF to rescue one case would trade the property the
-algorithm was chosen for.
+The 0.70 gate — mine, set before the run — is still **missed** at 0.477. Positions stay *stable*
+(nothing moves on its own); what degrades is *fidelity*. So re-layout must be **prompted** after a
+few percent of growth rather than buried in a health view, and at 28 s that is cheap.
 
-### What is scheduled, and why it moved
+### Not answered: canvas vs SVG
 
-The corpus run was killed at 2h45m and re-scheduled as a **Windows task, `ORACLE-OQ18-eval`, for
-2026-08-27 07:12** (`StartWhenAvailable`, so it runs at next boot if the machine is off). It takes
-~3 hours and writes `logs/measurements/oq18-translated.{txt,json}` and the reusable forward pass to
-`D:/ORACLE/scratch/`.
-
-Moving it was the better choice on the merits, not only for the CPU: the killed run loaded its
-corpus at 11:12, and **Phase 10 rewrote four ORACLE documents that are in that corpus**. Its numbers
-would have described a snapshot that no longer exists — and since OQ-18's live finding is precisely
-that ORACLE's own documents contaminate the measurement, measuring a stale snapshot is worse than
-measuring the committed state.
+It needs `requestAnimationFrame` deltas from a compositing window on this GTX 1050 Ti inside
+WebView2, and this environment has no displayed browser pane. A frame timing from a page that was
+never drawn is exactly the class of number this project keeps having to throw away.
+`oq22-graph.positions.npz` holds the frozen positions so the harness has its input.
+**ADR-0023 is therefore UNCONFIRMED** — at 1,420 nodes the scene is unremarkable for SVG, which is
+precisely why OQ-22 asks for that control.
 
 ---
 
-## A test that fails under load, and what that is worth knowing
+## Two defects found by reading, not by breaking
 
-`tests/security/test_terminal.py::…::test_a_long_burst_arrives_complete` lost 189 lines of a ConPTY
-burst — twice — while the corpus run had all 24 threads saturated. It also failed at `HEAD` with
-none of this work applied (verified in a clean `git worktree`), so it was never this branch's doing.
-**On an idle machine it passes in 6 s, and the full gate is green.**
+**HALT was bound to `F1`.** UI.md §16 specifies `Ctrl+Alt+Shift+H` and says why — *"deliberately
+awkward: four keys, so it cannot be hit by accident"*. The code used one key, and the one it used is
+the universal help key, next to Esc. HALT cancels every task, terminates every job object and drops
+policy to deny-all until a human resumes. Rebound, with a keybinding test rather than a UI test,
+because the failure mode is silent: the app looks identical and the only symptom is somebody's work
+stopping when they reached for help.
 
-So: a flake, not a bug. But it is a flake in the *merge gate*, and it is the one test whose subject
-is data loss — so "it only fails when the machine is busy" is an uncomfortable thing for it to mean.
-Recorded in [current_task.md](current_task.md) rather than closed: if it reappears, the question is
-whether the ConPTY reader really does drop output under starvation or whether the test's own
-deadline is too tight, and those have different fixes.
+**The least visible status in the app was the one that means HALTED.** UI.md §14 requires status
+≥ 3:1 contrast and singles out amber as "the risky one … must be verified, not assumed". It never
+had been — `a11y.test.tsx` disables axe's `color-contrast` rule, correctly, because happy-dom lays
+nothing out. So the one rule flagged as risky was the one rule the audit could not check.
 
-`make check` is **green**: **1,061 Python** + **171 TypeScript**, security suite included.
+`contrast.test.ts` checks it now as a pure function over tokens parsed **out of `styles.css`
+itself**, so it cannot drift. **Amber was fine** (7.22–8.99:1); the section guessed wrong. Two others
+failed: `--st-halt` at **2.99 / 2.82 / 2.63 / 2.40** — under 3:1 on *every* surface — and `--fg-2`
+under 3:1 on the two raised surfaces. Both raised.
+
+---
+
+## Phase 10 — pipelines, done earlier today
+
+A YAML file becomes a validated `Pipeline`, compiles to a task graph and runs on P7's scheduler. No
+pipeline executor, no `pipeline_runs` table, no new `TaskKind`. The roadmap's extra criterion is a
+passing test: a compiled pipeline and a hand-written graph of the same steps emit identical event
+sequences. Two shipped pipelines, both priced against the real policy by a test.
+
+It also uncovered a **P7 defect** — `Limits.timeout_s[TaskKind.TOOL]` is 120 s while `dev.run_tests`
+declares 630 s, so any TOOL task running it died at two minutes and was recorded as `TIMEOUT` — and
+**five places PIPELINES.md disagreed with reality**, each corrected in the document with its reason.
+Detail in the [Phase 10 dev log](../logs/development/2026-08-26-p10-pipelines.md).
+
+## And one dead root that took the watcher down
+
+`C:/Users/qhukz/Documents/MLAI NOTES/ML/AI` had not existed for some time. The indexer skipped it
+with a warning; `watchfiles` **refuses to start** on a path that is neither file nor directory, so
+that one absent root disabled **live re-indexing for every collection** with a single line at boot
+and no other symptom. Removed from `collections.yaml` and from `policy.yaml` (where it was also a
+read-only scope root — removing a scope only ever narrows). Verified: `rag.watch_started roots=9`,
+no warnings, and a live mtime-only touch now round-trips in 6 ms.
+
+---
 
 ## Next
 
-**P11-T1** ([current_task.md](current_task.md)) — but read the two carried-over items there first;
-one of them is a scheduled job that will have produced numbers by the time anybody reads this.
+**P11-T2** — OQ-14's go/no-go on the orbital view. See [current_task.md](current_task.md); note that
+the `tasks` table is **empty**, so the execution tree, orbit, timeline and queue would all render
+activity that has never happened outside a test. The cheapest unblock is a person running
+`oracle-selfcheck` once.

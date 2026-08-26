@@ -33,7 +33,7 @@ doc, delete the marker.
 | [OQ-19](#oq-19) | Should the Claude integration move to the Claude Agent SDK? | `TO VERIFY` (on trigger) | none — trigger-based | open |
 | [OQ-20](#oq-20) | Can `agy --json-schema` reliably return a valid ExecutionPlan? | measured 2026-08-24 | P6-T5 / Phase 8 | **answered NO — 75% vs a 90% gate; the ladder promoted Claude** |
 | [OQ-21](#oq-21) | When does ORACLE's MCP server need the 2026-07-28 spec? | `UNKNOWN` | none — watch item | monitoring |
-| [OQ-22](#oq-22) | Does the knowledge graph hold its budgets at corpus scale? | `EXPERIMENT NEEDED` | Phase 11 (graph view only) | open |
+| [OQ-22](#oq-22) | Does the knowledge graph hold its budgets at corpus scale? | measured 2026-08-26 | Phase 11 (graph view only) | **3 of 4 answered — build it, narrower; canvas-vs-SVG still needs a real window** |
 | [OQ-23](#oq-23) | Does a failure-carrying prompt produce a *different* plan? | `EXPERIMENT NEEDED` | nothing — replanning ships bounded | opened 2026-08-25 |
 
 ---
@@ -763,6 +763,33 @@ and this machine. Four measurements, run at the start of Phase 11 before the vie
 Failure of 1 or 2 changes the mechanism (coarser graph: one node per note/section, or
 level-of-detail culling), not the goal. Record results in `logs/development/` and fold the
 numbers into TESTING.md's performance table when the view lands.
+
+#### Measured  `2026-08-26, P11-T1`
+
+`scripts/measure_graph.py`, [dev log](../logs/development/2026-08-26-oq22-knowledge-graph.md),
+data in `logs/measurements/oq22-graph.{json,txt}`. Corpus fingerprint `e342f8a55a6ce17d`.
+
+**Measurement 3 ran first**, against the ordering above, because the edge model decides the node
+count and the node count is what the rendering question is asked at.
+
+| | result |
+|---|---|
+| **3 · semantic edges** | **Required, not optional.** Explicit wikilinks touch **11% of the corpus** (157 of 1,420 documents; 156 of them `notes`, 1 `projects`). Explicit-only leaves **1,168 of 1,325 embeddable documents orphaned**. Semantic edges take that to 44. Recommended default **k=4, thr=0.85**: 3,103 edges, 189 orphans, 35% giant component, 2-hop median 0.9%. The useful band is **0.80–0.90**; 0.95 is indistinguishable from no semantic edges. |
+| **3b · bridges** | **The one question the view cannot answer.** Across every k and every threshold the graph holds **one** edge joining `notes` to `projects`. Not a tuning failure — the notes are ML prose and the projects are code. UI.md §11b's four questions become three. |
+| **1 · layout** | Cold 1,420 nodes / 3,103 edges: **27.8 s**, peak RSS **121 MB**. Incremental placement p95 **0.032 ms**. All three gates pass by wide margins. |
+| **1b · the real cost** | Reading 13,771 vectors out of `vec0` is **51.8 s**; pooling and the full kNN together are **0.2 s**. The arithmetic is 0.2% of the work. **`document_vectors` is a required table**, written by `store.put()` — otherwise incremental indexing spends 52 s against a `< 5 s` budget and it gets misdiagnosed as slow layout. |
+| **1c · the ceiling** | Clean O(N²): 500/1k/2k/4k → 3.4/13.8/55.4/200.7 s projected. Extrapolated to ADR-0023's 10k ceiling: ~21 min, ~800 MB — inside the time gate, **outside the 500 MB one**. The current corpus does not need Barnes-Hut; a 7x larger one would. |
+| **4 · stability** | **Reframed as a holdout**, because "after a week of real edits" is unanswerable inside a phase. Jaccard@10 against a full re-layout: **0.477 / 0.410 / 0.336** at 5 / 10 / 20% holdout, against a self-imposed 0.70 gate — **missed**. Positions remain *stable* (nothing moves on its own, per ADR-0023); what degrades is *fidelity*. So re-layout must be prompted after a few percent growth, not buried — and at 28 s it is cheap. |
+| **2 · canvas vs SVG** | **Not answered.** It needs rAF deltas from a compositing window on this GPU inside WebView2, and the spike ran without one. Frozen positions are in `oq22-graph.positions.npz` so the harness has its input. At 1,420 nodes / 3,103 edges the scene is unremarkable for SVG, and OQ-22 asks for that control precisely to keep ADR-0023 honest — so **[ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered) is UNCONFIRMED** until somebody runs it. |
+
+**And one finding that was not one of the four.** The first stability run returned 0.249 at *every*
+holdout fraction — a metric not responding to its own variable. The cause was in the layout:
+initial positions were seeded by **array index**, so the same document started somewhere different
+depending on how many documents existed and in what order. Seeding from a hash of the node's own id
+fixed it, and the numbers immediately became monotone. This matters beyond the measurement:
+**ADR-0013's argument is that a person learns where things are**, and array-order seeding breaks
+that at the source — reindex after adding one file and every position shifts. It would have shipped
+as "the layout is unstable, add more iterations".
 
 ---
 

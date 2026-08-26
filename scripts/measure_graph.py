@@ -35,7 +35,6 @@ import argparse
 import hashlib
 import json
 import math
-import os
 import sqlite3
 import sys
 import time
@@ -332,8 +331,22 @@ def layout(
     """
     n = len(nodes)
     index = {node: i for i, node in enumerate(nodes)}
-    rng = np.random.default_rng(seed)
-    pos = rng.normal(scale=0.3, size=(n, 2)).astype(np.float32)
+
+    # Each node's starting point is a function of **its own id**, not of its position in the
+    # array. This is the difference between a map a person can learn and one that reshuffles.
+    #
+    # `rng.normal(size=(n, 2))` looks equivalent and is not: it makes every node's initial
+    # position depend on how many nodes there are and what order they arrived in, so indexing one
+    # new document moves the starting point of every document after it — and a force layout
+    # amplifies a different start into a different picture. Measured: with array-order seeding,
+    # neighbour-set Jaccard@10 between an incrementally-grown map and a re-layout was 0.25 and
+    # *did not vary with how much had been added*, which is the signature of a metric measuring
+    # its own noise rather than the thing it was pointed at.
+    pos = np.empty((n, 2), dtype=np.float32)
+    for i, node in enumerate(nodes):
+        digest = hashlib.sha256(f"{seed}:{node}".encode()).digest()
+        pos[i] = np.frombuffer(digest[:8], dtype=np.uint32).astype(np.float64) / 2**32 - 0.5
+    pos *= 0.6
 
     src = np.array([index[a] for a, _ in edges], dtype=np.int32)
     dst = np.array([index[b] for _, b in edges], dtype=np.int32)
@@ -572,7 +585,7 @@ def main() -> int:
         result["scaling"] = []
         for n in (500, 1000, 2000, 4000):
             fake = [f"n{i}" for i in range(n)]
-            fe = [(f"n{i}", f"n{(i * 7 + 3) % n}") for i in range(n * 3)]
+            fe = [(f"n{i % n}", f"n{(i * 7 + 3) % n}") for i in range(n * 3)]
             _, s = layout(fake, fe, iterations=30)
             projected = s * (args.iterations / 30)
             print(
@@ -618,12 +631,38 @@ def _peak_rss_mb() -> float:
     Reported rather than assumed: OQ-22 sets a 500 MB gate, and a gate measured as "we did not
     check" is not a gate.
     """
-    try:
-        import psutil  # type: ignore[import-not-found]
+    if sys.platform == "win32":
+        # No psutil dependency for one number. `GetProcessMemoryInfo` is in kernel32 on every
+        # supported Windows and reports the peak working set directly.
+        import ctypes
+        from ctypes import wintypes
 
-        return float(psutil.Process(os.getpid()).memory_info().peak_wset) / 1e6  # type: ignore[attr-defined]
-    except Exception:  # noqa: S110 - psutil is optional; the POSIX path is tried next
-        pass
+        class _Counters(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD),
+                ("PageFaultCount", wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        counters = _Counters()
+        counters.cb = ctypes.sizeof(_Counters)
+        get_current = ctypes.windll.kernel32.GetCurrentProcess  # type: ignore[attr-defined]
+        # Without this the pseudo-handle (-1) is truncated to a 32-bit int and the call
+        # fails silently, reporting -1 MB into a 500 MB gate.
+        get_current.restype = wintypes.HANDLE
+        handle = get_current()
+        info = ctypes.windll.psapi.GetProcessMemoryInfo  # type: ignore[attr-defined]
+        info.argtypes = [wintypes.HANDLE, ctypes.POINTER(_Counters), wintypes.DWORD]
+        info.restype = wintypes.BOOL
+        ok = info(handle, ctypes.byref(counters), counters.cb)
+        return float(counters.PeakWorkingSetSize) / 1e6 if ok else -1.0
     try:
         import resource
 

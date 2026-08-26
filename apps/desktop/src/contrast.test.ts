@@ -30,7 +30,8 @@ function tokens(): Record<string, string> {
   const root = CSS.slice(CSS.indexOf(":root"), CSS.indexOf("}", CSS.indexOf(":root")));
   const out: Record<string, string> = {};
   for (const m of root.matchAll(/(--[\w-]+)\s*:\s*(#[0-9a-fA-F]{3,8})\s*;/g)) {
-    out[m[1]] = m[2];
+    const [, name, value] = m;
+    if (name && value) out[name] = value;
   }
   return out;
 }
@@ -43,16 +44,33 @@ function channel(v: number): number {
 function luminance(hex: string): number {
   let h = hex.replace("#", "");
   if (h.length === 3) h = [...h].map((c) => c + c).join("");
-  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const rgb = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  if (rgb.length !== 3 || rgb.some(Number.isNaN)) {
+    throw new Error(`${hex} is not a hex colour this test can read`);
+  }
+  const [r, g, b] = rgb as [number, number, number];
   return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
 }
 
 export function contrast(fg: string, bg: string): number {
-  const [a, b] = [luminance(fg), luminance(bg)].sort((x, y) => y - x);
-  return (a + 0.05) / (b + 0.05);
+  const lighter = Math.max(luminance(fg), luminance(bg));
+  const darker = Math.min(luminance(fg), luminance(bg));
+  return (lighter + 0.05) / (darker + 0.05);
 }
 
 const T = tokens();
+
+/** A token by name, or a loud failure.
+ *
+ * `T[name]` is `string | undefined` under `strict`, and the tempting fix is a non-null assertion.
+ * That would make a *renamed* token silently compare `undefined` against a surface and produce
+ * `NaN`, which `toBeGreaterThanOrEqual` fails with a baffling message. Throwing names the token. */
+function tok(name: string): string {
+  const value = T[name];
+  if (!value) throw new Error(`${name} is not defined in styles.css :root`);
+  return value;
+}
+
 /** The surfaces §14 names: app → panel → raised → input. Status sits on all of them. */
 const SURFACES = ["--bg-0", "--bg-1", "--bg-2", "--bg-3"] as const;
 const STATUS = [
@@ -82,7 +100,7 @@ describe("UI.md §14: all text ≥ 4.5:1", () => {
   for (const fg of ["--fg-0", "--fg-1"] as const) {
     for (const bg of SURFACES) {
       it(`${fg} on ${bg}`, () => {
-        expect(contrast(T[fg], T[bg])).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(tok(fg), tok(bg))).toBeGreaterThanOrEqual(4.5);
       });
     }
   }
@@ -92,7 +110,7 @@ describe("UI.md §14: all status indicators ≥ 3:1", () => {
   for (const st of STATUS) {
     for (const bg of SURFACES) {
       it(`${st} on ${bg}`, () => {
-        expect(contrast(T[st], T[bg])).toBeGreaterThanOrEqual(3);
+        expect(contrast(tok(st), tok(bg))).toBeGreaterThanOrEqual(3);
       });
     }
   }
@@ -103,7 +121,7 @@ describe("the one §14 calls risky", () => {
     // Singled out because it is the token that means "needs a human". A status nobody can see is
     // a request nobody answers, and this is the colour the design flagged as most likely to fail.
     for (const bg of SURFACES) {
-      const ratio = contrast(T["--st-wait"], T[bg]);
+      const ratio = contrast(tok("--st-wait"), tok(bg));
       expect(ratio, `--st-wait on ${bg} is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
     }
   });
@@ -111,7 +129,7 @@ describe("the one §14 calls risky", () => {
   it("and is legible as text too, since approvals render words in it", () => {
     // `.pc-badge`, `.egress-dest` and the approval tier label are amber *text*, not just a dot,
     // so for those uses the 4.5:1 text bar is the one that applies.
-    const ratio = contrast(T["--st-wait"], T["--bg-2"]);
+    const ratio = contrast(tok("--st-wait"), tok("--bg-2"));
     expect(ratio, `amber text on a raised surface is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
       4.5,
     );
@@ -121,7 +139,7 @@ describe("the one §14 calls risky", () => {
 describe("--fg-2 is decoration, and is held to the non-text bar", () => {
   for (const bg of SURFACES) {
     it(`--fg-2 on ${bg} clears 3:1`, () => {
-      expect(contrast(T["--fg-2"], T[bg])).toBeGreaterThanOrEqual(3);
+      expect(contrast(tok("--fg-2"), tok(bg))).toBeGreaterThanOrEqual(3);
     });
   }
 });

@@ -113,9 +113,26 @@ Regressions here are silent and cumulative, so they are asserted:
 | WS event fan-out | < 20 ms |
 | Global search | p95 < 300 ms |
 | Orbit view, idle | < 5% CPU |
+| Knowledge-graph layout, cold (1.4k docs) | < 10 min — **measured 27.8 s** |
+| Knowledge-graph layout, peak RSS | < 500 MB — **measured 121 MB** |
+| Knowledge-graph incremental placement | < 250 ms — **measured 0.032 ms p95** |
+| Knowledge-graph canvas pan/zoom | p95 frame < 16.7 ms — **not yet measured** |
 
 Measured nightly on this hardware. These numbers are hardware-specific by design — a budget that
 passes on a different machine tells us nothing about the machine ORACLE runs on.
+
+**Two of these have no test to live in yet**, and saying so is better than implying otherwise:
+`make perf` and `make eval` are named in §8 below and defined in neither the `Makefile` nor
+`scripts/check.py`. Until they exist, the graph numbers above come from
+`scripts/measure_graph.py` run by hand ([OQ-22](OPEN_QUESTIONS.md#oq-22),
+[dev log](../logs/development/2026-08-26-oq22-knowledge-graph.md)), and the canvas row is honestly
+blank because it needs a compositing window on this GPU inside WebView2.
+
+**And one budget that is not in this table but bit twice on 2026-08-26**: several tests here carry
+implicit *wall-clock* assumptions — a watcher filtering 5,000 paths in under 2 s, a ConPTY burst
+arriving intact — and both failed while another process held all 24 threads, then passed idle. A
+budget asserted on a loaded machine measures the load. Worth deciding whether those become explicit
+perf tests (which may be skipped under load) or keep tighter deadlines.
 
 ## 7. What is not tested automatically
 

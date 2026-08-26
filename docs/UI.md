@@ -481,8 +481,7 @@ Backed by hybrid retrieval (P5) for notes/files and direct queries for the rest.
 The graph earns its place the same way the orbit does — by answering questions the list view
 cannot. The four it exists for:
 
-1. **Shape** — how is my knowledge actually organised? Where are the hubs, the clusters, the
-   bridges between a vault and a project?
+1. **Shape** — how is my knowledge actually organised? Where are the hubs and the clusters?
 2. **Neglect** — what is orphaned, stale, or was never indexed?
 3. **Reach** — starting from this note, what is connected, one and two hops out?
 4. **Use** — what did ORACLE just retrieve to answer me, and from where?
@@ -490,6 +489,24 @@ cannot. The four it exists for:
 If, after real use, it answers none of these better than search does, it gets cut and an ADR
 records that — the same honesty gate as the orbit ([OQ-14](OPEN_QUESTIONS.md#oq-14) applies to
 both, per view).
+
+**Struck from question 1: "the bridges between a vault and a project".**  `MEASURED 2026-08-26`
+Across every edge configuration measured for [OQ-22](OPEN_QUESTIONS.md#oq-22) — every `k`, every
+similarity threshold — this corpus contains **one** edge joining `notes` to `projects`. The explicit
+wikilink graph has two.
+
+That is not a threshold that wants tuning. The notes are prose about machine learning and the
+projects are TypeScript, Rust and Python; `bge-m3` is right that they are not about the same things,
+and no parameter will invent a relationship that is not there. A view that reliably finds one bridge
+is a sentence, not a feature, so the promise is withdrawn rather than left to disappoint. That the
+answer is "there are none" remains worth *showing* — it is a true and slightly uncomfortable fact
+about this corpus — but it is not something the view goes looking for.
+
+**And semantic edges are not optional, which this section had backwards.** Explicit wikilinks touch
+**11% of the corpus** (157 of 1,420 documents, 156 of them in one vault), leaving 1,168 of 1,325
+embeddable documents orphaned across 1,264 components. Semantic edges take orphans to 44. The "off
+by default, a toggle" framing below describes an enhancement; on this corpus they are the difference
+between a graph and a scatter of dots.
 
 ### Nodes and edges
 
