@@ -376,3 +376,40 @@ kbd {
 .dg-tests.bad { color: var(--st-err); }
 .dg-tests.warn { color: var(--st-wait); }
 .dg-ws { color: var(--fg-2); font-size: 11px; }
+
+/* ── Pipeline approval card ────────────────────────────────────────────────
+   docs/PIPELINES.md#3. The only card in ORACLE that authorises several actions
+   at once, so the styling carries two decisions rather than decorating one:
+   a step that needs the approval is marked and the ones that do not are dimmed,
+   and a pipeline that came from a repository is warned about in the same colour
+   the egress card uses for taint. */
+.pipeline-card { margin: 8px 0; padding: 10px 12px; background: var(--bg-2);
+  border: 1px solid var(--line); border-radius: 3px; font-size: 12px; }
+.pc-name { margin: 0 0 4px; color: var(--fg-0); }
+.pc-project { color: var(--fg-1); }
+.pc-source { margin: 0 0 6px; font-size: 11px; }
+.pc-source-project { color: var(--st-wait); }
+.pc-params { margin: 0 0 6px; display: flex; gap: 10px; flex-wrap: wrap; color: var(--fg-1); }
+.pc-param { font-family: ui-monospace, monospace; }
+.pc-count { margin: 0 0 6px; color: var(--fg-1); }
+.pc-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.pc-step { padding: 4px 0; }
+/* Dimmed, not hidden: a person needs to see everything that will run, and to be able
+   to tell at a glance which parts this decision is actually about. */
+.pc-auto { opacity: .62; }
+.pc-asks { border-left: 2px solid var(--st-wait); padding-left: 8px; margin-left: -10px; }
+.pc-step-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.pc-id { color: var(--fg-0); font-weight: 700; }
+.pc-tool { color: var(--st-ext); font-family: ui-monospace, monospace; }
+.pc-tier { color: var(--fg-1); font-size: 11px; letter-spacing: .06em; }
+.pc-tier-T2 { color: var(--st-wait); }
+.pc-badge { color: var(--st-wait); font-size: 10px; letter-spacing: .08em; font-weight: 700; }
+/* Verbatim and monospaced: the grant that gets minted binds to a digest of exactly
+   these arguments, so this line is part of the security model, not a caption. */
+.pc-args { margin-top: 2px; color: var(--fg-0); font-family: ui-monospace, monospace;
+  word-break: break-all; }
+.pc-rule { margin-top: 2px; font-size: 11px; }
+.pc-omitted { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
+.pc-omitted-label { color: var(--fg-2); font-size: 10px; letter-spacing: .08em; }
+.pc-omitted ul { margin: 4px 0 0; padding-left: 18px; color: var(--fg-1); }
+.pc-note { margin: 8px 0 0; font-size: 11px; }

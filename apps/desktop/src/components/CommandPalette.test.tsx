@@ -118,3 +118,52 @@ describe("buildItems — delegation", () => {
     expect(buildItems("@Asterim", ["Asterim"]).some((i) => i.kind === "delegate")).toBe(false);
   });
 });
+
+describe("pipelines in the palette", () => {
+  const PIPELINES = [
+    {
+      name: "oracle-selfcheck",
+      description: "ORACLE's own quality gate.",
+      project: "ORACLE",
+      source: "global",
+      steps: 5,
+    },
+    {
+      name: "asterim-check",
+      description: "Health check before pushing.",
+      project: "Asterim",
+      source: "project",
+      steps: 4,
+    },
+  ];
+
+  it("offers a discovered workflow by name", () => {
+    const items = buildItems("selfcheck", [], PIPELINES);
+    const pipe = items.find((i) => i.kind === "pipeline");
+    expect(pipe?.label).toBe("oracle-selfcheck");
+    // Sent as the bare name: the pre-router matches it deterministically, with no model
+    // in the loop (PIPELINES.md §5).
+    expect(pipe?.send).toBe("oracle-selfcheck");
+  });
+
+  it("says how many steps and which project, before anything is run", () => {
+    const items = buildItems("selfcheck", [], PIPELINES);
+    expect(items.find((i) => i.kind === "pipeline")?.hint).toContain("5 steps");
+    expect(items.find((i) => i.kind === "pipeline")?.hint).toContain("ORACLE");
+  });
+
+  it("marks a workflow that came from a repository", () => {
+    // Running a pipeline someone else's repo shipped is a different decision from running
+    // your own, and the palette is where that decision starts.
+    const items = buildItems("asterim", [], PIPELINES);
+    expect(items.find((i) => i.kind === "pipeline")?.hint).toContain("from the repository");
+  });
+
+  it("does not offer one when a slash query is being typed", () => {
+    expect(buildItems("/hal", [], PIPELINES).some((i) => i.kind === "pipeline")).toBe(false);
+  });
+
+  it("is absent, not broken, when nothing was discovered", () => {
+    expect(buildItems("check", []).some((i) => i.kind === "pipeline")).toBe(false);
+  });
+});

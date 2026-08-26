@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OracleClient } from "./client";
-import { CommandPalette } from "./components/CommandPalette";
+import { CommandPalette, type PipelineEntry } from "./components/CommandPalette";
 import { ConfirmationCenter } from "./components/ConfirmationCenter";
 import { DelegationPanel } from "./components/DelegationPanel";
 import { MemoryView, toFacts } from "./components/MemoryView";
@@ -48,6 +48,7 @@ export default function App() {
   const [inspector, setInspector] = useState(true);
   const [selectedTurn, setSelectedTurn] = useState<string | null>(null);
   const [projects, setProjects] = useState<string[]>([]);
+  const [pipelines, setPipelines] = useState<PipelineEntry[]>([]);
   const [projectsRoot, setProjectsRoot] = useState("");
   const [facts, setFacts] = useState<MemoryFact[]>([]);
   const clientRef = useRef<OracleClient | null>(null);
@@ -73,6 +74,7 @@ export default function App() {
       .then((d) => {
         if (cancelled || !d) return;
         if (Array.isArray(d.projects)) setProjects(d.projects as string[]);
+        if (Array.isArray(d.pipelines)) setPipelines(d.pipelines as PipelineEntry[]);
         if (typeof d.projects_root === "string") setProjectsRoot(d.projects_root);
       })
       .catch(() => undefined);
@@ -436,6 +438,7 @@ export default function App() {
       <CommandPalette
         open={paletteOpen}
         projects={projects}
+        pipelines={pipelines}
         onClose={() => setPaletteOpen(false)}
         onSubmit={submit}
       />

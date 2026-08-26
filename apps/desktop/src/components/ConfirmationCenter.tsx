@@ -29,6 +29,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Approval } from "../protocol";
 import { EgressPreview } from "./EgressPreview";
 import { GraphCard } from "./GraphCard";
+import { PipelineCard } from "./PipelineCard";
 
 /** Blocks an Enter keystroke carried over from whatever the user was doing before. */
 const GUARD_MS = 500;
@@ -182,6 +183,12 @@ export function ConfirmationCenter({ approvals, decided, onRespond }: Confirmati
         // A graph card carries a whole plan. The generic EFFECT block shows one line of
         // it, which is how somebody approves twelve tasks they never saw.
         <GraphCard preview={current.preview} />
+      ) : current.tool === "pipe.run" ? (
+        // A pipeline card authorises several actions at once - the only card in ORACLE
+        // that does. Its own component rather than a GraphCard variant, because its
+        // columns are tools and arguments where a graph's are roles and agents, and one
+        // of those sets would always be a lie.
+        <PipelineCard preview={current.preview} />
       ) : (
         (effect.summary || effect.detail) && (
           <div className="ap-effect">

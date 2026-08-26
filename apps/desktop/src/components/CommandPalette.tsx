@@ -21,14 +21,24 @@ export interface PaletteItem {
   id: string;
   label: string;
   hint: string;
-  kind: "command" | "project" | "chat" | "delegate";
+  kind: "command" | "project" | "pipeline" | "chat" | "delegate";
   /** What actually gets sent. For commands this is the slash form the pre-router eats. */
   send: string;
+}
+
+export interface PipelineEntry {
+  name: string;
+  description: string;
+  project: string | null;
+  source: string;
+  steps: number;
 }
 
 export interface CommandPaletteProps {
   open: boolean;
   projects: string[];
+  /** Discovered workflows, from `/api/v1/status`. Empty is a normal state, not an error. */
+  pipelines?: PipelineEntry[];
   onClose(): void;
   onSubmit(text: string): void;
 }
@@ -43,7 +53,11 @@ const COMMANDS: ReadonlyArray<{ name: string; summary: string }> = [
   { name: "events", summary: "Show the raw event stream" },
 ];
 
-export function buildItems(query: string, projects: string[]): PaletteItem[] {
+export function buildItems(
+  query: string,
+  projects: string[],
+  pipelines: PipelineEntry[] = [],
+): PaletteItem[] {
   const q = query.trim();
   const lower = q.toLowerCase();
   const items: PaletteItem[] = [];
@@ -65,6 +79,29 @@ export function buildItems(query: string, projects: string[]): PaletteItem[] {
         hint: c.summary,
         kind: "command",
         send: `/${c.name}`,
+      });
+    }
+  }
+
+  // Named workflows, offered by name (PIPELINES.md §5). Above projects because a person
+  // who types "selfcheck" means the pipeline, and below commands because a slash query is
+  // unambiguous. The step count and the source are on the row: running one from a
+  // repository is a different decision from running one of your own, and the palette is
+  // where that decision starts.
+  if (!wantsCommand && !wantsProject) {
+    for (const pl of pipelines) {
+      const r = rank(pl.name.toLowerCase());
+      if (r < 0) continue;
+      items.push({
+        id: `pipe:${pl.name}`,
+        label: pl.name,
+        hint:
+          `${pl.steps} step${pl.steps === 1 ? "" : "s"}` +
+          (pl.project ? ` · ${pl.project}` : "") +
+          (pl.source === "project" ? " · from the repository" : "") +
+          (pl.description ? ` — ${pl.description}` : ""),
+        kind: "pipeline",
+        send: pl.name,
       });
     }
   }
@@ -112,12 +149,21 @@ export function buildItems(query: string, projects: string[]): PaletteItem[] {
   return items;
 }
 
-export function CommandPalette({ open, projects, onClose, onSubmit }: CommandPaletteProps) {
+export function CommandPalette({
+  open,
+  projects,
+  pipelines = [],
+  onClose,
+  onSubmit,
+}: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const items = useMemo(() => buildItems(query, projects), [query, projects]);
+  const items = useMemo(
+    () => buildItems(query, projects, pipelines),
+    [query, projects, pipelines],
+  );
 
   useEffect(() => {
     if (open) {
