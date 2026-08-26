@@ -1,0 +1,75 @@
+{
+  "corpus": {
+    "docs": 1506,
+    "chunks": 16915,
+    "semantic": 15521
+  },
+  "lexical_only": {
+    "recall@1": 0.10526315789473684,
+    "recall@5": 0.2894736842105263,
+    "recall@10": 0.34210526315789475,
+    "r@5/crosslang": 0.0,
+    "r@5/semantic": 0.8,
+    "r@5/lexical": 1.0
+  },
+  "results": [
+    {
+      "name": "bge-m3",
+      "dim": 1024,
+      "dense": {
+        "recall@1": 0.34210526315789475,
+        "recall@5": 0.6578947368421053,
+        "recall@10": 0.7631578947368421,
+        "r@5/crosslang": 0.6,
+        "r@5/semantic": 0.7,
+        "r@5/lexical": 1.0
+      },
+      "hybrid": {
+        "recall@1": 0.3684210526315789,
+        "recall@5": 0.631578947368421,
+        "recall@10": 0.7894736842105263,
+        "r@5/crosslang": 0.48,
+        "r@5/semantic": 0.9,
+        "r@5/lexical": 1.0
+      },
+      "lexical": {
+        "recall@1": 0.10526315789473684,
+        "recall@5": 0.2894736842105263,
+        "recall@10": 0.34210526315789475,
+        "r@5/crosslang": 0.0,
+        "r@5/semantic": 0.8,
+        "r@5/lexical": 1.0
+      },
+      "chunks_per_s": 2.0632600062100916,
+      "query_ms_p50": 63.43584999922314,
+      "query_ms_p95": 97.09946999901149,
+      "load_s": 2.576068000002124,
+      "model_mb": 2267.545531,
+      "index_mb": 63.574016,
+      "misses": [
+        "ru-feature-entitlement",
+        "en-relay-dockerfile",
+        "ru-pairing-bruteforce",
+        "ru-air-gap",
+        "ru-kill-process-tree",
+        "ru-local-discovery",
+        "ru-terminal-reattach",
+        "ru-workspace-permissions",
+        "ru-audit-trail",
+        "ru-symbol-extraction",
+        "ru-bias-variance",
+        "ru-cross-validation",
+        "ru-nonlinearity",
+        "ru-model-degrades"
+      ],
+      "fusion": {
+        "dense": 0.6578947368421053,
+        "rrf": 0.631578947368421,
+        "rrf_w2": 0.7105263157894737,
+        "gated": 0.631578947368421,
+        "dense_xl": 0.7368421052631579,
+        "rrf_xl": 0.6578947368421053
+      }
+    }
+  ]
+}

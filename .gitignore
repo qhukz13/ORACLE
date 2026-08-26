@@ -8,6 +8,11 @@ logs/**
 !logs/**/.gitkeep
 !logs/README.md
 !logs/development/*.md
+# Measurement output that a dev log cites. A record that points at a file nobody else
+# has is not a record — these are small (a few KB), they are the evidence behind a
+# number in docs/, and they are exactly as durable as the log that references them.
+!logs/measurements/*.json
+!logs/measurements/*.txt
 
 # Local state / secrets
 .env
