@@ -136,6 +136,21 @@ scope, which makes it worth answering early rather than late.
   reappears, decide whether the reader genuinely drops output under starvation (a real bounded-buffer
   bug) or whether its own deadline is too tight (a test fix). Those are different repairs, and
   guessing between them is how a data-loss test gets a tolerance instead of an answer.
+- **The `chunker_version` guard does not fire on the indexes it was written for.**
+  `FOUND 2026-08-26, live.` `KnowledgeStore.bind()` only raises when a key is *already*
+  present and differs — `if key in stored and stored[key] != want` — and then it **writes**
+  the current version in. So an index built before `chunker_version` existed has no such key,
+  passes, and is silently stamped with the version of whatever binds it first. That is exactly
+  the population the guard was added for on 2026-08-26.
+  **It has already happened to `D:/ORACLE/data/knowledge.db`**, on the first daemon start after
+  the bump. Measured after the fact: **57% of its 14,586 rows exceed the shipped `MAX_CHARS`
+  of 1200, and the longest is 4,055 characters** — the exact v1 signature the P9-T2 report
+  cites. The rows are v1; the stamp says v2; nothing will ever mention it again.
+  Two things to decide: **(a)** `bind()` should refuse a missing `chunker_version` rather than
+  fill it in — an index that cannot prove which chunker cut it is not an index you can trust —
+  and stamping should happen at *build* time, not at bind time; **(b)** this database wants a
+  reindex (~2 h) to get the repaired boundaries. It does not affect the scheduled OQ-18 run,
+  which chunks in-process and never reads `knowledge.db`.
 - **`TO VERIFY`: how much of the corpus contamination is on the *dense* side.** `cases.yaml` is
   config and never embedded, so it cannot pollute a dense ranking — but ORACLE's markdown *is*
   embedded, and `docs/RAG.md`, `docs/OPEN_QUESTIONS.md` and `docs/current_*.md` all discuss the
