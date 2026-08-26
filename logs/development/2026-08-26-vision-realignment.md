@@ -100,7 +100,7 @@ while I am looking at it, then "it keeps working while I do something else" is f
 briefing has nothing to brief. Inverting it — the shell attaches to a running daemon — is also a
 strictly larger set of working configurations, and it is what the browser client already needs.
 
-Scheduled as Phase 13, with one new UI surface ([UI.md §7b](../../docs/UI.md#7b-the-briefing--phase-13)).
+Scheduled as Phase 13, with one new UI surface ([UI.md §7b](../../docs/UI.md#7b-the-briefing--backend-built--p12-t3-2026-08-26)).
 
 ### 2c. The vision contradicts a measurement, and the measurement wins
 

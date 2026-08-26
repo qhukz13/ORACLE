@@ -7,78 +7,79 @@
 
 ## Task
 
-**P12-T3 — the briefing: "what happened while I was away"**
+**P12-T4 — the sidebar and the briefing, rendered**
 
 **Phase:** [12 — project state & the continue loop](ROADMAP.md#phase-12--project-state--the-continue-loop--residency-arc) · **Scope:** Residency arc
 **Status:** `SET` · **Set:** 2026-08-26
-**Design:** [PROJECT_STATE.md §6](PROJECT_STATE.md#6-the-briefing--what-happened-while-i-was-away) · **Surface:** [UI.md §7b](UI.md#7b-the-briefing--phase-13) · **Why:** [VISION.md §2](VISION.md#2-the-day--the-acceptance-test)
+**Surfaces:** [UI.md §4](UI.md#4-sidebar) (sidebar) · [UI.md §7b](UI.md#7b-the-briefing--backend-built--p12-t3-2026-08-26) (briefing)
 
-**Done in Phase 12 so far:** T1 the entity · T2 the `continue` intent.
-[T1 log](../logs/development/2026-08-26-p12t1-project-entity.md) ·
-[T2 log](../logs/development/2026-08-26-p12t2-continue-intent.md)
+**Done in Phase 12 so far:** T1 the entity · T2 the `continue` intent · T3 the briefing backend.
+[T1](../logs/development/2026-08-26-p12t1-project-entity.md) ·
+[T2](../logs/development/2026-08-26-p12t2-continue-intent.md) ·
+[T3](../logs/development/2026-08-26-p12t3-briefing.md)
 
 ---
 
 ## This task
 
-`briefed_through_seq` already exists on the project row and already advances monotonically.
-This builds the thing that reads it.
+Three endpoints now return real project state and nobody can see any of it. This is the first
+task in Phase 12 that touches `apps/desktop/`.
 
-1. **The query.** Events with `seq > briefed_through_seq`, grouped by project, reduced to
-   counts and outcomes — what completed, what failed, what is waiting, what it cost. Bounded:
-   away for a week is not 40,000 events in a payload.
-2. **`GET /api/v1/briefing`** — every non-archived project's delta, plus a system section.
-3. **`POST /api/v1/briefing/ack`** — advances the pointer. **On acknowledgement only, never on
-   render.** A briefing that clears itself on sight is a notification, and notifications are
-   how people miss things.
-4. **Deterministic prose.** Counts, outcomes, timings and cost are arithmetic over the task
-   rows — no model, no latency, and no possibility of a hallucinated summary of my own work.
-   Prose summarisation belongs to the local mid-tier ([P16](ROADMAP.md#phase-16--local-tier-ladder--experimental--gpu-conditional-unscheduled)),
-   which does not exist; the template stays the permanent fallback because it is the version
-   that is always correct.
-5. **A dead daemon briefs itself.** If `oracled` crashed overnight that is the first line.
-   This is the mitigation for [ADR-0025](DECISIONS.md#adr-0025--oracle-is-a-resident-service-the-window-is-a-client)'s
-   main risk and it is cheap now: the gap is visible in the event log's own timestamps.
+1. **The sidebar reads `GET /api/v1/projects`** instead of the bare name list from
+   `/api/v1/status`. Registered projects with their counters; candidates behind a "show all".
+2. **The briefing is the centre stage on first paint** after a gap, and demotes to a
+   command-bar badge once acknowledged. `GET /api/v1/briefing` → render `projects[]` and
+   `system`; `[dismiss]` → `POST /api/v1/briefing/ack` with the `through_seq` **from the
+   payload that was displayed**, never a freshly-read one.
+3. **Every line is actionable or it is not rendered.** `[inspect]`, `[review]`, `[logs]` open
+   something real. A line with no affordance is a log entry in a costume.
+4. **`waiting` is the only loud element**, matching the sidebar and the core. One attention
+   channel, one meaning.
 
-**Not in this task:** the sidebar and inspector (T4), the first real run (T5).
+**Not in this task:** branch and dirty count in the sidebar — that needs
+[OQ-24](OPEN_QUESTIONS.md#oq-24) measured first, and the answer if it misses is lazy per-row
+observation, never a cache.
 
 ---
 
 ## Acceptance criteria
 
-- [ ] An unacknowledged briefing **survives a restart**. Tested.
-- [ ] Acknowledging advances the pointer; rendering does not. Tested both ways.
-- [ ] Empty is a real state — "Nothing ran since 18:04", not a placeholder and not a
-      fabricated summary.
-- [ ] The payload is bounded regardless of how long the gap is.
-- [ ] A project with a deleted root still renders its line.
-- [ ] No model is called on this path, and a test asserts it.
+- [ ] The sidebar renders registered projects with live counters; candidates are separate and
+      collapsed.
+- [ ] A project whose root vanished renders as `missing` and degrades nothing else.
+- [ ] The briefing renders, and **glancing at it does not clear it** — asserted in the UI
+      tests, not only in the API ones.
+- [ ] Acknowledging sends the displayed `through_seq`, so work that arrived mid-view is not
+      marked seen.
+- [ ] Empty renders as "Nothing ran since …", not a skeleton.
+- [ ] `axe` passes on both surfaces; every status carries icon + label + colour, never colour
+      alone ([UI.md §14](UI.md#14-colour-and-status-semantics)).
 - [ ] `make check` green.
 
 ## Watch for
 
-- **The pointer is per-project, and system events belong to no project.** Decide where the
-  system section's pointer lives before writing the query — a single global pointer would make
-  acknowledging one project's work hide another's.
-- **`tasks` is still 0 rows.** T3 can be built against fixtures; its *acceptance* cannot be
-  judged without T5. Record fixtures from the wire when T5 runs, not by hand — `TaskTree` is
-  already green on a fixture the running app cannot produce.
+- **Fixtures must come from the wire, not from imagination.** `TaskTree.test.tsx` is green on a
+  shape `store.ts` cannot produce, and that is exactly the bug to avoid repeating. The API
+  responses are stable and testable — record from them.
+- **`through_seq` is a value, not a timestamp.** Re-reading the head at dismissal time silently
+  acknowledges work the person never saw. The payload carries the number for this reason.
+- **The briefing is a glance, not a report.** If it stops being readable in 3–5 seconds it has
+  failed, however much information it gained.
 
 ---
 
-## Now unblocked for a person: P12-T5, the first real `continue`
+## Still a person's, and now genuinely runnable: P12-T5
 
-T1 and T2 make the loop runnable end to end for the first time: **"continue ORACLE"** resolves
-the project, reads real open tasks and this repository's own `docs/current_task.md`, builds an
-objective, and asks for approval before planning.
+**"continue ORACLE"** resolves this project, reads its real open tasks and this repository's own
+`docs/current_task.md`, and asks before planning. It needs **Ollama running** — the `continue`
+label is classified by the router and there is no slash-command bypass — and it asks twice, once
+for the graph and once for any delegation.
 
-Everything about it is gated and previewable. It needs **Ollama running** (the `continue`
-label is classified by the router, and there is no slash-command bypass for it), and it will
-ask twice — once for the graph, once for any delegation. This is the run that finally puts
-rows in `tasks`, which is what P11's orbit, timeline and queue are all waiting on.
+This is the run that puts the first rows in `tasks`. Everything in P11 (orbit, timeline, queue)
+and everything T4 renders is currently computed over fixtures only.
 
-It is a person's to fire, not an agent's: approvals expire in 180 s and firing it unattended
-writes a *refused* run into the very table the run exists to populate.
+A person's to fire, not an agent's: approvals expire in 180 s, and firing it unattended writes a
+*refused* run into the very table the run exists to populate.
 
 ---
 
@@ -88,15 +89,14 @@ writes a *refused* run into the very table the run exists to populate.
   an eleventh label. Deferred deliberately; the prompt boundary and four few-shots shipped
   instead, and a test pins them. `scripts/eval_intent.py` needs `continue` cases adding first.
 - **`make eval` and `make perf` are documented in TESTING.md §8 and defined nowhere.** OQ-25's
-  documented resolution path therefore does not exist. Fix the target or correct the doc.
+  documented resolution path therefore does not exist.
+- **[OQ-24](OPEN_QUESTIONS.md#oq-24) — the observation fan-out is unmeasured**, so
+  `GET /api/v1/projects` runs no git and omits branch/dirty count.
 - **P11-T5** — switchable centre stage, `Ctrl+1..4`, `TaskTree` in its own view, the inspector's
-  task branch, mounting `KnowledgeHealth` (built, 11 passing tests, imported by nothing).
-  Deferred behind Phase 12 deliberately; spec is in this file's history.
+  task branch, mounting `KnowledgeHealth` (built, 11 passing tests, imported by nothing). T4
+  touches the same shell and may absorb part of it; decide deliberately rather than by drift.
 - **P11-T2 — OQ-14, the orbit go/no-go.** Blocked on data. `oracle-selfcheck` remains the cheap
   unblock (~5 min, local, no egress); P12-T5 produces richer data but costs tokens and egress.
-- **[OQ-24](OPEN_QUESTIONS.md#oq-24) — the observation fan-out is unmeasured**, so
-  `GET /api/v1/projects` runs no git and omits branch/dirty count. T4 wants those columns;
-  measure before adding them, and **if it misses, observe lazily per row — never cache.**
 - **P9-T3b — the scheduled OQ-18 corpus run.** Windows task `ORACLE-OQ18-eval` fires
   **2026-08-27 07:12** (~3 h) → `logs/measurements/oq18-translated.{txt,json}`. On collection:
   compose `dense_mt` against `dense_xl`, confirm or flip `Settings.translate_queries`, decide
@@ -106,11 +106,13 @@ writes a *refused* run into the very table the run exists to populate.
   14,586 live rows exceed the 1200-char cap, longest 4,055. The database wants a reindex.
 - **A merge-gate test that fails under CPU starvation.**
   `test_a_long_burst_arrives_complete` lost 189 lines of a ConPTY burst twice under full load.
+  Related: a gate run hung in the pytest step under concurrent load on 2026-08-26 and passed
+  quietly on retry. **There is no `pytest-timeout` installed**, which makes either recurrence
+  expensive to bisect.
 - **`TaskTree.test.tsx` is green on a fixture the app cannot produce** — `store.ts` never
-  populates `dependsOn`. T5 is the chance to record fixtures from the wire.
+  populates `dependsOn`.
 - **`DATABASE.md`'s `facts`/`attempts`/`devices` blocks are still the pre-build sketch.** Only
-  `projects` has been reconciled against source. The shipped tables are `memory_facts` and
-  `memory_attempts`; `devices` is not built.
+  `projects`, `meta` and the task/event indexes have been reconciled against source.
 - **Palette results are not discoverable to assistive tech** — `<li role="option">` with
   `onClick`, no `role="combobox"`, no `aria-activedescendant`.
 - **A correction typed while a graph runs is refused**, because "never mid-plan" is implemented
@@ -118,6 +120,7 @@ writes a *refused* run into the very table the run exists to populate.
 - **Scheduled pipeline runs** are post-MVP; PIPELINES.md §5's "nothing above T1 unattended" is
   unenforced because nothing schedules anything.
 - **The visual references for the UI vision were never attached** and are not in the repository.
-  UI.md §1/§14/§15 are marked `TO VERIFY` against them.
+  UI.md §1/§14/§15 are marked `TO VERIFY` against them — and T4 is the first task that would
+  actually benefit from having them.
 - **Branch.** `phase6-integration` is ahead of a stale `origin/main` at Phase 5-era work.
   Merge or rename is still a decision nobody has made.

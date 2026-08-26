@@ -244,6 +244,26 @@ briefing = summarise(events where seq > briefed_through_seq, grouped by project)
 
 ---
 
+### As built  `P12-T3, 2026-08-26`
+
+`core/briefing.py`, migration `0007`, two endpoints, 43 tests. Four things this section
+had left open:
+
+| Question | Answer, and why |
+|---|---|
+| Where does the **system** section's watermark live? | A `meta(key, value)` table in `oracle.db` (migration 0007), at `briefing.system_seq`. A daemon restart belongs to no project, so without a watermark of its own it would reappear in every briefing forever — the notification a person learns to skip. `oracle.db` had no home for a daemon-level scalar; `knowledge.db` already has exactly this table, so it is a shape the project reads without thinking. |
+| Is `waiting` part of the delta? | **No — it is current state, included unconditionally.** Everything else answers "what changed since seq N". A task parked on an approval does not: it is a *block*, and hiding it because it started before the watermark would mean acknowledging a briefing could bury the thing that most needs a person. |
+| What else is current rather than delta? | `in_flight` — pending, ready or running. *"What is running now"* is one of the six things [VISION.md §2](VISION.md#2-the-day--the-acceptance-test) gives the screen three to five seconds to answer, and a briefing that counted only outcomes would go blank in the middle of a long run. |
+| How does a dead daemon brief itself? | `system.boot` carries whether the previous run ended cleanly, established by looking at what the last event *was*. A `system.shutdown` means somebody stopped it; anything else means it died. Without that pair, a crash leaves a silent gap in the log that is indistinguishable from an idle night — and ADR-0025's named risk would be unreportable. |
+
+**`through_seq` is pinned by the caller** — the log head at the moment of the request — and
+echoed back on acknowledgement, so work arriving mid-render cannot be marked seen by an
+acknowledgement of what the reader actually saw.
+
+**Not built in T3:** the sidebar and inspector (T4), the first real run (T5).
+
+---
+
 ## 7. Security posture
 
 Project state is derived from content ORACLE does not control, so it is a taint surface and is
@@ -311,8 +331,8 @@ The subsystem is done when all of these hold:
 - [~] `continue` resolves to a planning call against real project state.  `P12-T2` —
       **the intent eval is NOT re-run**; deferred by the owner and carried as
       [OQ-25](OPEN_QUESTIONS.md#oq-25) rather than silently dropped.
-- [ ] The briefing advances `briefed_through_seq` on acknowledgement only, and a test proves an
-      unacknowledged briefing survives a restart.
+- [x] The briefing advances `briefed_through_seq` on acknowledgement only, and a test proves an
+      unacknowledged briefing survives a restart.  `P12-T3`
 - [x] Registering a project widens no policy scope — asserted in `tests/security/`.  `P12-T1`
 
 ---

@@ -18,6 +18,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query, WebSocket, WebSock
 
 from oracle import __version__
 from oracle.config import Settings, get_settings
+from oracle.core import briefing as briefing_mod
 from oracle.core.approvals import ApprovalStore
 from oracle.core.eventlog import EventLog
 from oracle.core.events import PROTOCOL_VERSION, ClientCommand, Event, new_id
@@ -481,6 +482,39 @@ async def _continue_project(st: AppState, project: str, session_id: str | None, 
     )
 
 
+async def _announce_boot(st: AppState) -> None:
+    """Record that the daemon started, and whether the previous run ended cleanly.
+
+    A crash leaves no trace of itself — the log simply stops — and a silent gap is
+    indistinguishable from an idle night. So the fact is established here, once, by
+    looking at what the last event *was*: a `system.shutdown` means somebody stopped it,
+    anything else means it died. That is what lets the briefing say "ORACLE stopped
+    unexpectedly at 04:12" instead of saying nothing at all (ADR-0025).
+    """
+    async with st.conn.execute("SELECT type, ts FROM events ORDER BY seq DESC LIMIT 1") as cur:
+        row = await cur.fetchone()
+    last_event = str(row["type"]) if row is not None else None
+    last_seen = str(row["ts"]) if row is not None else None
+    # A first-ever boot has no previous run and is therefore not unclean — the absence of
+    # a shutdown only means something when there was a start to go with it.
+    unclean = last_event is not None and last_event != "system.shutdown"
+    await st.eventlog.append(
+        Event(
+            type="system.boot",
+            trace_id=bind_trace(),
+            actor="system",
+            payload={
+                "unclean": unclean,
+                "last_event": last_event,
+                "last_seen": last_seen,
+                "schema_version": st.schema_version,
+            },
+        )
+    )
+    if unclean:
+        log.warning("oracled.unclean_previous_run", last_event=last_event, last_seen=last_seen)
+
+
 async def _prewarm(st: AppState) -> None:
     """Start the toolhost ahead of first use. Failure is logged, never fatal."""
     try:
@@ -536,6 +570,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 interrupted=[t.id for t in found.interrupted],
                 action="nothing restarted; a human decides",
             )
+        await _announce_boot(st)
         # Projects, reconciled against the disk and against the task table. Both are
         # cheap — one `is_dir()` per row, one indexed scan per project — and both repair
         # rather than trust: a root deleted while the daemon was down becomes MISSING
@@ -558,6 +593,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            # Before anything is torn down, and best-effort: a shutdown that cannot be
+            # recorded is exactly the case the next boot must be able to notice, so a
+            # failure here is logged and swallowed rather than masking the stop.
+            with contextlib.suppress(Exception):
+                await st.eventlog.append(
+                    Event(type="system.shutdown", trace_id=bind_trace(), actor="system", payload={})
+                )
             for task in list(st.tasks):
                 task.cancel()
             for task in list(st.tasks):
@@ -744,6 +786,47 @@ def _register_routes(app: FastAPI) -> None:
         what it reconciles against on connect."""
         st = state_of(app)
         return await st.graphs.tree(root_id)
+
+    @app.get("/api/v1/briefing")
+    async def briefing() -> dict[str, Any]:
+        """What changed since I last acknowledged (PROJECT_STATE.md §6).
+
+        **Rendering does not advance the watermark.** Glancing at the screen and walking
+        away must leave the briefing intact — one that clears itself on sight is a
+        notification, and notifications are how people miss things.
+
+        `through_seq` is pinned to the log head at this moment and echoed back on
+        acknowledgement, so work arriving while the reader is looking cannot be marked
+        seen by an acknowledgement of what they actually saw.
+
+        No model is called. Every number is arithmetic over task rows.
+        """
+        st = state_of(app)
+        built = await briefing_mod.build(
+            st.conn, st.project_store, through_seq=st.eventlog.last_seq
+        )
+        return briefing_mod.wire(built)
+
+    @app.post("/api/v1/briefing/ack")
+    async def briefing_ack(
+        through_seq: int = Query(..., ge=0),
+        project_id: str = Query("", description="one project, or empty for all"),
+    ) -> dict[str, Any]:
+        """The only thing that advances the watermark.
+
+        Monotonic: a stale client acknowledging an old sequence cannot rewind a pointer a
+        later acknowledgement already advanced, which would re-show work already seen.
+        """
+        st = state_of(app)
+        if project_id and await st.project_store.get(project_id) is None:
+            raise HTTPException(status_code=404, detail=f"no such project: {project_id!r}")
+        await briefing_mod.acknowledge(
+            st.conn,
+            st.project_store,
+            through_seq=through_seq,
+            project_id=project_id or None,
+        )
+        return {"acknowledged_through": through_seq, "project_id": project_id or None}
 
     @app.get("/api/v1/projects")
     async def list_projects(

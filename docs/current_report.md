@@ -3,12 +3,13 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** **P12-T2 — the `continue` intent and unfinished-work derivation.** Plus P12-T1 (the
-project entity) and the vision realignment, all the same day.
-**Status:** Done, with **one acceptance item knowingly outstanding** — the intent eval was not
-re-run ([OQ-25](OPEN_QUESTIONS.md#oq-25)).
-**Date:** 2026-08-26 · **1,184 Python tests**, up 51 on T1 and 113 on the morning.
-**Dev logs:** [T2](../logs/development/2026-08-26-p12t2-continue-intent.md) ·
+**Task:** **P12-T3 — the briefing.** Third of three today, after T1 (the project entity) and T2
+(the `continue` intent), and the vision realignment that scheduled all of them.
+**Status:** Done. One acceptance item across the phase remains **knowingly outstanding** — the
+intent eval ([OQ-25](OPEN_QUESTIONS.md#oq-25)).
+**Date:** 2026-08-26
+**Dev logs:** [T3](../logs/development/2026-08-26-p12t3-briefing.md) ·
+[T2](../logs/development/2026-08-26-p12t2-continue-intent.md) ·
 [T1](../logs/development/2026-08-26-p12t1-project-entity.md) ·
 [vision realignment](../logs/development/2026-08-26-vision-realignment.md)
 
@@ -16,107 +17,95 @@ re-run ([OQ-25](OPEN_QUESTIONS.md#oq-25)).
 
 ## What shipped
 
-*"Continue Asterim"* now resolves a project, reads what is actually left, and hands a planner an
-objective built from evidence — or asks, when there is nothing to build one from.
-
-| | |
-|---|---|
-| `core/unfinished.py` | the derivation: open tasks, repo task documents, and the objective renderer |
-| `IntentLabel` | an eleventh member, `continue`, with a stated boundary and four few-shots |
-| `TurnPipeline.continue_work` | a hook, like `run_pipeline` — the router resolves the project and hands off; it does not decide the work |
-| `_continue_project` | the daemon side: register on first use, derive, ask or plan |
-| `approve_graph(untrusted_sources=…)` | the card names the files whose text is inside the objective |
-| `continue.derived` | a new **critical** event: how many open tasks, which files were quoted |
-| Migration `0006` | fixes a latent detonator in `0005` — see below |
-
-**The ordering is the design.** ORACLE's own task graph is authoritative; the repository's task
-documents are evidence; and **nothing is the third answer, not a guess**. `objective_of()` returns
-`None` for an empty derivation and the caller asks — because a planner handed a project name and
-nothing else produces plausible work, and plausible work is unfalsifiable.
+`core/briefing.py`, migration `0007`, `GET /api/v1/briefing`, `POST /api/v1/briefing/ack`, and
+43 tests. The data and the deterministic text exist; **the view does not** — that is T4.
 
 ---
 
-## Migration 0006 — the most useful thing found today
+## The distinction the design turned on
 
-Found by a test that was trying to assert something else.
+The briefing looked like one thing ("events since seq N") and is two.
 
-T1's generated column used `json_extract(spec, '$.project')`. **`json_extract` raises on malformed
-JSON** rather than returning NULL, and the column is indexed — so the blast radius is the whole
-table. On any database already holding one task row with an unparseable `spec`, migration 0005
-would have **failed at `CREATE INDEX`**; past that, every read of the column would raise: the
-counter rebuild, the unfinished-work query, the whole projects surface.
+**Delta** — completed, failed, cancelled. The watermark is the whole point.
 
-Same shape as the dead collection root that disabled live re-indexing for *every* collection with
-one absent path. It did not bite — `tasks` was 0 rows and `TaskStore.save()` only writes valid
-JSON — which is precisely why it was worth fixing before the conditions arrived unannounced.
+**Current state**, which appears *regardless* of the watermark:
 
-`json_valid()` guards it; a malformed row is now simply unattributed. **0005 was not edited** — an
-applied migration is a historical fact, and editing one leaves every database that ran it
-disagreeing with the file describing it.
+- **`waiting`** — a task parked on an approval. Watermarking it would mean acknowledging a
+  briefing could **bury the thing that most needs a person**. That is actively harmful, not
+  merely unhelpful.
+- **`in_flight`** — pending, ready or running. I got this wrong first and a test caught it: a
+  `RUNNING` task produced an empty brief and was filtered out, so a briefing during a long run
+  said *"Nothing ran"*. *"What is running now"* is one of the six things the vision gives the
+  screen 3–5 seconds to answer.
 
----
-
-## Taint buys attribution, not escalation
-
-The plan was for repo notes to raise the confirmation tier. Reading `approve_graph` showed that
-would be **theatre**: the graph card already evaluates as `Provenance.EXTERNAL` at T2, because
-ADR-0021 treats every plan as untrusted. There is no further escalation to give.
-
-What was missing was provenance, not severity. The card now names the files. My own acceptance
-criterion had said "escalates the tier by exactly one"; it was wrong, and the honest fix was to
-change the criterion rather than add an escalation that does nothing so the sentence could stay
-true.
+The test that caught it was written to check elapsed-time handling. That is twice today a test
+found a real gap while asserting something adjacent.
 
 ---
 
-## The injection surface, fenced three times
+## A dead daemon can only brief itself if it left a note
 
-Reading someone's `TODO.md` into a planner prompt is a prompt-injection channel **by
-construction**. So: **scope** (through `fs.read`, so the policy engine resolves the path — a
-project outside every scope cannot be read by asking ORACLE to continue it), **framing** (quoted
-inside a fence named after the file, under an untrusted heading, with ORACLE's own record first —
-order is a defence), and **authority** (the plan is still validated, still cannot name its own
-executor, still reaches a card that names the file).
+UI.md already promised *"if ORACLE crashed overnight, that is the first line"* as the mitigation
+for [ADR-0025](DECISIONS.md#adr-0025--oracle-is-a-resident-service-the-window-is-a-client)'s
+named risk. Implementing it showed the promise was **not implementable as written**: a crash
+leaves no trace, the log simply stops, and a silent gap is indistinguishable from an idle night.
 
-`tests/security/test_continue_evidence.py` runs five payloads through the renderer, including one
-that forges the closing fence, and uses a real `PolicyEngine` for the scope and traversal cases.
+So the fact is now established rather than inferred — `system.shutdown` on the way out,
+`system.boot` on the way in carrying `unclean`, computed from what the last event actually was.
+Both critical event types: a lost one turns a crash report into silence.
 
----
+One edge stated rather than discovered later: **a first-ever boot is not unclean.** There was no
+previous run for the absence of a shutdown to mean anything about.
 
-## The eval was not re-run — deferred, not dropped
-
-At the owner's direction. Intent accuracy (**93.3%**, 30 fixtures, ten labels) has not been
-re-measured against eleven. [OQ-25](OPEN_QUESTIONS.md#oq-25) records the risk — *"run the Asterim
-tests"* and *"continue Asterim"* are one word apart to a 0.8B classifier — and what shipped
-instead: the prompt states the boundary rather than leaving it inferable, four few-shots cover it
-including a Russian one, and a test pins both so a future edit cannot quietly delete the
-mitigation. A wrong route here is recoverable, which is why it blocks nothing.
-
-Noted while writing it up: **`make eval` is documented in TESTING.md §8 and defined nowhere**, so
-OQ-25's documented resolution path does not currently exist.
+**This mitigates P13's main risk before P13 exists**, which is why the briefing moved from P13
+to P12-T3: its watermark lives on the project row and its content is per-project, so it is a
+reading of *project state*, not of residency. ROADMAP and UI.md are reconciled to match.
 
 ---
 
-## Two smaller lessons
+## Where a watermark lives when it belongs to no project
 
-**A source-inspection test that matched on text asserted nothing after a reformat.** It grepped for
-`execute("`; `ruff format` wrapped the call across two lines. Rewritten over the AST.
+Migration `0007` adds `meta(key, value)` to `oracle.db` — one thing to reason about instead of a
+one-column table per scalar, and the shape `knowledge.db` already uses. The migration comment
+says what it is **not**: configuration lives in `config/*.yaml` where a human edits it and git
+records the edit.
 
-**A fake that invented a file.** `_FakeExecutor` matched paths by suffix, so `docs/TODO.md` was
-served the body registered for `TODO.md`. A fixture that invents data is worse than none, because
-it looks like coverage.
+The same migration adds `ix_events_task`. The briefing joins `events.task_id` to `tasks.id`, and
+none of the log's three existing indexes helps — it would have been a full scan per render.
+
+---
+
+## Rendering is arithmetic, and a test says so
+
+No model on this path: the briefing has the tightest latency budget of any surface, and it is
+the one place a fabricated summary would be **a summary of the owner's own work**.
+`TestNoModelIsOnThisPath` checks the module imports nothing from `oracle.llm` or `oracle.router`
+and that `render` is a plain `def` with no `await`, so it cannot do I/O at all. "Have the local
+model summarise this" is a genuinely attractive future edit; the template stays the permanent
+fallback because it is the version that is always right.
+
+---
+
+## Four smaller decisions
+
+**`through_seq` is pinned by the caller** and echoed back on acknowledgement — otherwise work
+arriving mid-view is marked seen by an acknowledgement of what nobody saw. **An unknown
+`project_id` on ack is a 404**, not a fallback to acknowledging everything on a typo. **A
+per-project dismissal never touches the system section** — that is how a crash gets lost.
+**Archived projects are not briefed**: archiving is a human saying "not now", and this is the
+surface that must respect it most.
 
 ---
 
 ## Next
 
-**[P12-T3](current_task.md) — the briefing.** The resume pointer already exists and already
-advances monotonically; this builds what reads it. Deterministic prose only: counts and outcomes
-are arithmetic over task rows, with no model on the path and no possibility of a hallucinated
-summary of your own work.
+**[P12-T4](current_task.md) — the sidebar and the briefing, rendered.** Three endpoints now
+return real project state and nobody can see any of it. First task in Phase 12 to touch
+`apps/desktop/`. Note the standing trap: fixtures must be recorded from the wire, because
+`TaskTree.test.tsx` is already green on a shape the running app cannot produce.
 
-**And now genuinely runnable by a person: P12-T5, the first real `continue`.** T1 and T2 close the
-loop for the first time — *"continue ORACLE"* will resolve this project, read its real open tasks
-and this repository's own `docs/current_task.md`, and ask before planning. It needs **Ollama
-running** (there is no slash-command bypass for `continue`) and it asks twice. It is the run that
-finally puts rows in `tasks`, which is what P11's orbit, timeline and queue are all waiting on.
+**Still a person's, and now genuinely runnable: P12-T5.** *"continue ORACLE"* will resolve this
+project, read its real open tasks and this repository's own `docs/current_task.md`, and ask
+before planning. Needs **Ollama running**; asks twice. It is the run that puts the first rows in
+`tasks` — everything P11 renders, and everything T4 will render, is computed over fixtures until
+it happens.

@@ -142,6 +142,16 @@ ALTER TABLE tasks ADD COLUMN project TEXT
   GENERATED ALWAYS AS (json_extract(spec, '$.project')) VIRTUAL;
 CREATE INDEX ix_tasks_project ON tasks(project, status);
 
+-- migration 0007. Daemon-level scalars — values ORACLE computes about itself.
+-- Deliberately NOT configuration: that lives in config/*.yaml where a human edits it and
+-- git records the edit. Today it holds `briefing.system_seq`, the watermark for briefing
+-- items that belong to no project (a restart, a degradation).
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+-- The briefing asks "which tasks in this project saw activity after seq N", which joins
+-- events.task_id to tasks.id. None of the log's other indexes helps that join.
+CREATE INDEX ix_events_task ON events(task_id, seq) WHERE task_id IS NOT NULL;
+
 -- Named `memory_facts` in the built schema, not `facts`.
 CREATE TABLE facts (                -- MEMORY.md §3
   id TEXT PRIMARY KEY, scope TEXT NOT NULL, scope_ref TEXT,

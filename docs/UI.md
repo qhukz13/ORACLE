@@ -340,11 +340,15 @@ the event log; older entries are summarised per turn.
 
 ---
 
-## 7b. The briefing — **Phase 13**
+## 7b. The briefing — backend built  `P12-T3, 2026-08-26`
 
 > *"What happened while I wasn't looking?"* — the timeline answers this exhaustively, which is the
 > wrong shape for the question. Added 2026-08-26 from [VISION.md §2](VISION.md#2-the-day--the-acceptance-test);
 > design in [PROJECT_STATE.md §6](PROJECT_STATE.md#6-the-briefing--what-happened-while-i-was-away).
+>
+> **The data and the deterministic text exist** — `GET /api/v1/briefing`,
+> `POST /api/v1/briefing/ack` ([as built](PROJECT_STATE.md#as-built--p12-t3-2026-08-26)). **The
+> view does not**; it is P12-T4, and the sketch below is what it renders.
 
 The timeline (§7) is the debugging surface: every event, in order, filterable. The briefing is the
 **glance** surface: the delta since I last acknowledged, grouped by project, bounded in size, and
@@ -357,6 +361,7 @@ once acknowledged.
 SINCE YESTERDAY 18:04                                        [ dismiss all ]
 
   Asterim                                              4 tasks · 38m · $0.42
+  ● 1 running        implement the retry ladder
   ✓ 3 completed      fix pipeline timeout · regression tests · update docs
   ✗ 1 failed         verify: 3 tests still failing            [inspect] [retry]
 
@@ -376,7 +381,8 @@ SINCE YESTERDAY 18:04                                        [ dismiss all ]
 | **Bounded** | Away for a week, this is not 40,000 events. Counts, outcomes, cost — and a link into the timeline for the rest. |
 | **`waiting on you` sorts to the top and is the only loud element** | Same rule as the sidebar (§4) and the core (§3). One attention channel, one meaning. |
 | **Every line is actionable or it is deleted** | `[inspect]`, `[retry]`, `[review]`, `[logs]` open something real. A line with no affordance is a log entry in a costume. |
-| **A dead daemon briefs itself** | If ORACLE crashed overnight, that is the first line. A background service that fails silently is the main risk of [ADR-0025](DECISIONS.md#adr-0025--oracle-is-a-resident-service-the-window-is-a-client), and this is the mitigation. |
+| **A dead daemon briefs itself** | If ORACLE crashed overnight, that is the first line. A background service that fails silently is the main risk of [ADR-0025](DECISIONS.md#adr-0025--oracle-is-a-resident-service-the-window-is-a-client), and this is the mitigation. **Built**: `system.boot` carries whether the previous run ended cleanly, because a silent gap in the log is otherwise indistinguishable from an idle night. |
+| **Running counts, not just outcomes** | *"What is running now"* is one of the six things [VISION.md §2](VISION.md#2-the-day--the-acceptance-test) gives the screen 3–5 seconds to answer. A briefing of outcomes alone goes blank mid-run, which is when a person most wants to see something. |
 | **Empty is a real state** | Nothing happened → "Nothing ran since 18:04." Not a placeholder, not a skeleton, not a fabricated summary. |
 
 ### Where the text comes from

@@ -76,8 +76,13 @@ def test_message_produces_the_full_event_sequence(client: TestClient) -> None:
             if ev["type"] == "turn.finished":
                 break
 
-    assert types[0] == "session.created"
-    assert "turn.started" in types
+    # `since_seq=0` replays the whole log, and since 2026-08-26 the first thing in a
+    # fresh one is `system.boot` — the daemon announcing itself so the next start can
+    # tell a clean stop from a crash (PROJECT_STATE.md §6). What this test is actually
+    # about is the ordering *within* a turn, so it asserts that rather than an index.
+    assert types[0] == "system.boot"
+    assert "session.created" in types
+    assert types.index("session.created") < types.index("turn.started")
     assert "message.completed" in types
     assert types[-1] == "turn.finished"
 

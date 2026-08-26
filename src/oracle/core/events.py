@@ -52,6 +52,13 @@ CRITICAL_TYPES: Final[frozenset[str]] = frozenset(
         # partly untrusted, and this is the event that says how it got that way. One
         # per `continue`, so it costs the queue nothing.
         "continue.derived",
+        # The daemon's own lifecycle. Critical because the briefing's answer to "did
+        # ORACLE die while nobody was looking?" is built from them: a silent gap in the
+        # log is indistinguishable from "nothing happened", so the boot event carries
+        # whether the previous run ended cleanly. This is the mitigation for ADR-0025's
+        # named risk — a background service failing invisibly at 04:00.
+        "system.boot",
+        "system.shutdown",
         "error",
         "system.degraded",
     }

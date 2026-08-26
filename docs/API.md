@@ -136,6 +136,11 @@ GET    /api/v1/projects/{id}            BUILT 2026-08-26: the row + a fresh obse
 POST   /api/v1/projects/{id}/scan       PLANNED — and probably never: there is nothing to
                                         scan into, because observed state is not stored
 
+GET    /api/v1/briefing                 BUILT 2026-08-26: what changed since you last
+                                        acknowledged. Reading does NOT consume it
+POST   /api/v1/briefing/ack?through_seq= BUILT 2026-08-26: the only thing that advances
+                                        the watermark. ?project_id= scopes it to one
+
 GET    /api/v1/sessions                 list
 GET    /api/v1/sessions/{id}/events     paged history (?since_seq=&limit=)
 DELETE /api/v1/sessions/{id}
@@ -175,6 +180,69 @@ POST   /api/v1/resume                   clears HALT; desktop only
 Conventions: cursor pagination (`?cursor=&limit=`, `limit` capped at 200) · `ETag`/`If-None-Match` on
 project and collection reads · `Idempotency-Key` required on every POST that starts work, so a mobile
 retry cannot launch a pipeline twice.
+
+---
+
+### `system.boot` / `system.shutdown`  `BUILT 2026-08-26`
+
+The daemon brackets its own life. **Critical** event types: a lost one turns a crash report
+into silence.
+
+```json
+{"unclean": true, "last_event": "tool.finished",
+ "last_seen": "2026-08-26T04:11:58.402Z", "schema_version": 7}
+```
+
+`unclean` is computed at boot by looking at what the last event in the log actually **was**.
+A `system.shutdown` means somebody stopped it; anything else means it died. This exists
+because a crash leaves *no trace of itself* — the log simply stops, and a silent gap is
+indistinguishable from an idle night, which would make ADR-0025's named risk unreportable.
+
+A **first-ever boot is not unclean**: there was no previous run for the absence of a shutdown
+to mean anything about.
+
+> **Protocol note.** A client connecting with `since_seq=0` against a fresh database now
+> receives `system.boot` as its **first** event, where it previously received
+> `session.created`. Clients already MUST ignore unknown types and MUST NOT depend on the
+> type at a given index; this is the first change that makes the second rule bite.
+
+---
+
+### `GET /api/v1/briefing` — what happened while I wasn't looking  `BUILT 2026-08-26`
+
+The delta since the reader last acknowledged, grouped by project, bounded, with a
+deterministic `text` rendering alongside the structured fields
+([PROJECT_STATE.md §6](PROJECT_STATE.md#6-the-briefing--what-happened-while-i-was-away)).
+
+**Reading it does not consume it.** A client may poll this, and a person may glance at it
+and walk away, without losing what they came back for. Only `POST /api/v1/briefing/ack`
+advances the watermark — a surface that cleared itself on sight would be a notification,
+and notifications are how people miss things.
+
+**No model is called.** Every number is arithmetic over task rows, so the surface with the
+tightest latency budget has none, and a summary of the owner's own work cannot be invented.
+A test asserts the module imports no provider.
+
+Two fields are **current state rather than delta**, and appear regardless of the watermark:
+`waiting` (a task parked on an approval is a *block* — acknowledging a briefing must never
+bury it) and `in_flight` (pending, ready or running — otherwise the briefing goes blank
+mid-run).
+
+`through_seq` is the log head at the moment of the request. Send it back on acknowledgement:
+work that arrived while the reader was looking is then not marked as seen.
+
+`system` reports the daemon's own news — chiefly whether the previous run ended cleanly.
+`unclean: true` means it died; the briefing says so rather than showing a silent gap that
+reads like an idle night.
+
+### `POST /api/v1/briefing/ack` — the only thing that consumes it  `BUILT 2026-08-26`
+
+`?through_seq=` is required, `?project_id=` optional. Without a project id it acknowledges
+every project **and** the system section; with one it acknowledges that project alone, so a
+per-project dismissal cannot sweep up a crash report. Monotonic: a stale client returning
+with an old sequence cannot rewind a pointer a later acknowledgement already advanced.
+
+An unknown `project_id` is a **404** rather than a silent acknowledgement of everything.
 
 ---
 

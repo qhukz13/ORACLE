@@ -373,10 +373,11 @@ index and could start earlier if the phase is split — it shares no code with t
 > [ADR-0024](DECISIONS.md#adr-0024--a-project-is-a-first-class-persistent-entity) ·
 > product rationale: [VISION.md §5](VISION.md#5-what-is-persistent).
 >
-> **T1 and T2 done 2026-08-26** — the entity
-> ([as built](PROJECT_STATE.md#as-built--p12-t1-2026-08-26)), then the `continue` intent and
-> unfinished-work derivation ([as built](PROJECT_STATE.md#as-built--p12-t2-2026-08-26)).
-> T3–T5 below. One acceptance item is **knowingly outstanding**: the intent eval was not
+> **T1, T2 and T3 done 2026-08-26** — the entity
+> ([as built](PROJECT_STATE.md#as-built--p12-t1-2026-08-26)), the `continue` intent and
+> unfinished-work derivation ([as built](PROJECT_STATE.md#as-built--p12-t2-2026-08-26)),
+> and the briefing ([as built](PROJECT_STATE.md#as-built--p12-t3-2026-08-26)).
+> T4–T5 below. One acceptance item is **knowingly outstanding**: the intent eval was not
 > re-run after an eleventh label was added ([OQ-25](OPEN_QUESTIONS.md#oq-25)).
 
 **Objective.** Make *"continue Asterim"* answerable: ORACLE resolves the project, reads its real
@@ -411,8 +412,13 @@ the tool layer for every observation · the event log's `seq` as the briefing po
 | API | `GET /api/v1/projects`, `POST /api/v1/projects`, `GET /api/v1/projects/{id}`; the sidebar stops rendering a bare name list |
 
 **Tasks.** T1 the entity (**done**) · T2 the `continue` intent and unfinished-work derivation
-(**done**) · T3 the briefing · T4 the sidebar and inspector reading real project state · T5 the
-first real `continue` run, end to end, with a person watching every approval.
+(**done**) · T3 the briefing (**done**) · T4 the sidebar and inspector reading real project
+state · T5 the first real `continue` run, end to end, with a person watching every approval.
+
+**The briefing moved here from P13 on 2026-08-26**, because its watermark lives on the project
+row and its content is per-project: it is a reading of project state, not of residency. What
+stays in P13 is everything about *being resident* — the service, the boot health phase, the
+shell attaching to a running daemon.
 
 **Migration work.** `discover_projects()` becomes a *candidate* source rather than the registry.
 Existing `memory_facts`/`memory_attempts` rows are keyed by project **name**; they are 0 rows today,
@@ -457,15 +463,21 @@ window-independent.
 
 **New work.** `oracled` installed as a Windows service or scheduled task, starting
 **degraded-capable** rather than eagerly · a boot health phase over Ollama, both databases, the
-index, agent CLIs and policy · the briefing surface, advancing `briefed_through_seq` **on
-acknowledgement only** · the shell attaches to a running daemon instead of supervising a sidecar.
+index, agent CLIs and policy · the shell attaches to a running daemon instead of supervising a
+sidecar.
+
+**Already done in P12-T3, and this phase's main risk is already mitigated:** the briefing, and
+the `system.boot` / `system.shutdown` pair that lets it say *"ORACLE stopped unexpectedly at
+04:12"* rather than showing a silent gap. A background service failing invisibly was the named
+cost of [ADR-0025](DECISIONS.md#adr-0025--oracle-is-a-resident-service-the-window-is-a-client);
+it is reportable before the service exists.
 
 **Depends on.** P12 — the briefing is per-project and the resume pointer lives on the project row.
 
-**Tests.** An unacknowledged briefing survives a restart · a service that died overnight is the
-first line of the next briefing · HALT works with no window open · boot with Ollama down reaches
-ONLINE and says which capability is missing · no interrupted worker is ever auto-resumed (this test
-already exists and must keep passing under service start).
+**Tests.** HALT works with no window open · boot with Ollama down reaches ONLINE and says which
+capability is missing · no interrupted worker is ever auto-resumed (this test already exists and
+must keep passing under service start). *An unacknowledged briefing surviving a restart, and a
+daemon that died overnight being the first line of the next briefing, are both tested in P12-T3.*
 
 **Acceptance criteria.**
 
