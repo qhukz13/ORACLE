@@ -172,7 +172,27 @@ class Scheduler:
     async def run(self) -> TaskStatus:
         await self._persist_all()
         for task in self.graph.tasks:
-            await self._emit("task.created", task, {"kind": str(task.kind), "root": task.root_id})
+            # The whole shape of the row, not just its kind. `depends_on` in particular:
+            # without it a client folding these events has a list, not a graph, and cannot
+            # rank or lay out anything. It was absent until 2026-08-26, which is why
+            # `TaskTree`'s dependency line was dead in the running app while a test that
+            # hand-populated the field asserted it rendered.
+            await self._emit(
+                "task.created",
+                task,
+                {
+                    "kind": str(task.kind),
+                    "root": task.root_id,
+                    "depends_on": list(task.depends_on),
+                    "objective": task.spec.objective,
+                    "role": task.spec.role,
+                    "agent": task.agent,
+                    "project": task.spec.project,
+                    "attempt": task.attempt,
+                    "max_attempts": task.max_attempts,
+                    "supersedes": task.supersedes,
+                },
+            )
 
         try:
             await self._loop()
@@ -496,6 +516,13 @@ class Scheduler:
                 # claim rides beside it, labelled, and gates nothing.
                 "evidence": result.evidence,
                 "claim": result.claim,
+                # What the row cost, where anything knows. ORCHESTRATION §6 asks the tree
+                # to answer "what did this graph cost", and until now `TaskResult.cost`
+                # was populated by runners and read by nobody.
+                "cost": result.cost.model_dump() if result.cost else None,
+                "attempt": finished.attempt,
+                "started_at": finished.started_at,
+                "finished_at": finished.finished_at,
             },
         )
         # Every failure is *offered*; nothing here decides whether it is answered. Note

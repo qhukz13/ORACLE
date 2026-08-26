@@ -141,7 +141,25 @@ export interface GraphTask {
   taskId: string;
   kind: string;
   status: string;
+  /** The tasks this one waits on. Populated from `task.created` since 2026-08-26 — before
+   *  that the scheduler never sent it, so this was always `[]` in the running app while a
+   *  test that hand-wrote the field asserted it rendered. A list is not a graph without it. */
   dependsOn: string[];
+  /** What the task is for, verbatim. An objective summarised on the way to the screen is an
+   *  objective nobody read — the same rule the graph approval card follows. */
+  objective?: string;
+  role?: string;
+  agent?: string;
+  project?: string;
+  /** Which try this is. A *retry* (`attempt 2` of the same row) is a different thing from a
+   *  *replan* (`supersedes` a failed row), and §6b draws them differently. */
+  attempt?: number;
+  maxAttempts?: number;
+  startedAt?: string;
+  finishedAt?: string;
+  /** What the row cost, where the runner knew. `undefined` means nobody measured — which is
+   *  the honest answer for a local tool call, and is not the same as zero. */
+  cost?: { tokens?: number; usd?: number };
   summary?: string;
   /** What ORACLE measured. Never merged with `claim` — that distinction is the whole
    *  verification design (docs/ORCHESTRATION.md §2). */

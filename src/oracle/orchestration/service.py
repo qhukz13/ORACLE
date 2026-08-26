@@ -178,6 +178,11 @@ class GraphService:
                     "summary": task.result.summary if task.result else None,
                     "evidence": task.result.evidence if task.result else {},
                     "claim": task.result.claim if task.result else None,
+                    #: What it cost, when the runner knew. A DELEGATION knows; a TOOL task
+                    #: does not, and `None` says so rather than implying zero.
+                    "cost": task.result.cost.model_dump()
+                    if task.result and task.result.cost
+                    else None,
                     "error": task.result.error.model_dump()
                     if task.result and task.result.error
                     else None,

@@ -467,3 +467,116 @@ describe("store.apply — task graphs", () => {
     expect(useStore.getState().graphs[0]?.tasks).toHaveLength(1);
   });
 });
+
+/** Apply a list of raw wire events and hand back the resulting state. */
+function play(events: Array<Record<string, unknown>>) {
+  useStore.getState().reset();
+  const { apply } = useStore.getState();
+  for (const e of events) {
+    apply({ v: 1, session_id: "s_1", turn_id: null, trace_id: "tr_1", ...e } as OracleEvent);
+  }
+  return useStore.getState();
+}
+
+describe("the graph slice folds what the scheduler actually sends", () => {
+  /**
+   * These payloads are the ones `orchestration/scheduler.py::_emit` builds, field for field.
+   *
+   * The reason this suite exists is a specific failure: `TaskTree.test.tsx` asserted that a task's
+   * dependencies render, using a fixture that hand-populated `dependsOn` — while the scheduler
+   * never sent `depends_on` and `store.ts` set it to `[]` unconditionally. A green test over a
+   * shape the app could not produce. Fixtures for wire-folding belong close to the wire.
+   */
+  const created = (over: Record<string, unknown> = {}) => ({
+    seq: 1,
+    type: "task.created",
+    ts: "2026-08-26T12:00:00Z",
+    task_id: "tk_root-b",
+    payload: {
+      root_id: "tk_root",
+      source: "graph",
+      kind: "tool",
+      root: "tk_root",
+      depends_on: ["tk_root-a"],
+      objective: "dev.run_tests (oracle-selfcheck/tests)",
+      role: "operator",
+      agent: null,
+      project: "ORACLE",
+      attempt: 1,
+      max_attempts: 2,
+      supersedes: null,
+      ...over,
+    },
+  });
+
+  it("keeps the dependencies, so the client has a graph and not a list", () => {
+    const s = play([created()]);
+    expect(s.graphs[0]?.tasks[0]?.dependsOn).toEqual(["tk_root-a"]);
+  });
+
+  it("carries the objective verbatim rather than a summary of it", () => {
+    const s = play([created()]);
+    expect(s.graphs[0]?.tasks[0]?.objective).toBe("dev.run_tests (oracle-selfcheck/tests)");
+  });
+
+  it("leaves agent undefined when there is none, rather than inventing a dash", () => {
+    // A TOOL task genuinely has no agent. `""` would render as an empty label; undefined
+    // lets the view decide, and the view's decision is to draw nothing.
+    const s = play([created()]);
+    expect(s.graphs[0]?.tasks[0]?.agent).toBeUndefined();
+    expect(s.graphs[0]?.tasks[0]?.role).toBe("operator");
+  });
+
+  it("records cost from task.finished, and undefined is not zero", () => {
+    const withCost = {
+      seq: 2,
+      type: "task.finished",
+      ts: "2026-08-26T12:01:00Z",
+      task_id: "tk_root-b",
+      payload: {
+        root_id: "tk_root",
+        source: "graph",
+        status: "succeeded",
+        ok: true,
+        summary: "ok",
+        evidence: { tool: "dev.run_tests" },
+        claim: null,
+        cost: { tokens: 1200, usd: 0.04 },
+        attempt: 1,
+        started_at: "2026-08-26T12:00:01Z",
+        finished_at: "2026-08-26T12:00:59Z",
+      },
+    };
+    const s = play([created(), withCost]);
+    const task = s.graphs[0]?.tasks[0];
+    expect(task?.cost?.tokens).toBe(1200);
+    expect(task?.startedAt).toBe("2026-08-26T12:00:01Z");
+
+    const free = play([created(), { ...withCost, payload: { ...withCost.payload, cost: null } }]);
+    expect(free.graphs[0]?.tasks[0]?.cost).toBeUndefined();
+  });
+
+  it("still keeps evidence and the worker's claim apart", () => {
+    const s = play([
+      created(),
+      {
+        seq: 2,
+        type: "task.finished",
+        ts: "2026-08-26T12:01:00Z",
+        task_id: "tk_root-b",
+        payload: {
+          root_id: "tk_root",
+          source: "graph",
+          status: "failed",
+          ok: false,
+          summary: "tests 40/41",
+          evidence: { passed: 40, failed: 1 },
+          claim: "everything passes",
+        },
+      },
+    ]);
+    const task = s.graphs[0]?.tasks[0];
+    expect(task?.evidence).toEqual({ passed: 40, failed: 1 });
+    expect(task?.claim).toBe("everything passes");
+  });
+});

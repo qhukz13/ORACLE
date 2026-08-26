@@ -335,7 +335,20 @@ export const useStore = create<State>((set) => ({
               taskId,
               kind: str(ev.payload["kind"]),
               status: "pending",
-              dependsOn: [],
+              // The scheduler sends this now. It did not until 2026-08-26, which made the
+              // dependency line in TaskTree dead in the running app.
+              dependsOn: Array.isArray(ev.payload["depends_on"])
+                ? (ev.payload["depends_on"] as unknown[]).map(String)
+                : [],
+              objective: optional(ev.payload["objective"]),
+              role: optional(ev.payload["role"]),
+              agent: optional(ev.payload["agent"]),
+              project: optional(ev.payload["project"]),
+              attempt: ev.payload["attempt"] == null ? undefined : num(ev.payload["attempt"], 1),
+              maxAttempts:
+                ev.payload["max_attempts"] == null
+                  ? undefined
+                  : num(ev.payload["max_attempts"], 1),
               // Carried on the first event about the row, so a replacement can be placed
               // without re-querying the tree and diffing it.
               supersedes:
@@ -402,6 +415,13 @@ export const useStore = create<State>((set) => ({
               // Kept as its own field, deliberately: rendering a worker's claim beside
               // ORACLE's evidence is fine; rendering it *as* evidence is not.
               claim: ev.payload["claim"] == null ? undefined : str(ev.payload["claim"]),
+              cost:
+                ev.payload["cost"] == null
+                  ? undefined
+                  : (asRecord(ev.payload["cost"]) as GraphTask["cost"]),
+              attempt: ev.payload["attempt"] == null ? t.attempt : num(ev.payload["attempt"], 1),
+              startedAt: optional(ev.payload["started_at"]) ?? t.startedAt,
+              finishedAt: optional(ev.payload["finished_at"]) ?? t.finishedAt,
             }));
             break;
           }
@@ -436,6 +456,15 @@ export const useStore = create<State>((set) => ({
 /** Add a task to its graph, creating the graph on first sight. Graphs are keyed by
  *  `root_id` from the payload — the event carries it precisely so a client never has to
  *  infer which graph a task belongs to. */
+/** A payload field that may legitimately be absent, as `string | undefined`.
+ *
+ *  `str(x)` turns a missing field into `""`, which then renders as an empty label rather than
+ *  as nothing at all. The distinction matters most for `agent`: a TOOL task genuinely has no
+ *  agent, and a blank column is the truthful rendering of that, not an em-dash pretending. */
+function optional(value: unknown): string | undefined {
+  return value === null || value === undefined ? undefined : String(value);
+}
+
 function upsertTask(graphs: Graph[], ev: OracleEvent, task: GraphTask): Graph[] {
   const rootId = str(ev.payload["root_id"]);
   if (!rootId) return graphs;

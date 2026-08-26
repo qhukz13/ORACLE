@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 import pytest
@@ -531,3 +532,85 @@ class TestTaskTimeoutOverridesTheKindDefault:
             assert rows["plain"].timeout_s is None, "no ceiling must stay no ceiling"
         finally:
             await conn.close()
+
+
+class TestWhatTheWireCarries:
+    """The `task.*` payloads, asserted against what a client needs to draw a tree.
+
+    This exists because of a specific hole. `TaskTree.tsx` renders `after {dependsOn}`, a
+    vitest asserted it rendered, and the scheduler never sent `depends_on` — so the store
+    set it to `[]` unconditionally and the feature was dead in the running app while its
+    test was green. The fixture proved something the wire could not produce.
+
+    So the contract gets asserted from both ends: here, that the scheduler emits it, and in
+    `store.test.ts`, that the client folds the payload this test describes.
+    """
+
+    async def emitted(self, graph: TaskGraph, eventlog: Any) -> list[Any]:
+        from oracle.orchestration.models import Cost, TaskResult
+
+        async def run(t: Task) -> TaskResult:
+            return TaskResult(
+                ok=True,
+                summary=f"{t.id} ok",
+                evidence={"tool": "dev.run_tests"},
+                claim="the worker said it went fine",
+                cost=Cost(tokens=1200, usd=0.04),
+            )
+
+        before = await eventlog.load_head()
+        await Scheduler(
+            graph, dict.fromkeys(TaskKind, run), limits=Limits(local=4), eventlog=eventlog
+        ).run()
+        return await eventlog.read_range(before, await eventlog.load_head())
+
+    async def test_task_created_carries_the_shape_of_the_row(self, eventlog: Any) -> None:
+        a = task("a")
+        b = task("b", "a").model_copy(update={"agent": "claude", "max_attempts": 2})
+        events = await self.emitted(TaskGraph([a, b]), eventlog)
+        created = {e.task_id: e.payload for e in events if e.type == "task.created"}
+
+        assert created["b"]["depends_on"] == ["a"], (
+            "without this the client has a list, not a graph"
+        )
+        assert created["b"]["objective"] == "do b"
+        assert created["b"]["role"] == "coder"
+        assert created["b"]["agent"] == "claude"
+        assert created["b"]["max_attempts"] == 2
+        # A task with no agent sends null, not "" — a TOOL task genuinely has none, and the
+        # view needs to be able to tell "nobody" from "somebody unnamed".
+        assert created["a"]["agent"] is None
+
+    async def test_task_finished_carries_the_cost_and_the_clock(self, eventlog: Any) -> None:
+        """`TaskResult.cost` has existed since P7 and reached nothing — not the REST
+        projection, not the wire, not the screen. ORCHESTRATION §6 asks the tree to answer
+        "what did this graph cost"."""
+        events = await self.emitted(TaskGraph([task("a")]), eventlog)
+        [finished] = [e for e in events if e.type == "task.finished"]
+
+        assert finished.payload["cost"] == {"tokens": 1200, "usd": 0.04}
+        assert finished.payload["started_at"] and finished.payload["finished_at"]
+        assert finished.payload["attempt"] == 1
+
+    async def test_evidence_and_claim_stay_apart_on_the_wire(self, eventlog: Any) -> None:
+        """The distinction the whole verification design rests on, checked at the last
+        place it could be thrown away before the screen."""
+        events = await self.emitted(TaskGraph([task("a")]), eventlog)
+        [finished] = [e for e in events if e.type == "task.finished"]
+        assert finished.payload["evidence"] == {"tool": "dev.run_tests"}
+        assert finished.payload["claim"] == "the worker said it went fine"
+        assert finished.payload["evidence"] != finished.payload["claim"]
+
+    async def test_a_cost_nobody_measured_is_null_rather_than_zero(self, eventlog: Any) -> None:
+        """A local tool call has no cost. Reporting 0 would put a number in a column that
+        sums, and a graph of six tool tasks would confidently total $0.00 as if measured."""
+        from oracle.orchestration.models import TaskResult
+
+        async def run(_t: Task) -> TaskResult:
+            return TaskResult(ok=True, summary="ok")
+
+        before = await eventlog.load_head()
+        await Scheduler(TaskGraph([task("a")]), {TaskKind.TOOL: run}, eventlog=eventlog).run()
+        events = await eventlog.read_range(before, await eventlog.load_head())
+        [finished] = [e for e in events if e.type == "task.finished"]
+        assert finished.payload["cost"] is None
