@@ -188,6 +188,13 @@ class TurnPipeline:
         #: what puts a turn-started delegation under HALT like every other task.
         self.spawn = spawn or self._own_spawn
         self._pipelines = pipelines or frozenset()
+        #: How a recognised pipeline name becomes a run. Public and assigned after the
+        #: state exists, exactly like `spawn` above and for the same reason: the callable
+        #: needs the whole daemon, which is not built yet when this object is.
+        #:
+        #: `None` means pipelines are discovered but not runnable, which is a legitimate
+        #: configuration and not an error — the turn says so rather than pretending.
+        self.run_pipeline: Callable[[str, str | None, str], None] | None = None
         self.stats = stats or StructuredStats()
         self._on_halt = on_halt
         #: Set when the provider is unreachable. Deterministic paths keep working
@@ -740,12 +747,28 @@ class TurnPipeline:
             else:
                 return await self._delegate_intent(text, None, session_id, turn_id, trace)
         elif pre.kind is PreRouteKind.PIPELINE:
+            # Deterministic, and that is the security property rather than an
+            # optimisation: a pipeline is started by a name a person typed matching a
+            # file a person wrote. No model chooses it, and ADR-0021 already forbids a
+            # *plan* from naming one.
+            if self.run_pipeline is None:
+                await self._say(
+                    f"Recognised pipeline {pre.command!r}, but pipelines are not wired up "
+                    "in this configuration.",
+                    session_id,
+                    turn_id,
+                    trace,
+                )
+                return False
             await self._say(
-                f"Recognised pipeline {pre.command!r}. Pipelines arrive in Phase 7.",
+                f"Running pipeline {pre.command!r}. Every step that needs approval is on "
+                "one card, before anything starts.",
                 session_id,
                 turn_id,
                 trace,
             )
+            self.run_pipeline(pre.command or "", session_id, trace)
+            return True
         return False
 
     def _run_command(self, command: str, args: str) -> str:

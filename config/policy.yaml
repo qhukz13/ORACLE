@@ -209,6 +209,22 @@ tools:
   # *shape* only - every delegation inside it still asks its own egress question, because
   # an egress approval binds to rendered bytes that do not exist yet (SECURITY.md §10).
   ai.graph:        { tier: T2 }
+  # The pipeline approval card (P10-T4). One decision covering a whole run: every step is
+  # listed with its tool, its RESOLVED arguments, its tier and the rule that priced it.
+  # Approving it mints a single-use grant per elevated step, each bound to the argument
+  # digest the card showed - so it authorises exactly what was displayed and nothing that
+  # resembles it. T3 steps are refused at validation and never reach a card: a T3 needs a
+  # phrase typed for that invocation, and batching one would make it a T2 wearing a label
+  # (SECURITY.md §5).
+  #
+  # T0 here is a FLOOR, not a price, and the distinction is the whole rule.
+  # `evaluate()` raises a tool's tier to its `declared_tier` and never lowers it, and a
+  # pipeline declares `max(tier(step))` (PIPELINES.md §3). So a run containing a T2 step
+  # is priced T2 and asks; a run of nothing but reads is priced T0 and asks nobody, which
+  # is what "confirm actions, not intentions" means when the actions are all T0. The entry
+  # exists because `default_decision: deny` means an absent pseudo-tool is a refused one -
+  # it is here to make `pipe.run` KNOWN, not to fix what it costs.
+  pipe.run:        { tier: T0 }
 
 # Tools deliberately absent, and therefore denied by default:
 #   oracle.set_policy   - policy changes are a human editing this file

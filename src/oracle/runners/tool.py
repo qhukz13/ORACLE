@@ -53,6 +53,7 @@ def make_tool_runner(
     approvals: ApprovalStore | None = None,
     *,
     session_id: str | None = None,
+    pre_granted: dict[str, str] | None = None,
 ) -> Any:
     """Bind an executor into a `Runner`. Constructed in the daemon and injected, so the
     scheduler still imports nothing that can execute.
@@ -65,7 +66,15 @@ def make_tool_runner(
     #: What the first attempt learned, so the second can present it. Keyed by task id and
     #: cleared on use: an approval binds to one task and one argument digest, and a
     #: leftover id is exactly the replay the digest exists to prevent.
-    granted: dict[str, str] = {}
+    #:
+    #: `pre_granted` seeds it, and there is exactly one caller: a pipeline, whose single
+    #: up-front card already asked about every elevated step and minted a grant for each
+    #: (PIPELINES.md §3). A seeded task therefore finds its `approval_id` and never parks
+    #: — which is the whole of "never a prompt mid-run". It is not a bypass: the grant is
+    #: bound to the argument digest the card displayed, `execute()` recomputes that digest
+    #: from the resolved arguments, and a mutated argument fails `Approval.valid_for` with
+    #: a valid id in hand.
+    granted: dict[str, str] = dict(pre_granted or {})
     #: Tasks that have already been through the asking. Without this, a *refused* task
     #: parks, resumes with no grant, asks again, parks again - forever, and the human who
     #: said no is asked again every few milliseconds. Asking once per task is the rule;

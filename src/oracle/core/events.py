@@ -38,6 +38,13 @@ CRITICAL_TYPES: Final[frozenset[str]] = frozenset(
         "task.created",
         "task.updated",
         "task.finished",
+        # A pipeline run's boundary. Critical because `pipeline.finished` carries the run
+        # record — the one thing about a run that is not reconstructible from the task
+        # rows, since it also holds what the parameters *omitted*. The steps themselves
+        # emit ordinary `task.*`: a pipeline is a task graph, so there is no second
+        # per-step event type and a consumer needs no new vocabulary to render one.
+        "pipeline.started",
+        "pipeline.finished",
         "error",
         "system.degraded",
     }

@@ -36,7 +36,7 @@ __all__ = [
 ]
 
 
-def build_runners(state: Any) -> dict[Any, Any]:
+def build_runners(state: Any, *, pre_granted: dict[str, str] | None = None) -> dict[Any, Any]:
     """Every runner a graph can need, bound to the daemon's real components.
 
     This is the composition P7-T2 deliberately left undone — building runners nothing
@@ -87,7 +87,10 @@ def build_runners(state: Any) -> dict[Any, Any]:
         state.delegations, repo, allowed_tools=("Read", "Edit", "Write"), inputs_for=inputs_for
     )
     return {
-        TaskKind.TOOL: make_tool_runner(state.executor, state.approvals),
+        # `pre_granted` is empty for every caller but a pipeline, whose one up-front card
+        # already asked about each elevated step (PIPELINES.md §3). A seeded task finds
+        # its approval id and never parks; everything else asks exactly as it did before.
+        TaskKind.TOOL: make_tool_runner(state.executor, state.approvals, pre_granted=pre_granted),
         TaskKind.DELEGATION: delegation,
         TaskKind.VERIFY: make_verify_runner(
             state.task_store, run_tests, BaselineCache(repo, run_tests)

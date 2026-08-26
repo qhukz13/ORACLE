@@ -22,6 +22,12 @@ roles:
   summarizer:  { outcome: report,  workspace: none }
   # No model holds this one. Where code can judge, no model is asked to.
   verifier:    { outcome: verdict, workspace: none, deterministic: true }
+  # Nor this one. A pipeline step is work ORACLE performs itself, from a file a human
+  # wrote (PIPELINES.md §2), so no agent lists it and `resolve_agent` returns None.
+  # `deterministic: true` also means `plan.validate()` refuses a planner that tries to
+  # author an `operator` task with anything but a verdict - so naming the role here
+  # closes it as a hole rather than opening one.
+  operator:    { outcome: report,  workspace: none, deterministic: true }
 
 agents:
   claude:

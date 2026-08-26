@@ -25,6 +25,12 @@ config/local.*
 *.sqlite3
 secrets/
 .oracle/
+# ...except a project's own pipelines, which are source rather than state (PIPELINES.md
+# §2). A workflow that decides what runs unattended belongs in review and in history, and
+# an ignored one is invisible to both and lost on a clone. ORACLE still treats a pipeline
+# found here as untrusted repository content whether or not it is tracked.
+!.oracle/pipelines/
+!.oracle/pipelines/**
 
 # Python
 __pycache__/
