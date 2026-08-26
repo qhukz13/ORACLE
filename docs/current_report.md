@@ -3,120 +3,110 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** P9-T1 — memory: what ORACLE is allowed to remember, and what it must refuse to forget.
-**Done: five of six acceptance criteria.** The sixth — the retrieval recall gate — is **narrowed,
-not met**, and the narrowing is the more useful result. Details below.
-**Status:** `src/oracle/memory/` exists. Facts, preferences and prior attempts are durable; the
-write policy refuses four ways; band 5 is filled; a repeated task's packet carries what was already
-tried; the Memory view answers "why does ORACLE think that?" in one click. `make check` green.
-**Date:** 2026-08-25
+**Task:** P9-T2 — retrieval: the hypothesis that is left, and the corpus it is measured against.
+**Done: four and a half of six acceptance criteria.** Both of OQ-18's levers are measured. The
+gate is **not** met and **not** moved: the best measured configuration is **78.9%** against 80% —
+**30 of 38 fixtures, one short**.
+**Status:** The chunk budget is enforced and calibrated; recall improved on every strategy;
+`make check` green.
+**Date:** 2026-08-26
 
 ---
 
-## The bands stop being empty
+## The headline
 
-`ContextAssembler` has had bands 5–7 declared and unfed since Phase 1. Band 5 is filled now, in
-MEMORY.md §5's priority order, and the ANSWER call goes through the assembler instead of two
-hand-built messages — so memory and recent history are budgeted, truncated and provenance-labelled
-like everything else.
+Two full runs over the real corpus, ~4.3 hours of CPU, identical except for the chunker.
+Composed per-case for the path that actually ships:
 
-**Band 6 (retrieval) is deliberately still empty on the interactive answer path**, and that is a
-decision rather than an omission: filling it puts the embedder on a path with a measured latency
-budget and ~70 ms of headroom. Retrieval already runs where those seconds are free — the Handoff
-Packet, where a delegation takes minutes.
+| | overall recall@5 | RU recall@5 |
+|---|---|---|
+| before this task | 68.4% | 56.0% |
+| **after the chunker repair** | **71.1%** | **60.0%** |
+| **+ an English probe** | **78.9%** | **72.0%** |
+| the gate | 80% — 31 of 38 | |
 
-## The policy is the subsystem
+| lever | effect on the shipped path |
+|---|---|
+| 2 · truncation, fixed | +2.7 overall, +4.0 RU |
+| 1 · query translation, at its ceiling | +7.8 overall, +12.0 RU |
+| 3 · not fusing BM25 on a crosslingual query | already correct in `retrieval.py`, worth 12–20 RU points, and the **harness had it wrong** |
 
-**Memory is the only place an injection survives the turn it arrived in.** Everything else is
-turn-scoped: a document taints one turn, a plan authors one graph, a worker's claim gates nothing
-ever. A written memory is read back into future prompts, for months, labelled as ORACLE's own
-belief. So `policy.py` is a pure function, says no by default, and is not called from inside the
-store — a store that also decided what was permissible would be a place where "just this once"
-could be added without anybody noticing.
+## The correction that matters most
 
-Four blocks, each with a test: **tainted** (checked first, before the source is even read, so a
-document cannot borrow the owner's authority by claiming it) · **mid-plan** · **a single
-observation** · **an unapproved inference**. `plan_active` comes from the daemon, not from the
-client payload, and a security test checks that against the source.
+**OQ-18's "44% on the 25 Russian fixtures" was measuring a code path ORACLE does not run.**
 
-Two consequences worth stating plainly:
+`retrieve()`'s `discriminating_terms` drops minority-script terms at any frequency, so a Russian
+query returns no lexical terms and takes the **dense-only** path — it never fuses BM25. The eval
+harness's `gated` strategy tests only document frequency, with no script rule. So every
+crosslingual number this project has recorded described a fusion that does not happen. What ships
+scored **56%** on those fixtures before this task, not 44%.
 
-- **Nothing is deleted except by a person.** A fact that loses a conflict is marked `superseded_by`
-  and stays readable; `forget()` is the only deletion and nothing inside ORACLE calls it. The
-  Memory view renders dropped beliefs under the ones that replaced them.
-- **A lower-authority contradiction changes nothing at all.** It returns a question. Auto-deletion
-  on contradiction is tempting and wrong — a transient failure would erase a correct fact.
+That is the fourth instrument discrepancy in three days, after the chunker copy, the config
+denominator and the off-by-one summary header. They share a shape and it is worth naming: **the
+measurements were fine and the things around them were not.** The harness now calls the shipped
+chunker, prints both denominators, and has a header that lines up with its rows.
 
-## The criterion that pays for the phase
+## The chunk budget
 
-A delegation fails. The failure becomes a record. The *same objective*, asked again, produces a
-packet whose ATTEMPTS.md names it — with nothing wiring the two together, because the signature
-matched. There is a test that does exactly that against a real packet on disk.
+Two defects, both real, neither about tokenizers on its own:
 
-**No worker claim travels.** `Attempt` has no field for one — a missing field rather than a filter
-somebody has to remember — because an attempt is read back into a planning prompt and a Handoff
-Packet, which are the two places prose becomes instructions.
+- **The cap was never enforced.** `MAX_CHARS` was documented as the ceiling on a chunk and applied
+  to the *body* — `_pack` counted block bodies while emitting `header + anchor + body`, `_window`
+  counted lines while emitting `prefix + lines`, and the overlap path dropped a newline per line.
+  The longest "1,800-character" chunk in the corpus was **4,055 characters**. The test that should
+  have caught it asserted `<= MAX_CHARS * 2`; a budget with a factor-of-two tolerance is not a
+  budget.
+- **It was calibrated against the wrong corpus.** "~500 tokens at 3.6 chars/token" — bge-m3
+  tokenizes this corpus at 3.05 (code) / 3.33 (markdown) median and 2.34 / 2.42 at the 1st
+  percentile. **27.1%** of embedded chunks overflowed the window.
 
-Matching is a normalised signature plus token overlap, with **no embedder**, and that is a decision
-MEMORY.md §4 did not make: an embedder on the packet-rendering path degrades to "no prior attempts"
-exactly when it is unavailable, which is the failure that makes a memory system feel like it has
-none. `match()` takes candidates and scores them, so the upgrade is one function when a measurement
-asks for it.
+`MAX_CHARS` is 1200 now. Truncation is **0.7%** of embedded chunks and 0.10% of embedded tokens. It
+costs 43% more chunks and 20 MB of index — and made indexing *faster* in wall-clock (7,523 s
+against 8,032 s), because attention cost is superlinear in sequence length.
 
-## OQ-18: the cheap lever, measured and ruled out
+**`CHUNKER_VERSION` is recorded in the index** and checked like the embedding model. Incremental
+indexing does not rebuild rows it already has, so a boundary change leaves an index half cut each
+way with nothing failing. **Your `knowledge.db` will now report "not stale, wrong" and ask for a
+reindex** — that is the guard working, not a break.
 
-[dev log](../logs/development/2026-08-25-oq18-truncation.md) ·
-`scripts/measure_truncation.py` · [OQ-18](OPEN_QUESTIONS.md#oq-18)
+## The suite hang, fixed at the cause
 
-OQ-18 said to measure the 512-token truncation first because it is countable without building
-anything and would change what the other experiment means. Counted, with `bge-m3`'s own tokenizer
-over the real corpus:
+`make check` hung on me three times. Eleven `async for event in eventlog.stream(0)` loops in tests
+had no deadline: when the awaited event never arrives they do not fail, they hang, and with no
+global pytest timeout they hang the whole run. P8-T1's report predicted the trigger — *"the helper
+should probably move into `helpers_delegation.py` when a fourth suite needs it"*. A fourth suite
+needed it. `wait_event(eventlog, match, timeout, what)` exists, `wait_for`/`wait_state` are
+one-liners over it, and all eleven are converted: a missing event now fails in 30 s with
+`waited 30s for the graph card and it never arrived (last_seq=…)`.
 
-- **20.1%** of 12,648 chunks exceed the window; **10.1% of all corpus tokens are never embedded**.
-- It is not uniform — **88% of `config` chunks** overflow, against 13% of code.
-- The character cap meant to prevent this **is not enforced**: 17% of chunks exceed `MAX_CHARS`,
-  the longest by more than double.
+## What is not done, and why
 
-**And none of it explains the recall gap.** The seven Russian cases that never enter the candidate
-list all point at notes markdown whose chunks fit with room to spare — **0% of their tokens are
-lost**. So lever 2 is dead, query translation is what remains, and — this is what the ordering
-bought — its result will now be interpretable, because the index it is measured against does not
-have a hole where the answers are.
+**Query translation is measured but not implemented.** Two things block it and neither is typing:
 
-The recall gate is therefore **still not met and not re-argued**: I have removed a hypothesis, not
-raised the number. Saying so is more useful than moving the gate to where the numbers already are.
+1. **The translator is unmeasured.** +12.0 RU is what a *human* translation buys — deliberately the
+   ceiling, so a negative result would have killed the idea outright. Whether the resident 0.8B
+   model's Russian reaches it is the next measurement. **Ollama was not running on this machine**,
+   so it could not be answered here.
+2. **The latency does not fit the interactive path.** A second dense probe costs one more query
+   embedding — 63 ms p50 / 97 ms p95, measured — against ~70 ms of headroom, before the generation
+   call. Where it fits is the Handoff Packet, where a delegation takes minutes.
 
-**A methodology mistake worth reusing:** the first run of that script reported those same seven
-fixtures as "not in the corpus at all" — a spectacular-looking finding, and wrong. It resolved
-fixture paths with an exact dict lookup while `eval_embeddings.hit()` uses a suffix match. A
-measurement that resolves identity differently from the system it measures is measuring itself.
+Shipping the mechanism on a ceiling measurement is how a system acquires a feature that works in
+the log and not on the machine, so it waits for one cheap measurement.
 
-## Tests
+**OQ-18 is therefore narrowed, not resolved.** The gate stays at 80% — 6.3 points on 38 fixtures is
+2.4 cases, and a gate re-argued to sit just below where the numbers landed measures nothing.
 
-44 new Python (26 in the security suite) and 7 vitests. Notable:
+One of the eight remaining misses is structural rather than ranking: `en-relay-dockerfile` expects a
+**config** file, which is indexed lexically and never embedded. No dense probe of any quality can
+retrieve it.
 
-- a tainted turn refused under **every** source, including `user_stated` with `user_approved`;
-- an observation seen five times still losing to what the owner stated, and becoming a question;
-- a remembered value that reads like an order arriving in band 5 as labelled text, verbatim;
-- memory switched off producing exactly the pre-Phase-9 turn, and a store that raises costing
-  band 5 and nothing else;
-- the migration adding no new write surface.
+## Also landed
 
-## What is deliberately still missing
-
-**Confidence that means anything** (every write lands at 1.0; decay is the only thing that moves
-it) · **proposed facts** (rule 4 is enforceable, but nothing observes twice yet) · **§5 item 4**,
-"facts referenced in the last 3 turns", which needs a per-turn read timeline that `hit_count` is
-not — `bands.recent_facts` exists and says so.
-
-And one friction recorded rather than excepted: "never written mid-plan" is implemented literally,
-so **a correction typed while a graph runs is refused**. That is the safe reading, and the fix when
-somebody hits it is a queue that applies the write when the graph ends — not an exception in the
-policy.
+The carried-over `verifier` + `verdict` inconsistency is cleared — the accurate spelling was
+rejected while the misleading one was accepted. The shipped template uses the honest spelling.
 
 ## Next
 
-**P9-T2** ([current_task.md](current_task.md)): the retrieval repair — query translation, which is
-now the only hypothesis left for OQ-18, together with the two chunking defects this task measured.
-They belong in one task because both change chunk boundaries, and a recall number measured across a
-boundary change cannot be compared with the one before it.
+**P9-T3** ([current_task.md](current_task.md)): measure the translator and close the last fixture.
+Both remaining steps are small and named; the expensive part of this question is done.

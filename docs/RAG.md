@@ -166,6 +166,48 @@ the index, [OQ-22](OPEN_QUESTIONS.md#oq-22)) and will persist layout positions i
 Nothing about indexing or retrieval changes; the graph is a read-only projection of what this
 document already specifies.
 
+### The budget, enforced and recalibrated  `MEASURED 2026-08-26`
+
+The target sizes in the table above are in **tokens**; the chunker's budget is in **characters**,
+because a character budget keeps chunking independent of the tokenizer — which is what let OQ-02
+compare five embedding candidates against byte-identical chunks. That trade has a maintenance cost
+that went unpaid for two months, and both halves of it are now measured
+([log](../logs/development/2026-08-26-oq18-chunking.md)).
+
+**The cap was never enforced.** `MAX_CHARS` was documented as the ceiling on a chunk and applied to
+the *body*: `_pack` counted block bodies while emitting `header + anchor + body` per block, and
+`_window` counted lines while emitting `prefix + lines`. The longest "1,800-character" chunk in the
+real corpus was **4,055 characters**. The unit test that should have caught it asserted
+`<= MAX_CHARS * 2`; a budget with a factor-of-two tolerance is not a budget, and that slack is gone.
+
+**And it was calibrated against the wrong corpus.** "~500 tokens of English prose" assumed ~3.6
+characters per token. `bge-m3` tokenizes this corpus at a median of 3.05 (code) and 3.33
+(markdown), and at the 1st percentile 2.34 and 2.42 — so **27.1% of embedded chunks exceeded the
+512-token window and were silently truncated**, taking 6.4% of embedded tokens with them.
+
+`MAX_CHARS` is **1200** now, and enforced against the rendered chunk. Truncation is 0.7% of
+embedded chunks and 0.10% of embedded tokens. It costs 43% more chunks.
+
+It stays a character cap rather than becoming a token cap, deliberately: a token cap would make
+chunking depend on the tokenizer, and the coupling that produces is precisely what let
+`eval_embeddings.py`'s copy of the chunker drift 8% away from the shipped one — which meant every
+recall number this project has published, including OQ-18's baseline, described the harness rather
+than the index. The harness calls the shipped chunker now.
+
+**`CHUNKER_VERSION` is recorded in the index**, beside the embedding model and checked the same
+way. `bind()` has always refused an index built by a different model because "it returns confident
+nonsense"; a boundary change is the same class of problem, and incremental indexing does not
+rebuild rows it already has — so without the guard an index ends up half cut one way and half the
+other, with nothing failing and retrieval quietly getting worse.
+
+**What the repair bought**, measured over the full corpus on the path that ships: **+2.7 points of
+recall@5 overall and +4.0 on the Russian subset**, with every fusion strategy improving and none
+regressing. It costs 43% more chunks and 20 MB of index, and it made indexing *faster* in
+wall-clock — 7,523 s against 8,032 s — because attention cost is superlinear in sequence length and
+these sequences are shorter. Numbers and method in
+[the log](../logs/development/2026-08-26-oq18-chunking.md); the gate itself is
+[OQ-18](OPEN_QUESTIONS.md#oq-18).
+
 ---
 
 ## 4. Embeddings
@@ -277,6 +319,23 @@ RRF is chosen because it needs no score normalisation between two incomparable s
 tuned weights — it is robust by construction. Metadata pre-filtering (project, collection, language,
 path prefix) happens **before** the KNN scan, which is what keeps brute force cheap — in sqlite-vec
 that means vec0 partition keys, so the predicate is pushed into the scan rather than applied after it.
+
+### The script rule, re-measured  `2026-08-26`
+
+`discriminating_terms` drops minority-script terms at any frequency, so a Russian question against
+this Latin-majority corpus produces no lexical terms and `retrieve()` takes the **dense-only** path.
+The 2026-08-24 measurement put that at 12 points of cross-language recall@5. Re-measured over the
+full corpus on the repaired index, it is worth **12 points** without a translated probe and **20**
+with one — BM25 scores **0.0%** on all 25 Russian fixtures in both runs, and unweighted RRF admits
+those fifty results as a second opinion of equal standing, displacing correct dense hits out of the
+top 5.
+
+**The eval harness did not implement this rule**, and that mattered more than the rule itself:
+`eval_embeddings.py`'s `gated` strategy tests only document frequency, with no script test, so
+every crosslingual recall number this project has recorded — including
+[OQ-18](OPEN_QUESTIONS.md#oq-18)'s 44% — described a fusion ORACLE does not perform. What ships
+scores 60.0% on those fixtures, not 44%
+([log](../logs/development/2026-08-26-oq18-chunking.md)).
 
 ### Fusion is conditional  `MEASURED 2026-08-24`
 

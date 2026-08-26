@@ -29,7 +29,7 @@ doc, delete the marker.
 | [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | `EXPERIMENT NEEDED` | UX quality, not a phase | open |
 | [OQ-16](#oq-16) | Does `connect_read_pipe` work anywhere on Windows? | `UNKNOWN` | none — worked around | monitoring |
 | [OQ-17](#oq-17) | Is a ~43 min **cold** reindex acceptable? | `ASSUMPTION` | Phase 5 tuning | narrowed 2026-08-22 — warm rebuilds are 37 s |
-| [OQ-18](#oq-18) | Can Russian questions reach an English corpus at all? | `EXPERIMENT NEEDED` | Phase 5 gate | **narrowed 2026-08-25 — lever 2 measured and ruled out; query translation is what is left** |
+| [OQ-18](#oq-18) | Can Russian questions reach an English corpus at all? | measured 2026-08-26 | Phase 5 gate | **both levers measured — 78.9% against an 80% gate, one fixture short; gate NOT moved** |
 | [OQ-19](#oq-19) | Should the Claude integration move to the Claude Agent SDK? | `TO VERIFY` (on trigger) | none — trigger-based | open |
 | [OQ-20](#oq-20) | Can `agy --json-schema` reliably return a valid ExecutionPlan? | measured 2026-08-24 | P6-T5 / Phase 8 | **answered NO — 75% vs a 90% gate; the ladder promoted Claude** |
 | [OQ-21](#oq-21) | When does ORACLE's MCP server need the 2026-07-28 spec? | `UNKNOWN` | none — watch item | monitoring |
@@ -578,6 +578,83 @@ own merits, and — this is what the ordering bought — its result will be inte
 index it is measured against does not have a hole where the answers are. The chunking defects are
 worth fixing on their own terms; they belong to a task that touches retrieval, because they change
 chunk boundaries and therefore invalidate every recall number measured before them.
+
+#### The baseline was measured with the wrong chunker  `2026-08-26, P9-T2`
+
+[dev log](../logs/development/2026-08-26-oq18-chunking.md). `scripts/eval_embeddings.py` carried its
+own copy of the chunker — correct for OQ-02, where five candidates had to see byte-identical chunks,
+and wrong from the moment the model was fixed. On the same corpus the copy produced **12,770**
+chunks and the shipped chunker **11,727**. **Every recall number this question records was computed
+over chunks ORACLE does not produce.**
+
+The harness calls the shipped chunker now. Re-measured against it, before any repair:
+
+| | recorded here | measured 2026-08-26 |
+|---|---|---|
+| best overall recall@5 | 61% (gated) | **68%** (`rrf_w2`); gated is 58% |
+| RU (crosslang) recall@5 | 44% | **40%** |
+
+Neither is a regression — they are the first numbers that describe the shipped code. The gate is
+unchanged at 80% and unmet.
+
+The truncation figures in the section above were measured the same way and are corrected in the same
+log: **27.1%** of *embedded* chunks over the window (not 20.1%), and **6.42%** of embedded tokens
+(not 10.1%, which counted config chunks that are never embedded at all). The conclusion is
+unaffected: the seven Russian cases that never reach the candidate list lose **0%** of their tokens.
+
+`MAX_CHARS` is recalibrated (1800 → 1200) and now enforced against the rendered chunk, taking
+truncation to 0.7% of embedded chunks.
+
+#### Both levers measured  `2026-08-26, P9-T2`
+
+Two full runs over the real corpus, ~4.3 hours of CPU, same fixtures, same model, the only
+difference between them the chunker: `logs/measurements/oq18-{before,after}.json`,
+[dev log](../logs/development/2026-08-26-oq18-chunking.md).
+
+**First, a correction that changes what this question has been recording.** `retrieve()`'s
+`discriminating_terms` drops minority-script terms at any frequency, so a Russian query returns no
+lexical terms and ORACLE takes the **dense-only** path — it never fuses BM25. The eval harness's
+`gated` strategy uses a different rule with no script test, so **the 44% recorded above was
+measuring a code path ORACLE does not run.**
+
+Composed per-case from the miss lists, for the path that actually ships:
+
+| | overall recall@5 | RU recall@5 |
+|---|---|---|
+| before this task | 68.4% | 56.0% |
+| **after the chunker repair** | **71.1%** | **60.0%** |
+| **+ an English probe (human translation)** | **78.9%** | **72.0%** |
+| the gate | 80% — 31 of 38 fixtures | |
+
+**78.9% is 30 of 38. The gate needs 31.** One fixture.
+
+| lever | effect on the shipped path |
+|---|---|
+| 2 · truncation, fixed | +2.7 overall, +4.0 RU |
+| 1 · query translation, at its ceiling | +7.8 overall, +12.0 RU |
+| 3 · not fusing BM25 on a crosslingual query | already correct in `retrieval.py`; worth **12–20 RU points**, and the harness had it wrong |
+
+**The gate stays at 80% and is unmet.** 6.3 points on 38 fixtures is 2.4 cases; a gate re-argued to
+sit just below where the numbers landed would measure nothing. What changed is that "unmet" now has
+a number, a decomposition, and a named next step.
+
+**Two things block closing it, and neither is a matter of typing:**
+
+1. **The translator is unmeasured.** +12.0 RU is what a *human* translation buys — the ceiling of
+   the idea, deliberately, so that a negative result would have killed it outright. Whether the
+   resident 0.8B model's Russian reaches that ceiling is the next measurement, and it is cheap:
+   translate 25 fixture questions, re-score the query half. Ollama was not running on this machine,
+   so it could not be done here.
+2. **The latency does not fit the interactive path.** A second dense probe costs one more query
+   embedding — 63 ms p50 / 97 ms p95, measured — against the ~70 ms of headroom recorded above, and
+   that is *before* the generation call. Where it fits is the Handoff Packet, where a delegation
+   takes minutes and retrieval already runs.
+
+**One of the eight remaining misses is structural rather than a ranking problem.**
+`en-relay-dockerfile` expects `Asterim/Dockerfile.relay`, a **config** file — indexed lexically and
+never embedded. No dense probe of any quality can retrieve it; the lexical half is what should, and
+the script rule turns that half off for the queries around it. A fixture set that includes it is
+measuring fusion and dense retrieval with one number.
 
 ---
 

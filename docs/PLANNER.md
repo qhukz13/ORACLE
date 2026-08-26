@@ -327,9 +327,16 @@ Two more decisions the code had to make that this document did not:
   `{root}-a` on compilation, and `depends_on` with them. Letting `"A"` reach the task
   table would make two plans' first task the same row.
 * **`expected_outcome` chooses the `TaskKind`**, not the plan. A plan says what it wants
-  back; the supervisor decides how that is produced. `verdict` becomes a `VERIFY` task —
-  which is also why a plan asking a *worker* for the `verifier` role is rejected: no model
-  holds it.
+  back; the supervisor decides how that is produced. `verdict` becomes a `VERIFY` task.
+
+  **Corrected 2026-08-26 (P9-T2).** This originally said "a plan asking a *worker* for the
+  `verifier` role is rejected: no model holds it", and the validator implemented exactly
+  that — which meant `reviewer` + `verdict` was accepted while `verifier` + `verdict`, the
+  accurate description of the identical deterministically-judged task, was refused. A
+  validator that rejects the honest spelling and accepts the misleading one teaches
+  planners to lie. A deterministic role is now legal **for a `verdict` and nothing else**,
+  and it compiles with `agent = None`, because nobody is nominated to run what code
+  runs.
 
 ### The registry is where the measurement lives now
 
