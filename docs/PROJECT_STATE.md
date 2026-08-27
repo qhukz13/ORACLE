@@ -264,6 +264,25 @@ acknowledgement of what the reader actually saw.
 
 ---
 
+### As built  `P12-T4, 2026-08-26`
+
+`components/ProjectList.tsx`, `components/Briefing.tsx`, 34 UI tests, three new axe cases.
+**Verified against a live daemon** rather than only against fixtures — registration moved
+`ORACLE` from candidates into the tracked list, and dismissal posted the `through_seq` that had
+been displayed.
+
+| Question | Answer, and why |
+|---|---|
+| Does the sidebar show git state? | **No, and a test asserts it does not.** [OQ-24](OPEN_QUESTIONS.md#oq-24) is unmeasured, and an omission that is merely intended gets added back by the next person who wants a branch name. |
+| How are candidates presented? | Collapsed, under *"N not tracked"*. The live run found **10** — including `New folder` and `Kaggle`. Registration stays an explicit act. |
+| What acknowledges the briefing? | The dismiss button only. The component has no effect that calls `onAcknowledge`, and a test re-renders it twice to prove it. The sequence sent is the one that was **displayed**. |
+| Where do fixtures come from? | The wire shape, snake_case and complete. `TaskTree.test.tsx` is green on a shape the app cannot produce; that is the bug this avoided repeating. |
+
+**Not built:** the inspector still opens turns rather than tasks — `onInspect` routes a task id
+into the turn selector, which is P11-T5's shape and is a stopgap.
+
+---
+
 ## 7. Security posture
 
 Project state is derived from content ORACLE does not control, so it is a taint surface and is

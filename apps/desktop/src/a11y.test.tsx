@@ -23,12 +23,14 @@
 import { render } from "@testing-library/react";
 import axe from "axe-core";
 import { describe, expect, it } from "vitest";
+import { Briefing, toBriefing } from "./components/Briefing";
 import { CommandPalette } from "./components/CommandPalette";
 import { DelegationPanel } from "./components/DelegationPanel";
 import { GraphCard } from "./components/GraphCard";
 import { KnowledgeHealth } from "./components/KnowledgeHealth";
 import { MemoryView } from "./components/MemoryView";
 import { PipelineCard } from "./components/PipelineCard";
+import { ProjectList, toProjects } from "./components/ProjectList";
 import { TaskTree } from "./components/TaskTree";
 import { ConfirmationCenter } from "./components/ConfirmationCenter";
 import { TerminalDock } from "./components/TerminalDock";
@@ -308,6 +310,144 @@ describe("status is never carried by colour alone", () => {
     );
     expect(container.querySelector(".ap-tier")?.textContent).toBe("T2");
     expect(container.textContent).toContain("APPROVAL REQUIRED");
+  });
+});
+
+const projectsData = toProjects({
+  projects: [
+    {
+      id: "pj_1",
+      name: "Asterim",
+      root: "C:\\Projects\\Asterim",
+      status: "active",
+      description: "",
+      open_tasks: 2,
+      failed_tasks: 1,
+      usd_spent: 0.42,
+    },
+    {
+      id: "pj_2",
+      name: "GameRecs",
+      root: "C:\\Projects\\GameRecs",
+      status: "missing",
+      open_tasks: 0,
+      failed_tasks: 0,
+      usd_spent: 0,
+    },
+  ],
+  candidates: ["New folder"],
+  projects_root: "C:\\Projects",
+});
+
+const briefingData = toBriefing({
+  through_seq: 128,
+  since_ts: "2026-08-26T18:04:00.000Z",
+  empty: false,
+  text: "",
+  projects: [
+    {
+      project: "Asterim",
+      status: "active",
+      completed: 3,
+      failed: 1,
+      waiting: 1,
+      in_flight: 2,
+      cancelled: 0,
+      elapsed_s: 2280,
+      usd: 0.42,
+      needs_you: true,
+      more: 4,
+      highlights: [
+        { id: "tk_1", objective: "fix pipeline timeout", status: "waiting" },
+        {
+          id: "tk_2",
+          objective: "regression tests",
+          status: "failed",
+          error: "3 tests still failing",
+        },
+      ],
+    },
+  ],
+  system: {
+    restarted_at: "2026-08-26T04:12:00.000Z",
+    unclean: true,
+    degraded: ["Ollama is not reachable"],
+    errors: 2,
+  },
+});
+
+describe("the P12 surfaces pass the standing audit", () => {
+  it("project list", async () => {
+    const { container } = render(
+      <ProjectList data={projectsData} onSelect={() => {}} onRegister={() => {}} />,
+    );
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it("briefing", async () => {
+    const { container } = render(
+      <Briefing
+        data={briefingData}
+        onAcknowledge={() => {}}
+        onInspect={() => {}}
+        onOpenProject={() => {}}
+      />,
+    );
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it("briefing, empty", async () => {
+    const { container } = render(
+      <Briefing
+        data={toBriefing({ empty: true })}
+        onAcknowledge={() => {}}
+        onInspect={() => {}}
+        onOpenProject={() => {}}
+      />,
+    );
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it("a project's status is a word, so it is not colour alone", () => {
+    const { container } = render(
+      <ProjectList data={projectsData} onSelect={() => {}} onRegister={() => {}} />,
+    );
+    const words = [...container.querySelectorAll(".pj-status")].map((n) => n.textContent);
+    expect(words).toContain("active");
+    expect(words).toContain("missing");
+  });
+
+  it("every briefing line carries its status as a word", () => {
+    const { container } = render(
+      <Briefing
+        data={briefingData}
+        onAcknowledge={() => {}}
+        onInspect={() => {}}
+        onOpenProject={() => {}}
+      />,
+    );
+    const lines = [...container.querySelectorAll(".bf-line")];
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line.querySelector(".bf-status")?.textContent?.trim()).toBeTruthy();
+    }
+  });
+
+  it("each inspect button names what it inspects", () => {
+    // "inspect" repeated eight times is unusable in a screen reader's element list.
+    const { container } = render(
+      <Briefing
+        data={briefingData}
+        onAcknowledge={() => {}}
+        onInspect={() => {}}
+        onOpenProject={() => {}}
+      />,
+    );
+    const labels = [...container.querySelectorAll("button[aria-label]")].map((b) =>
+      b.getAttribute("aria-label"),
+    );
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(labels.some((l) => l?.includes("fix pipeline timeout"))).toBe(true);
   });
 });
 

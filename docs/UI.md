@@ -168,11 +168,17 @@ WORKSPACE                         ⌃B
   ROADMAP.md
 ```
 
-**Where these numbers come from.** Task counts, git branch and ahead/behind, and per-project
-activity are [PROJECT_STATE.md](PROJECT_STATE.md) — a **Phase 12** subsystem that does not exist
-yet. Until it does, the sidebar renders a bare list of directory names, which is what
-`GET /api/v1/status` returns today. The distinction that governs this row is that document's §2:
-`2 tasks` is stored, `branch main +3` is read fresh from git and never cached.
+**Where these numbers come from.** [PROJECT_STATE.md](PROJECT_STATE.md), and the distinction
+that governs this row is that document's §2: `2 tasks` is **stored**, `branch main +3` is **read
+fresh** from git and never cached.
+
+**As built `P12-T4`:** task counts, status and registration are live from
+`GET /api/v1/projects`. **Branch and ahead/behind are deliberately absent**, and a test asserts
+their absence — producing them per row costs a `git` subprocess per project per render and that
+fan-out is unmeasured ([OQ-24](OPEN_QUESTIONS.md#oq-24)). When it is measured, the answer if it
+misses is lazy per-row observation, never a cache. Directories nobody registered appear
+collapsed under *"N not tracked"*: the real projects root holds ten, including `New folder` and
+`docs.zip`.
 
 Rules: sections collapse and persist · counts are live · **"Waiting on me" is the only sidebar item
 allowed to demand attention** (amber, and it sorts to the top when non-empty) · the agent section
@@ -340,15 +346,16 @@ the event log; older entries are summarised per turn.
 
 ---
 
-## 7b. The briefing — backend built  `P12-T3, 2026-08-26`
+## 7b. The briefing  `BUILT P12-T3/T4, 2026-08-26`
 
 > *"What happened while I wasn't looking?"* — the timeline answers this exhaustively, which is the
 > wrong shape for the question. Added 2026-08-26 from [VISION.md §2](VISION.md#2-the-day--the-acceptance-test);
 > design in [PROJECT_STATE.md §6](PROJECT_STATE.md#6-the-briefing--what-happened-while-i-was-away).
 >
-> **The data and the deterministic text exist** — `GET /api/v1/briefing`,
-> `POST /api/v1/briefing/ack` ([as built](PROJECT_STATE.md#as-built--p12-t3-2026-08-26)). **The
-> view does not**; it is P12-T4, and the sketch below is what it renders.
+> Backend and view both built — `GET /api/v1/briefing`, `POST /api/v1/briefing/ack`
+> ([T3](PROJECT_STATE.md#as-built--p12-t3-2026-08-26)) and `components/Briefing.tsx`
+> ([T4](PROJECT_STATE.md#as-built--p12-t4-2026-08-26)). Verified against a live daemon, whose
+> first real briefing was a genuine crash report.
 
 The timeline (§7) is the debugging surface: every event, in order, filterable. The briefing is the
 **glance** surface: the delta since I last acknowledged, grouped by project, bounded in size, and

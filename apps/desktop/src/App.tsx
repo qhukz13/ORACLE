@@ -15,6 +15,10 @@ import { OracleClient } from "./client";
 import { CommandPalette, type PipelineEntry } from "./components/CommandPalette";
 import { ConfirmationCenter } from "./components/ConfirmationCenter";
 import { DelegationPanel } from "./components/DelegationPanel";
+import { Briefing, toBriefing } from "./components/Briefing";
+import type { BriefingData } from "./components/Briefing";
+import { ProjectList, toProjects } from "./components/ProjectList";
+import type { ProjectRow, ProjectsData } from "./components/ProjectList";
 import { MemoryView, toFacts } from "./components/MemoryView";
 import type { MemoryFact } from "./components/MemoryView";
 import { TaskTree } from "./components/TaskTree";
@@ -36,7 +40,9 @@ const STATE_LABEL: Record<string, string> = {
   halted: "HALTED",
 };
 
-type Stage = "chat" | "events" | "memory";
+type Stage = "chat" | "events" | "memory" | "briefing";
+
+const NO_PROJECTS: ProjectsData = { projects: [], candidates: [], projectsRoot: "" };
 
 export default function App() {
   const s = useStore();
@@ -48,6 +54,12 @@ export default function App() {
   const [inspector, setInspector] = useState(true);
   const [selectedTurn, setSelectedTurn] = useState<string | null>(null);
   const [projects, setProjects] = useState<string[]>([]);
+  const [tracked, setTracked] = useState<ProjectsData>(NO_PROJECTS);
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [briefing, setBriefing] = useState<BriefingData | null>(null);
+  //: Set once, after the first briefing arrives. Without it, dismissing the briefing
+  //: would be undone by the next fetch deciding to show it again.
+  const briefingShown = useRef(false);
   const [pipelines, setPipelines] = useState<PipelineEntry[]>([]);
   const [projectsRoot, setProjectsRoot] = useState("");
   const [facts, setFacts] = useState<MemoryFact[]>([]);
@@ -82,6 +94,86 @@ export default function App() {
       cancelled = true;
     };
   }, [s.connection]);
+
+  // Projects and the briefing are named state too. Re-read when a task or a project event
+  // lands rather than patching a local copy: a second projection of project state is
+  // exactly the thing that gets to disagree with the first one.
+  const projectSeq = useMemo(
+    () =>
+      s.events.filter(
+        (e) => e.type.startsWith("task.") || e.type === "continue.derived",
+      ).length,
+    [s.events],
+  );
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/v1/projects")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d) setTracked(toProjects(d));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [s.connection, projectSeq]);
+
+  // The briefing is fetched, never streamed, and **reading it does not consume it**
+  // (docs/PROJECT_STATE.md#6). Only the dismiss button acknowledges.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/v1/briefing")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) return;
+        const next = toBriefing(d);
+        setBriefing(next);
+        // Auto-switch to it exactly once, on the first paint after connecting, and only
+        // if there is something to say. Doing it on every refresh would yank the stage
+        // out from under someone mid-sentence.
+        if (!briefingShown.current) {
+          briefingShown.current = true;
+          if (!next.empty) setStage("briefing");
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [s.connection, projectSeq]);
+
+  const acknowledge = useCallback(
+    (throughSeq: number, projectId?: string) => {
+      // The sequence comes from the payload that was DISPLAYED, never from a fresh read:
+      // work that arrived while the reader was looking must not be marked as seen.
+      const q = new URLSearchParams({ through_seq: String(throughSeq) });
+      if (projectId) q.set("project_id", projectId);
+      fetch(`/api/v1/briefing/ack?${q.toString()}`, { method: "POST" })
+        .then(() => fetch("/api/v1/briefing"))
+        .then((r) => (r && r.ok ? r.json() : null))
+        .then((d) => {
+          if (d) setBriefing(toBriefing(d));
+          setStage("chat");
+        })
+        .catch(() => undefined);
+    },
+    [],
+  );
+
+  const registerProject = useCallback((name: string) => {
+    fetch(`/api/v1/projects?name=${encodeURIComponent(name)}`, { method: "POST" })
+      .then(() => fetch("/api/v1/projects"))
+      .then((r) => (r && r.ok ? r.json() : null))
+      .then((d) => {
+        if (d) setTracked(toProjects(d));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const openProject = useCallback((name: string) => {
+    const row = tracked.projects.find((p) => p.name === name);
+    setSelectedProject(row ? row.id : null);
+  }, [tracked.projects]);
 
   // What ORACLE remembers is named state, so it comes from REST like the project list.
   // Re-read on every memory event rather than patching a local copy: the store is small,
@@ -266,6 +358,15 @@ export default function App() {
         >
           {stage === "memory" ? "Chat" : "Memory"}
         </button>
+        {/* Demoted to a badge once acknowledged, never removed: the briefing is where
+            "what happened while I was away" lives, and it must stay reachable. */}
+        <button
+          className={`ghost${briefing && !briefing.empty ? " attn" : ""}`}
+          onClick={() => setStage(stage === "briefing" ? "chat" : "briefing")}
+          title="what happened while you were away"
+        >
+          {stage === "briefing" ? "Chat" : "Briefing"}
+        </button>
         <button className="halt" onClick={halt} title="HALT — Ctrl+Alt+Shift+H">
           HALT
         </button>
@@ -308,17 +409,15 @@ export default function App() {
       <div className="body">
         {sidebar && (
           <nav className="sidebar" aria-label="Workspace">
-            <h2>PROJECTS</h2>
-            <ul className="tree">
-              {projects.length === 0 && <li className="muted">none discovered</li>}
-              {projects.map((p) => (
-                <li key={p}>
-                  <button className="tree-item" onClick={() => submit(`what is the status of ${p}`)}>
-                    <i className="dot" aria-hidden="true" /> {p}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <ProjectList
+              data={tracked}
+              selected={selectedProject}
+              onSelect={(p: ProjectRow) => {
+                setSelectedProject(p.id);
+                submit(`continue ${p.name}`);
+              }}
+              onRegister={registerProject}
+            />
 
             {/* The only sidebar item allowed to demand attention (docs/UI.md#4). */}
             <h2 className={waiting > 0 ? "attn" : ""}>
@@ -344,7 +443,14 @@ export default function App() {
             onCancelGraph={cancelGraph}
           />
 
-          {stage === "memory" ? (
+          {stage === "briefing" ? (
+            <Briefing
+              data={briefing ?? { throughSeq: 0, sinceTs: null, empty: true, text: "", projects: [], system: { restartedAt: null, unclean: false, degraded: [], errors: 0 } }}
+              onAcknowledge={acknowledge}
+              onInspect={(taskId) => setSelectedTurn(taskId)}
+              onOpenProject={openProject}
+            />
+          ) : stage === "memory" ? (
             <MemoryView facts={facts} onForget={forget} />
           ) : stage === "events" ? (
             <table className="events">

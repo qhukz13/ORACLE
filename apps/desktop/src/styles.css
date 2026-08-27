@@ -487,3 +487,92 @@ kbd {
 .tt-superseded { margin-top: 4px; }
 .tt-superseded > summary { color: var(--st-wait); font-size: 11px; cursor: pointer; }
 .tt-superseded .tt-task { opacity: .7; }
+
+/* ───────────────────────────────────────────── Projects in the sidebar (UI.md#4)
+   Status is icon + label + colour, never colour alone (UI.md#14): `.pj-status` carries
+   the word for EVERY row, not only the alarming ones — a label that appears only on
+   failure is one nobody learns to read.
+
+   Branch and dirty count are deliberately absent. They would cost a `git` subprocess per
+   project per render, and that fan-out is unmeasured (OQ-24). */
+.pj { gap: 6px; }
+.pj .dot { font-style: normal; width: 12px; text-align: center; }
+.pj-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pj-status {
+  color: var(--fg-2); font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+}
+.pj-count {
+  color: var(--fg-1); font-size: 10px; background: var(--bg-3);
+  border-radius: 8px; padding: 0 5px;
+}
+.pj-count.attn { color: #1a1205; background: var(--st-err); font-weight: 700; }
+.pj-active .dot { color: var(--st-run); }
+.pj-active .pj-name { color: var(--fg-0); }
+.pj-idle .dot { color: var(--st-idle); }
+.pj-archived { opacity: .6; }
+.pj-missing .dot, .pj-missing .pj-status { color: var(--st-err); }
+.tree-item.selected { background: var(--bg-3); color: var(--fg-0); }
+
+/* Candidates are directories nobody registered. Collapsed on purpose: the real projects
+   root holds `New folder` and `docs.zip` next to the real ones, and registration is an
+   explicit human act (ADR-0024). */
+.pj-candidates { margin-top: 6px; }
+.pj-candidates > summary {
+  color: var(--fg-2); font-size: 11px; cursor: pointer; padding: 2px 6px;
+}
+.pj-candidates .ghost-item { color: var(--fg-2); }
+.pj-candidates .ghost-item:hover { color: var(--fg-0); }
+
+/* ─────────────────────────────────────────────────── The briefing (UI.md#7b)
+   The glance surface: what changed since the reader last acknowledged. Everything here
+   is sized to be read in three to five seconds — if it stops being, it has failed however
+   much information it gained. */
+.briefing { padding: 14px 16px; max-width: 900px; }
+.bf-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.bf-title {
+  margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--fg-1);
+}
+.bf-empty { color: var(--fg-2); }
+.bf-empty > span { margin-right: 6px; }
+
+.bf-project {
+  border: 1px solid var(--line); border-left-width: 3px; border-radius: 5px;
+  background: var(--bg-1); padding: 8px 10px; margin-bottom: 8px;
+}
+/* The only loud element, matching the sidebar and the core: one attention channel, one
+   meaning (UI.md#4, UI.md#3). */
+.bf-project.attn { border-left-color: var(--st-wait); }
+.bf-project-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.bf-project-head button.link {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--fg-0); font-weight: 600; font-size: 13px;
+}
+.bf-project-head button.link:hover { text-decoration: underline; }
+.bf-system-title { color: var(--fg-1); font-weight: 600; font-size: 13px; }
+.bf-counts { color: var(--fg-1); font-size: 11px; }
+
+.bf-lines { list-style: none; margin: 6px 0 0; padding: 0; }
+.bf-line {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 3px 0; font-size: 12px; color: var(--fg-1);
+}
+.bf-mark { font-style: normal; width: 12px; text-align: center; }
+.bf-status {
+  font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--fg-2); min-width: 66px;
+}
+.bf-objective { flex: 1; color: var(--fg-0); }
+.bf-error { color: var(--st-err); font-family: ui-monospace, monospace; font-size: 11px; }
+.bf-more { color: var(--fg-2); font-size: 11px; padding-top: 4px; }
+button.ghost.small { font-size: 10px; padding: 1px 6px; }
+
+.bf-line.st-waiting .bf-mark, .bf-line.st-waiting .bf-status {
+  color: var(--st-wait); font-weight: 700;
+}
+.bf-line.st-failed .bf-mark, .bf-line.st-failed .bf-status,
+.bf-line.st-timeout .bf-mark, .bf-line.st-timeout .bf-status { color: var(--st-err); }
+.bf-line.st-succeeded .bf-mark, .bf-line.st-succeeded .bf-status { color: var(--st-ok); }
+.bf-line.st-running .bf-mark, .bf-line.st-running .bf-status,
+.bf-line.st-ready .bf-mark, .bf-line.st-pending .bf-mark { color: var(--st-run); }
+.bf-line.st-cancelled .bf-status, .bf-line.st-skipped .bf-status { color: var(--fg-2); }
