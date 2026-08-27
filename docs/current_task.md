@@ -103,16 +103,19 @@ six steps) if a full `continue` is too much for a first run. It produces a real 
   task branch, mounting `KnowledgeHealth` (built, 11 passing tests, imported by nothing). T4 has
   now added a fourth stage (`briefing`) by the same ad-hoc mechanism T5 is meant to replace, so
   the shape it fixes has one more caller than it did.
-- **P9-T3b — the scheduled OQ-18 corpus run ABORTED. It must be re-fired.**
-  `logs/measurements/oq18-translated.txt` contains one header line —
-  *"OQ-18 corpus run, started Thu 08/27/2026 23:11:05.94"* — followed immediately by `^C`.
-  The task is back in `Ready`, so nothing is running and **there is no result**.
-  The likely cause is mine: this session killed stray `python` processes twice while
-  diagnosing a hung gate, and the run had no protection from that. The file is left on disk
-  as evidence and deliberately **not committed** — a two-line artifact filed as a measurement
-  is worse than no file, because the next reader finds an answer where there is none.
-  **Re-fire it, and check afterwards that the output has more than a header.** Then, on
-  collection: compose `dense_mt` against `dense_xl`, confirm or flip
+- **P9-T3b — the OQ-18 corpus run is RUNNING again.** Re-fired **2026-08-28 00:47:31**;
+  expect it to finish around **03:15–03:45** (the script says 2.5–3 h). Health at +6.5 min:
+  6,053 CPU-seconds, 2.3 GB RSS, 73 threads — `onnxruntime` on all cores.
+  **`logs/measurements/oq18-translated.txt` will look empty until it ends**: Python
+  block-buffers stdout when redirected, so an unchanging file is not a stuck job. Check the
+  worker instead, or wait for the trailing `=== finished … with exit code N ===` line.
+  **Do not kill stray `python` processes while it runs** — that is exactly what ended the
+  previous attempt (`LastTaskResult 3221225786` = `STATUS_CONTROL_C_EXIT`).
+  *The attempt before it* died within seconds of starting on 2026-08-27 23:11, leaving only a
+  header line and a `^C`. Its output is untracked on purpose — a two-line artifact filed under
+  `logs/measurements/` is worse than no file, because the next reader finds an answer where
+  there is none. The current run overwrites it.
+  On collection: compose `dense_mt` against `dense_xl`, confirm or flip
   `Settings.translate_queries`, decide `en-relay-dockerfile`, resolve OQ-18, state the
   answer-key correction wherever pre-2026-08-26 recall numbers are quoted, then
   `Unregister-ScheduledTask`.
