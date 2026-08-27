@@ -22,15 +22,21 @@ planner to emit can bypass the registry or the gate.
 from __future__ import annotations
 
 import ast
+import asyncio
 import inspect
 from pathlib import Path
 
+import aiosqlite
 import pytest
 
 from oracle.core import unfinished as unfinished_mod
+from oracle.core.approvals import ApprovalStore
+from oracle.core.eventlog import EventLog
 from oracle.core.unfinished import RepoNote, Unfinished, objective_of, repo_notes
+from oracle.orchestration.registry import load_registry
 from oracle.policy.audit import AuditLog
 from oracle.policy.engine import PolicyEngine, load_policy
+from oracle.runners.planning import Planner
 from oracle.tools import ToolExecutor, build_registry
 
 POLICY = """
@@ -43,6 +49,9 @@ scopes:
     - "**/*.env"
 tools:
   fs.read: {{ tier: T0, scopes: [projects] }}
+  # The planning egress. Declared so `TestTheEgressCardTellsTheTruth` can observe the
+  # card; without it the gate denies outright and no question is ever asked.
+  ai.delegate: {{ tier: T2 }}
 """
 
 #: What somebody would put in a `TODO.md` to try to steer an agent that reads it.
@@ -208,3 +217,97 @@ class TestTaint:
         assert "untrusted_sources" in params
         source = inspect.getsource(approve_graph)
         assert '"untrusted_sources": list(untrusted_sources or [])' in source
+
+
+class TestTheEgressCardTellsTheTruth:
+    """The planning call sends the objective to a cloud API, and on a `continue` the
+    objective **contains the project\'s own files**.
+
+    Found by P12-T5 — the first real run — with the card saying
+    `sends_repo_contents: False` while carrying 2,820 characters of
+    `docs/current_task.md` and `docs/ROADMAP.md`, and the gate pricing it `tainted:
+    False`. It was true when written: before `continue` existed, a planning objective was
+    always a sentence the owner had typed. That is the shape of every dangerous stale
+    assumption, so it is pinned here rather than fixed and forgotten.
+    """
+
+    @staticmethod
+    def _planner(executor: ToolExecutor, eventlog: EventLog) -> tuple:
+        approvals = ApprovalStore(eventlog, executor, ttl_s=60.0)
+        registry = load_registry(Path(__file__).resolve().parents[2] / "config" / "agents.yaml")
+
+        class _Adapter:
+            id = "claude"
+
+            async def run(self, *a: object, **k: object) -> object:  # pragma: no cover
+                raise AssertionError("the card is the subject; nothing should egress")
+
+        planner = Planner(_Adapter(), approvals, executor.policy, registry, projects={"Asterim"})
+        return planner, approvals
+
+    @staticmethod
+    async def _card(planner: object, approvals: ApprovalStore, sources: list[str]) -> dict:
+        """Start a planning call, grab the card it raises, then refuse it.
+
+        Refusing rather than approving is the point: the adapter above raises if anything
+        actually runs, so the test can only ever observe the question.
+        """
+        task = asyncio.create_task(
+            planner.plan(  # type: ignore[attr-defined]
+                "Continue work on Asterim.", trace_id="tr_1", untrusted_sources=sources
+            )
+        )
+        open_requests: list[dict] = []
+        for _ in range(300):
+            await asyncio.sleep(0.01)
+            open_requests = approvals.open_requests()
+            if open_requests:
+                break
+        assert open_requests, "no approval was requested"
+        card = open_requests[0]
+        await approvals.resolve(str(card["approval_id"]), approved=False)
+        await task
+        return card
+
+    async def test_a_derived_objective_says_it_sends_repo_contents(
+        self, conn: aiosqlite.Connection, executor: ToolExecutor
+    ) -> None:
+        eventlog = EventLog(conn)
+        await eventlog.load_head()
+        planner, approvals = self._planner(executor, eventlog)
+
+        card = await self._card(planner, approvals, ["docs/current_task.md"])
+        preview = card.get("preview", {})
+
+        assert preview["sends_repo_contents"] is True
+        assert preview["untrusted_sources"] == ["docs/current_task.md"]
+
+    async def test_a_derived_objective_is_tainted_at_the_gate(
+        self, conn: aiosqlite.Connection, executor: ToolExecutor
+    ) -> None:
+        """Recording taint on an event while pricing the call as untainted is the worst
+        of both: it looks audited and is not."""
+        eventlog = EventLog(conn)
+        await eventlog.load_head()
+        planner, approvals = self._planner(executor, eventlog)
+
+        card = await self._card(planner, approvals, ["TODO.md"])
+
+        assert card["tainted"] is True
+        assert card["escalated"] is True
+
+    async def test_an_objective_the_owner_typed_is_neither(
+        self, conn: aiosqlite.Connection, executor: ToolExecutor
+    ) -> None:
+        """The other half. If every planning call were marked tainted the signal would
+        carry no information, and the card's attribution line would become noise."""
+        eventlog = EventLog(conn)
+        await eventlog.load_head()
+        planner, approvals = self._planner(executor, eventlog)
+
+        card = await self._card(planner, approvals, [])
+        preview = card.get("preview", {})
+
+        assert preview["sends_repo_contents"] is False
+        assert preview["untrusted_sources"] == []
+        assert card["tainted"] is False

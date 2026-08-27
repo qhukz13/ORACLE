@@ -257,6 +257,28 @@ disabled. This needs real-usage tuning — track the escalation rate as a metric
 
 ---
 
+### A card that understated its own egress  `found 2026-08-28, P12-T5`
+
+The planning approval hardcoded `sends_repo_contents: False` in its preview. That was true when
+written — a planning objective was always a sentence the owner had typed — and became false when
+`continue` began deriving objectives from a project's own task documents
+([PROJECT_STATE.md §5](PROJECT_STATE.md#5-unfinished-work--where-continue-gets-its-list)).
+
+The first real run sent **2,820 characters** of `docs/current_task.md` and `docs/ROADMAP.md`
+under a card that said it sent no repository contents, and the gate priced the call `tainted:
+False` while `continue.derived` had already recorded `tainted: true` for the same objective.
+
+**Recording taint on an event while pricing the call as untainted is the worst of both: it looks
+audited and is not.** Fixed by passing `Provenance.LOCAL_FOREIGN` into the gate — which
+escalates T2 → **T3 `confirm_strong`**, exactly as §6 requires — and by computing
+`sends_repo_contents` rather than asserting it. Pinned by `TestTheEgressCardTellsTheTruth`.
+
+The generalisable rule: **a preview field that is a literal is a claim nobody re-checks.** If a
+card asserts something about what leaves the machine, it must be derived from what is actually
+being sent.
+
+---
+
 ## 7. Secrets and egress
 
 **Storage.** Secrets live in Windows Credential Manager via `keyring` (DPAPI-backed, tied to the user

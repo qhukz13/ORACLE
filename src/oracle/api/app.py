@@ -1012,6 +1012,9 @@ async def _plan_and_run(
         project=project,
         eventlog=st.eventlog,
         session_id=session_id,
+        # The planning call egresses the objective, and on a `continue` the objective
+        # contains the project's own files. The card has to say so.
+        untrusted_sources=untrusted_sources,
     )
     if ladder.plan is None:
         log.info(

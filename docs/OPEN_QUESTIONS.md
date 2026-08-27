@@ -36,7 +36,7 @@ doc, delete the marker.
 | [OQ-22](#oq-22) | Does the knowledge graph hold its budgets at corpus scale? | measured 2026-08-26 | Phase 11 (graph view only) | **3 of 4 answered — build it, narrower; canvas-vs-SVG still needs a real window** |
 | [OQ-23](#oq-23) | Does a failure-carrying prompt produce a *different* plan? | `EXPERIMENT NEEDED` | nothing — replanning ships bounded | opened 2026-08-25 |
 | [OQ-24](#oq-24) | Does observing every project fit the glance budget? | `EXPERIMENT NEEDED` | Phase 12 (the sidebar and the briefing) | opened 2026-08-26 |
-| [OQ-25](#oq-25) | Did adding the `continue` label move intent accuracy? | `TO VERIFY` | nothing — but it is a regression risk carried knowingly | opened 2026-08-26 |
+| [OQ-25](#oq-25) | Did adding the `continue` label move intent accuracy? | `TO VERIFY` | nothing — but it is a regression risk carried knowingly | **first real evidence 2026-08-28: the label routes; the project slot does not** |
 
 ---
 
@@ -892,3 +892,22 @@ the turn and can rephrase — which is why this blocks nothing.
 first, and record the result the way OQ-01 was recorded. Note that `make eval` is documented in
 [TESTING.md §8](TESTING.md) and **defined nowhere** — that has to be fixed or the doc corrected
 before this can be run the documented way.
+
+### First real evidence  `2026-08-28, P12-T5`
+
+Two live `continue ORACLE` runs against the real router
+([dev log](../logs/development/2026-08-28-p12t5-first-run.md)):
+
+| | |
+|---|---|
+| `intent` | **`continue`** both times, confidence `medium` — the label routes |
+| `project` | **`null` both times** — on an input whose second word is a registered project |
+
+So the feared failure did not happen: `continue` was not confused with `run` or `modify`. A
+different one did. **The project slot is unreliable**, and the turn only worked because
+`_named_project` scans the raw text against the registry — a fallback written for `delegate`.
+
+That fallback cannot cover the cases that matter later: a project named in a *previous* turn, or
+referred to obliquely. Fixtures should pin the slot, not just the label, before anything trusts
+it. This does not change the marker — the eval is still un-rerun — but it narrows what to look
+for when it is.

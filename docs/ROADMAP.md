@@ -379,9 +379,15 @@ index and could start earlier if the phase is split — it shares no code with t
 > ([T3](PROJECT_STATE.md#as-built--p12-t3-2026-08-26)), and both surfaces rendered
 > ([T4](PROJECT_STATE.md#as-built--p12-t4-2026-08-26)).
 >
-> **T5 is all that remains, and it is a person's to run.** One acceptance item is knowingly
-> outstanding: the intent eval was not re-run after an eleventh label was added
-> ([OQ-25](OPEN_QUESTIONS.md#oq-25)).
+> **T5 ran 2026-08-28** and stopped at the egress approval, which is where an agent stops
+> ([dev log](../logs/development/2026-08-28-p12t5-first-run.md)). It proved the loop and found a
+> defect on the safety surface: the planning card claimed it sent no repository contents while
+> sending 2,820 characters of them. Fixed and pinned.
+>
+> **What remains is one human click.** `tasks` is still 0 rows, so the orbit's go/no-go, the
+> execution tree's acceptance and `TaskTree`'s fixture are all still waiting. One acceptance item
+> is knowingly outstanding: the intent eval ([OQ-25](OPEN_QUESTIONS.md#oq-25)), which now has its
+> first real evidence — the label routes, the project slot does not.
 
 **Objective.** Make *"continue Asterim"* answerable: ORACLE resolves the project, reads its real
 state, decides what remains, plans, dispatches one worker, verifies with evidence, reports, and

@@ -211,17 +211,37 @@ class Planner:
         failure: str = "",
         purpose: str = "planning",
         preview_extra: dict[str, Any] | None = None,
+        untrusted_sources: list[str] | None = None,
     ) -> PlanOutcome:
         """One approved egress, up to `MAX_CALLS` calls inside it, one validated plan out.
 
         `failure` is what makes this the same method for planning and **replanning**: a
         replan is the identical call with the failure attached to the prompt and named on
         the card. Sharing the path is deliberate — a second, nearly-identical planning
-        route is how one of them quietly stops validating."""
+        route is how one of them quietly stops validating.
+
+        `untrusted_sources` names files whose **contents are inside `objective`** — a
+        project's own `TODO.md`, say, when the objective was derived by `continue`
+        (PROJECT_STATE.md §5). It does two things, and both were missing until the first
+        real run showed the card lying:
+
+        * the gate is told the turn carries `local_foreign` content, so the tier
+          escalates by one exactly as SECURITY.md §6 says it must;
+        * `sends_repo_contents` becomes **true**, because it is.
+
+        Found 2026-08-28 by P12-T5. Before `continue` existed, a planning objective was
+        always a sentence the owner had typed, and `sends_repo_contents: False` was
+        simply true. The `continue` path made it false without anything noticing —
+        which is the shape of every dangerous stale assumption: correct when written."""
         packet = self.packet(objective, task_id=f"plan-{trace_id}", extra=failure)
+        sources = list(untrusted_sources or [])
         verdict = self._engine.evaluate(
             EGRESS_TOOL,
             capabilities=frozenset({Capability.AGENT_DELEGATE, Capability.NET_EGRESS}),
+            # Untrusted content in the objective escalates the tier by one. Recording the
+            # taint on an event while pricing the call as untainted is the worst of both:
+            # it looks audited and is not.
+            provenances=frozenset({Provenance.LOCAL_FOREIGN}) if sources else frozenset(),
             declared_tier=Tier.T2,
         )
         if verdict.decision is Decision.DENY:
@@ -245,7 +265,11 @@ class Planner:
                 "prompt": packet.render_prompt(),
                 # The bound, stated before the click rather than discovered after it.
                 "calls": f"up to {MAX_CALLS} (one repair attempt if the plan is invalid)",
-                "sends_repo_contents": False,
+                # Computed, never assumed. This was a hardcoded `False` until P12-T5 sent
+                # 2,820 characters of `docs/current_task.md` and `docs/ROADMAP.md` under
+                # a card that said it sent no repository contents.
+                "sends_repo_contents": bool(sources),
+                "untrusted_sources": sources,
                 **(preview_extra or {}),
             },
         )
@@ -543,6 +567,7 @@ async def plan_with_ladder(
     project: str | None = None,
     eventlog: Any = None,
     session_id: str | None = None,
+    untrusted_sources: list[str] | None = None,
 ) -> LadderResult:
     """Walk PLANNER.md §6's ladder until something validates.
 
@@ -557,7 +582,9 @@ async def plan_with_ladder(
 
     # Rung 1 — a planner.
     if planner is not None and registry.usable:
-        outcome = await planner.plan(objective, trace_id=trace_id)
+        outcome = await planner.plan(
+            objective, trace_id=trace_id, untrusted_sources=untrusted_sources
+        )
         result.attempts = outcome.attempts
         if outcome.refused:
             # A full stop, not a rung. Routing around a refusal is the thing this whole
