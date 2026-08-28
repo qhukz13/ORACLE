@@ -112,4 +112,10 @@ The daemon holds `.venv\Scripts\oracled.exe`, so **syncing `uv` commands fail wi
   → `main`) and set the standing rule — work on `main`, commit and push after every task
   (AGENTS.md updated). The fossil branch can be deleted at leisure.
 - **P11 remainder:** T2 orbit (blocked on OQ-14 → blocked on the click above) · the knowledge
-  graph (OQ-22 measurements first) · timeline proper (§7), global search, notifications.
+  graph (OQ-22 measurements first) · the agent queue (needs live task data) · notifications.
+  *Timeline (§7) and global search (§11, backend + overlay) shipped 2026-08-28 evening.*
+- **⚠ Restart `oracled` before trusting three things:** `POST /api/v1/knowledge/reindex`,
+  `GET /api/v1/search`, and — more importantly — the **`know.*` model fix**: the tool layer
+  had pinned `multilingual-e5-base` since before the 2026-08-24 bge-m3 switch, so live
+  retrieval tools have been failing `bind()` for days. The fix is in source; the process up
+  since 01:05 predates it.

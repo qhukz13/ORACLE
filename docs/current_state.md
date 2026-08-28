@@ -16,7 +16,7 @@
 | | |
 |---|---|
 | **OQ-18 corpus run** | **SCHEDULED: 04:00 2026-08-29, `WakeToRun`.** Stopped at ~60% on the owner's instruction (PC performance); expect a clean restart at 04:00 (evening commits changed the corpus, so the checkpoint will be refused — the guard working). See §2 and current_task.md. |
-| `oracled` | up on 127.0.0.1:8787 since 01:05:42 — **predates the reindex endpoint**, restart to serve it |
+| `oracled` | up on 127.0.0.1:8787 since 01:05:42 — **stale: predates `POST /knowledge/reindex`, `GET /search`, and the `know.*` model fix** (live retrieval tools fail `bind()` until it restarts) |
 | Ollama | up, `qwen3.5:0.8b` resident |
 | Vite dev UI | on 5273 when a session runs it (`npm --prefix apps/desktop run dev`) |
 
@@ -139,10 +139,11 @@ OQ-18 is collected, and only against a restarted daemon.
 
 ## 6. Tests and the gate
 
-**1,240 Python tests, measured this session** (830 main + 410 security + 1 skip; 4 new:
-`TestKnowledgeReindex`) · **305 UI tests** (28 new across ViewTabs, stage keybindings, the task
-branch, lazy observation, and axe cases closing the a11y audit to **15/15 components**) ·
-`tests/security/` is a merge gate and is not optional.
+**1,245 Python tests, measured** (834 main + 411 security + 1 skip) · **327 UI tests** —
+2026-08-28 added ~50 across ViewTabs, stage keybindings, the inspector's task branch, lazy
+observation, the Timeline, global search, the palette's combobox contract, and axe cases
+taking the a11y audit to **every component** · `tests/security/` is a merge gate and is not
+optional.
 
 ```
 uv run python scripts/check.py     # ruff format -> ruff lint -> mypy -> tsc -> pytest -> security -> vitest
