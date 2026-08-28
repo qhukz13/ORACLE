@@ -20,9 +20,9 @@
  * Phase 11's new surfaces land, so the audit is a standing gate rather than a phase artifact.
  */
 
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import axe from "axe-core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Briefing, toBriefing } from "./components/Briefing";
 import { Citations } from "./components/Citations";
 import { CommandPalette } from "./components/CommandPalette";
@@ -572,6 +572,59 @@ describe("the components the audit missed, and the T5 surfaces", () => {
       />,
     );
     expect(await violations(container)).toEqual([]);
+  });
+
+  it("global search, with results and the taint badge showing", async () => {
+    const { GlobalSearch } = await import("./components/GlobalSearch");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          query: "auth",
+          elapsed_ms: 700,
+          projects: [{ id: "pj_1", name: "Asterim", status: "active", description: "" }],
+          tasks: [],
+          events: [{ seq: 1, ts: "2026-08-28T20:00:00Z", type: "turn.started", snippet: "{}" }],
+          files: [
+            {
+              collection: "projects",
+              project: "Asterim",
+              path: "src/auth.ts",
+              anchor: "(file)",
+              provenance: "local_foreign",
+              text: "…",
+            },
+          ],
+          notes: [],
+          tainted: true,
+          degraded: false,
+          knowledge_error: "",
+          git: [],
+          git_searched: false,
+          git_error: "",
+        }),
+      }),
+    );
+    try {
+      const { container } = render(
+        <GlobalSearch
+          open
+          project={null}
+          onClose={() => {}}
+          onOpenProject={() => {}}
+          onInspectTask={() => {}}
+          onOpenTimeline={() => {}}
+        />,
+      );
+      fireEvent.change(screen.getByLabelText("Global search query"), {
+        target: { value: "auth" },
+      });
+      await waitFor(() => expect(screen.getByText("PROJECTS (1)")).toBeTruthy());
+      expect(await violations(container)).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("egress preview", async () => {

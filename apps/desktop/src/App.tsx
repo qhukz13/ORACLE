@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OracleClient } from "./client";
 import { CommandPalette, type PipelineEntry } from "./components/CommandPalette";
+import { GlobalSearch } from "./components/GlobalSearch";
 import { ConfirmationCenter } from "./components/ConfirmationCenter";
 import { DelegationPanel } from "./components/DelegationPanel";
 import { Briefing, toBriefing } from "./components/Briefing";
@@ -61,6 +62,7 @@ export default function App() {
   const [draft, setDraft] = useState("");
   const [stage, setStage] = useState<Stage>("chat");
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [sidebar, setSidebar] = useState(true);
   const [dock, setDock] = useState(false);
   const [inspector, setInspector] = useState(true);
@@ -376,6 +378,9 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
         setSidebar((v) => !v);
@@ -669,6 +674,20 @@ export default function App() {
         pipelines={pipelines}
         onClose={() => setPaletteOpen(false)}
         onSubmit={submit}
+      />
+
+      <GlobalSearch
+        open={searchOpen}
+        project={tracked.projects.find((p) => p.id === selectedProject)?.name ?? null}
+        onClose={() => setSearchOpen(false)}
+        // Selection, not `continue`: search points at things; starting work is the
+        // sidebar's affordance, with its approval card.
+        onOpenProject={(id) => setSelectedProject(id)}
+        onInspectTask={(id) => {
+          setSelection({ kind: "task", id });
+          setInspector(true);
+        }}
+        onOpenTimeline={() => setStage("events")}
       />
     </div>
   );

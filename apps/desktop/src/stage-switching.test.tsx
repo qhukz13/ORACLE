@@ -139,6 +139,17 @@ describe("Ctrl+1..4", () => {
   });
 });
 
+describe("the overlays", () => {
+  it("opens global search on Ctrl+Shift+F (§16)", () => {
+    render(<App />);
+    fireEvent.keyDown(window, { key: "F", ctrlKey: true, shiftKey: true });
+    expect(screen.getByLabelText("Global search query")).toBeTruthy();
+    // And it is a toggle, like the palette.
+    fireEvent.keyDown(window, { key: "F", ctrlKey: true, shiftKey: true });
+    expect(screen.queryByLabelText("Global search query")).toBeNull();
+  });
+});
+
 describe("the one automatic switch", () => {
   it("returns to Chat when a message is sent from another stage", () => {
     useStore.getState().setConnection("online", 0);

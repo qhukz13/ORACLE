@@ -622,3 +622,10 @@ button.tt-id:hover { text-decoration: underline; border: none; }
 
 /* The selected row's observed half — read fresh, held nowhere (OQ-24). */
 .pj-git { color: var(--fg-2); font-size: 11px; margin-left: auto; white-space: nowrap; }
+
+/* Global search (UI.md §11) — the palette's frame, more rows. */
+.palette.gsearch { width: min(760px, 94vw); }
+.gs-meta { padding: 6px 15px; border-bottom: 1px solid var(--line); font-size: 11px; }
+.gs-group { list-style: none; margin: 0; padding: 0; }
+.gs-head { font-size: 10px; letter-spacing: .1em; padding: 8px 11px 2px; cursor: default; }
+.gs-note { margin: 0; padding: 8px 15px; border-top: 1px solid var(--line); font-size: 11px; }

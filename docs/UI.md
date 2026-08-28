@@ -600,6 +600,17 @@ Backed by hybrid retrieval (P5) for notes/files and direct queries for the rest.
 > Finding the number also found a live defect: `know.*` had pinned `multilingual-e5-base`
 > since before the 2026-08-24 model switch, so every toolhost search against the rebuilt index
 > failed `bind()` — fixture-invisible, now pinned to `embedding.DEFAULT` by a security test.
+>
+> **As built — the overlay, same evening (`components/GlobalSearch.tsx`).** `Ctrl+Shift+F`,
+> the palette's combobox contract, six labelled groups with counts, a 300 ms debounce, and
+> `elapsed_ms` on screen (a slow answer with a number is a measurement; one without is a
+> broken feeling). `Tab` cycles the non-empty groups; `Enter` does only what the app can
+> honestly do — select a project (selection, not `continue`: starting work stays behind the
+> sidebar's approval card), open a task in the inspector, jump an event to the Timeline —
+> and does **nothing** for files, notes and git commits, which are previews until a viewer
+> exists. `Ctrl+Enter` ("send as context") is deferred with them: it needs a
+> context-package path no API provides yet. The absent GIT group states its reason on the
+> surface. The taint badge rides from `know.search` to the meta line untouched.
 
 ---
 
