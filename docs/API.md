@@ -155,7 +155,17 @@ POST   /api/v1/tasks/{id}/cancel        PLANNED as REST; the built path is the `
 GET    /api/v1/approvals                pending
 POST   /api/v1/approvals/{id}           {decision, nonce}
 
-POST   /api/v1/search                   {query, sources[], filters} → grouped results
+GET    /api/v1/search                   BUILT 2026-08-28: ?q=&project=&limit= → grouped
+                                        results (UI.md §11). GET, not the POST this line
+                                        sketched — a search is a read, like every other
+                                        read here. files/notes via `know.search` through
+                                        the executor (tainted rides through); projects/
+                                        tasks/events are SQL over stored rows (the
+                                        briefing's precedent); GIT only when ?project=
+                                        names a registered repo — an all-repo sweep is
+                                        OQ-24's fan-out under a new name. `sources[]`
+                                        dropped: the response is grouped, the client
+                                        shows or hides groups
 GET    /api/v1/knowledge                BUILT 2026-08-22: index health — built?, model,
                                         per-collection counts, what failed (RAG.md §9)
 POST   /api/v1/knowledge/reindex        BUILT 2026-08-28: ?full=&collection= — executes

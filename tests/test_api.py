@@ -448,6 +448,238 @@ class TestKnowledgeReindex:
         assert asked == []
 
 
+class TestGlobalSearch:
+    """One query, grouped answers (UI.md §11). The retrieval half goes through the
+    executor — and therefore the gate — exactly like a chat turn; the stored half is
+    the briefing's precedent, SQL over the API's own rows. Each group fails alone."""
+
+    @staticmethod
+    def _outcome(tool_id: str, result: object) -> object:
+        from oracle.policy.model import Decision, PolicyVerdict, Tier
+        from oracle.tools.executor import ToolOutcome
+
+        return ToolOutcome(
+            tool=tool_id,
+            ok=True,
+            result=result,  # type: ignore[arg-type]
+            verdict=PolicyVerdict(
+                decision=Decision.ALLOW, tier=Tier.T0, base_tier=Tier.T0, rule=f"tools.{tool_id}"
+            ),
+            duration_ms=3,
+        )
+
+    @staticmethod
+    def _hit(collection: str, path: str, provenance: str = "local_owned") -> dict:
+        return {
+            "chunk_id": f"ch_{path}",
+            "collection": collection,
+            "project": "Asterim",
+            "path": path,
+            "abs_path": f"C:/x/{path}",
+            "anchor": "(file)",
+            "score": 0.7,
+            "provenance": provenance,
+            "indexed_at": "2026-08-28T20:00:00Z",
+            "text": "…snippet…",
+        }
+
+    def test_knowledge_hits_split_by_collection_and_taint_rides_through(
+        self, client: TestClient
+    ) -> None:
+        """A vault note and a source file are different kinds of answer, so one
+        `know.search` call becomes two groups — and `tainted` must survive the trip,
+        because a search result is a chunk somebody may not have written."""
+        from oracle.api.app import state_of
+        from oracle.tools.knowledge import KnowSearchResult
+
+        st = state_of(client.app)
+        asked: list[tuple[str, dict]] = []
+        outer = self
+
+        class Recorder:
+            async def execute(self, tool_id: str, raw_args: dict, **_: object) -> object:
+                asked.append((tool_id, raw_args))
+                return outer._outcome(
+                    tool_id,
+                    KnowSearchResult(
+                        query=str(raw_args["query"]),
+                        results=[
+                            outer._hit("projects", "src/auth.ts"),
+                            outer._hit("notes", "vault/auth.md", provenance="local_foreign"),
+                            outer._hit("projects", "src/token.ts"),
+                        ],
+                        tainted=True,
+                        strategy="hybrid",
+                        degraded=False,
+                    ),
+                )
+
+        st.executor = Recorder()  # type: ignore[assignment]
+
+        body = client.get("/api/v1/search", params={"q": "auth"}).json()
+
+        assert asked == [("know.search", {"query": "auth", "limit": 16})]
+        assert [f["path"] for f in body["files"]] == ["src/auth.ts", "src/token.ts"]
+        assert [n["path"] for n in body["notes"]] == ["vault/auth.md"]
+        assert body["tainted"] is True
+        assert body["git_searched"] is False  # no project named, no repository swept
+        assert body["elapsed_ms"] >= 0
+
+    def test_git_searches_one_repository_or_none(self, settings: Settings) -> None:
+        """`git.log` has no grep and the toolhost serialises invocations, so an
+        all-projects sweep would be OQ-24's fan-out under a new name. Naming a
+        registered project filters its last 50 subjects; naming none turns the
+        group off, stated rather than empty.
+
+        Builds its own client: candidates are discovered at boot, so the directory
+        must exist before the app does."""
+        from oracle.api.app import state_of
+        from oracle.tools.git import Commit, GitLogResult
+        from oracle.tools.knowledge import KnowSearchResult
+
+        (settings.projects_root / "Asterim").mkdir(parents=True)
+        asked: list[tuple[str, dict]] = []
+        outer = self
+
+        class Recorder:
+            async def execute(self, tool_id: str, raw_args: dict, **_: object) -> object:
+                asked.append((tool_id, raw_args))
+                if tool_id == "know.search":
+                    return outer._outcome(
+                        tool_id,
+                        KnowSearchResult(
+                            query="auth",
+                            results=[],
+                            tainted=False,
+                            strategy="hybrid",
+                            degraded=False,
+                        ),
+                    )
+                return outer._outcome(
+                    tool_id,
+                    GitLogResult(
+                        repo="Asterim",
+                        commits=[
+                            Commit(
+                                sha="a" * 40,
+                                short="aaaaaaa",
+                                author="q",
+                                date="2026-08-28",
+                                subject="fix auth token refresh",
+                            ),
+                            Commit(
+                                sha="b" * 40,
+                                short="bbbbbbb",
+                                author="q",
+                                date="2026-08-28",
+                                subject="ui: unrelated work",
+                            ),
+                        ],
+                    ),
+                )
+
+        with TestClient(create_app(settings)) as client:
+            registered = client.post("/api/v1/projects", params={"name": "Asterim"})
+            assert registered.status_code == 200, registered.text
+
+            state_of(client.app).executor = Recorder()  # type: ignore[assignment]
+            body = client.get("/api/v1/search", params={"q": "auth", "project": "Asterim"}).json()
+
+        git_calls = [a for a in asked if a[0] == "git.log"]
+        assert len(git_calls) == 1 and git_calls[0][1]["limit"] == 50
+        assert body["git_searched"] is True
+        assert [c["subject"] for c in body["git"]] == ["fix auth token refresh"]
+
+    def test_stored_rows_are_searched_without_tools_and_groups_fail_alone(
+        self, client: TestClient, settings: Settings
+    ) -> None:
+        """Tasks and events are the API's own rows — the briefing's precedent, no tool
+        and no model. And a refused `know.search` becomes that group's error field
+        while the stored groups still answer: error is a field, never an exception."""
+        import sqlite3
+
+        from oracle.api.app import state_of
+        from oracle.policy.model import Decision, PolicyVerdict, Tier
+        from oracle.tools.executor import ToolError, ToolErrorKind, ToolOutcome
+
+        seed = sqlite3.connect(settings.db_path)
+        seed.execute(
+            """INSERT INTO tasks (id, root_id, kind, status, spec, depends_on, created_at)
+               VALUES ('tk_s1', 'tk_root', 'delegation', 'failed',
+                       '{"objective": "repair the auth retry ladder"}', '[]',
+                       '2026-08-28T20:00:00Z')"""
+        )
+        seed.execute(
+            """INSERT INTO events (ts, type, session_id, turn_id, task_id, trace_id, actor,
+                                   payload, critical)
+               VALUES ('2026-08-28T20:00:01Z', 'continue.derived', NULL, NULL, NULL,
+                       'tr_seed', 'system', '{"project": "Asterim", "notes": ["auth"]}', 0)"""
+        )
+        seed.commit()
+        seed.close()
+
+        st = state_of(client.app)
+
+        class Refuser:
+            async def execute(self, tool_id: str, raw_args: dict, **_: object) -> ToolOutcome:
+                return ToolOutcome(
+                    tool=tool_id,
+                    ok=False,
+                    result=None,
+                    verdict=PolicyVerdict(
+                        decision=Decision.DENY,
+                        tier=Tier.T0,
+                        base_tier=Tier.T0,
+                        rule="halt",
+                        reason="halted",
+                    ),
+                    duration_ms=1,
+                    error=ToolError(ToolErrorKind.DENIED, "halted: user requested halt"),
+                )
+
+        st.executor = Refuser()  # type: ignore[assignment]
+
+        body = client.get("/api/v1/search", params={"q": "auth"}).json()
+
+        assert [t["id"] for t in body["tasks"]] == ["tk_s1"]
+        assert body["tasks"][0]["objective"] == "repair the auth retry ladder"
+        assert any(e["type"] == "continue.derived" for e in body["events"])
+        assert body["files"] == [] and body["notes"] == []
+        assert "halted" in body["knowledge_error"]
+
+    def test_wildcards_are_searched_as_characters_not_as_wildcards(
+        self, client: TestClient
+    ) -> None:
+        """A query of `100%` must look for the string `100%`, not become LIKE's
+        match-everything — the difference between a search box and an injection."""
+        from oracle.api.app import state_of
+        from oracle.tools.knowledge import KnowSearchResult
+
+        st = state_of(client.app)
+        outer = self
+
+        class Quiet:
+            async def execute(self, tool_id: str, raw_args: dict, **_: object) -> object:
+                return outer._outcome(
+                    tool_id,
+                    KnowSearchResult(
+                        query=str(raw_args["query"]),
+                        results=[],
+                        tainted=False,
+                        strategy="hybrid",
+                        degraded=False,
+                    ),
+                )
+
+        st.executor = Quiet()  # type: ignore[assignment]
+
+        resp = client.get("/api/v1/search", params={"q": "100%_\\"})
+        assert resp.status_code == 200
+        body = resp.json()
+        # A wildcard-as-wildcard would have matched every event the boot wrote.
+        assert body["events"] == [] and body["tasks"] == []
+
+
 def test_the_task_graph_endpoint_is_a_projection_of_the_table(client: TestClient) -> None:
     """`GET /api/v1/tasks` reads the rows and shapes them; it is not a second source of
     truth (ORCHESTRATION.md §6). A graph nobody ran is an empty tree, not a 404 — the

@@ -32,7 +32,7 @@ from oracle.logsink import get_logger
 from oracle.policy.model import Capability, Tier
 from oracle.rag.cache import EmbeddingCache, cache_path
 from oracle.rag.collections import load_registry
-from oracle.rag.embedding import E5_BASE, Embedder
+from oracle.rag.embedding import DEFAULT, Embedder, ModelSpec
 from oracle.rag.indexer import index as run_index
 from oracle.rag.retrieval import TOP_K, retrieve, to_citation
 from oracle.rag.store import KnowledgeStore
@@ -49,11 +49,22 @@ CollectionName = Annotated[str | None, Field(default=None, description="Restrict
 ProjectName = Annotated[str | None, Field(default=None, description="Restrict to one project")]
 
 
+#: The model these tools query with — `embedding.DEFAULT`, aliased ONCE and pinned by a
+#: test. This line used to say `E5_BASE`, hardcoded, and when the indexer moved to
+#: `bge-m3` on 2026-08-24 nobody moved it: every `know.*` call through the toolhost then
+#: failed `bind()` against the rebuilt index — a SchemaMismatch the fixture-world tests
+#: could never see, because a test's empty tmp index binds whatever the tool asks for,
+#: self-consistently. Found 2026-08-28 by a latency measurement that expected numbers and
+#: got refusals. "One name to change" (embedding.py) is only true when nobody keeps a
+#: private copy of the name.
+_MODEL: ModelSpec = DEFAULT
+
+
 @lru_cache(maxsize=1)
 def _store() -> KnowledgeStore:
     settings = Settings()
-    store = KnowledgeStore(settings.data_dir / "knowledge.db", E5_BASE.out_dim)
-    store.bind(E5_BASE.name, E5_BASE.out_dim)
+    store = KnowledgeStore(settings.data_dir / "knowledge.db", _MODEL.out_dim)
+    store.bind(_MODEL.name, _MODEL.out_dim)
     return store
 
 
@@ -62,9 +73,9 @@ def _cache() -> EmbeddingCache:
     """Shared with `scripts/index_knowledge.py` — one cache file per model, not per caller."""
     settings = Settings()
     return EmbeddingCache(
-        cache_path(settings.data_dir, E5_BASE.name, E5_BASE.out_dim),
-        E5_BASE.name,
-        E5_BASE.out_dim,
+        cache_path(settings.data_dir, _MODEL.name, _MODEL.out_dim),
+        _MODEL.name,
+        _MODEL.out_dim,
     )
 
 
@@ -78,7 +89,7 @@ def _embedder() -> Embedder | None:
     than one that says it is degraded.
     """
     try:
-        return Embedder(E5_BASE)
+        return Embedder(_MODEL)
     except (FileNotFoundError, OSError) as exc:
         log.warning("know.embedder_unavailable", error=str(exc))
         return None

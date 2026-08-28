@@ -586,6 +586,21 @@ GIT       (7)   a3f21c fix auth token refresh …
 Backed by hybrid retrieval (P5) for notes/files and direct queries for the rest. Target p95 < 300 ms.
 `Tab` cycles source groups; `Enter` opens; `Ctrl+Enter` sends the result to the agent as context.
 
+> **As built — the backend, 2026-08-28 evening.** `GET /api/v1/search` (API.md) answers all six
+> groups: files/notes via `know.search` through the executor and the gate (`tainted` rides
+> through), projects/tasks/events as SQL over stored rows, GIT only when a project is named —
+> an all-repo sweep is OQ-24's fan-out under a new name. **The 300 ms target is measured and
+> missed:** the retrieval half alone costs **p50 681 ms / p95 1,270 ms** warm through the
+> toolhost (16 results, real corpus). The target was written before the `bge-m3` switch, whose
+> own budget was 400 ms and whose in-process p95 measured 332 ms (OQ-02) — the toolhost hop
+> and the bigger corpus took the rest. Recorded rather than quietly re-argued: the overlay
+> should debounce and show `elapsed_ms`, and if sub-300 ever matters, the levers are a smaller
+> `limit` and the in-process retrieval band the API already uses for context assembly.
+> Building the search *without* measuring first would have shipped a spinner nobody explained.
+> Finding the number also found a live defect: `know.*` had pinned `multilingual-e5-base`
+> since before the 2026-08-24 model switch, so every toolhost search against the rebuilt index
+> failed `bind()` — fixture-invisible, now pinned to `embedding.DEFAULT` by a security test.
+
 ---
 
 ## 11b. The knowledge graph — **Phase 11**

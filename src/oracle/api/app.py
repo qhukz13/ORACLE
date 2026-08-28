@@ -11,6 +11,7 @@ import contextlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 import aiosqlite
@@ -825,6 +826,147 @@ def _register_routes(app: FastAPI) -> None:
         what it reconciles against on connect."""
         st = state_of(app)
         return await st.graphs.tree(root_id)
+
+    @app.get("/api/v1/search")
+    async def global_search(
+        q: str = Query(..., min_length=2),
+        project: str = Query(
+            "",
+            description="a registered project name; scopes retrieval and turns the GIT group on",
+        ),
+        limit: int = Query(8, ge=1, le=25, description="per group"),
+    ) -> dict[str, Any]:
+        """Global search (UI.md §11): one query, grouped answers, each group honest
+        about how it was searched.
+
+        Two different searches wearing one endpoint, on purpose:
+
+        - **files / notes** go through `know.search` via the executor — hybrid
+          retrieval behind the policy gate, exactly what a chat turn would get, split
+          by collection so a vault note and a source file do not read as one kind of
+          thing. `tainted` rides through untouched: a search result is a chunk somebody
+          may not have written, and the badge must survive the trip.
+        - **projects / tasks / events** are substring scans over the API's own stored
+          rows — the briefing's precedent (`st.conn`, arithmetic over rows, no model,
+          no tools), because there is nothing to embed and nothing to gate.
+
+        **GIT searches one repository or none.** `git.log` has no grep and the toolhost
+        serialises invocations, so an all-projects sweep would queue behind real work —
+        the exact fan-out OQ-24 measured 2-3x over budget. Name a project and its last
+        50 subjects are filtered; name none and the group says why it is absent.
+
+        Every group fails alone: a down embedder degrades files/notes to lexical (the
+        tool's own fallback), a refused tool call becomes that group's `error` field,
+        and the rest of the response stands. Error is a field, never an exception —
+        the ProjectObservation rule.
+        """
+        st = state_of(app)
+        t0 = perf_counter()
+        needle = q.lower()
+        # LIKE with ESCAPE, so a query containing % or _ searches for those characters
+        # instead of becoming a different query.
+        like = "%" + needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+        rows = await st.project_store.all()
+        projects = [
+            {
+                "id": p.id,
+                "name": p.name,
+                "status": str(effective_status(p)),
+                "description": p.description,
+            }
+            for p in rows
+            if needle in p.name.lower() or needle in p.description.lower()
+        ][:limit]
+
+        tasks: list[dict[str, Any]] = []
+        async with st.conn.execute(
+            """SELECT id, root_id, kind, status,
+                      COALESCE(json_extract(spec, '$.objective'), '') AS objective
+               FROM tasks
+               WHERE lower(id) LIKE ? ESCAPE '\\'
+                  OR lower(status) LIKE ? ESCAPE '\\'
+                  OR lower(COALESCE(json_extract(spec, '$.objective'), '')) LIKE ? ESCAPE '\\'
+               ORDER BY created_at DESC LIMIT ?""",
+            (like, like, like, limit),
+        ) as cur:
+            async for row in cur:
+                tasks.append(
+                    {
+                        "id": row[0],
+                        "root_id": row[1],
+                        "kind": row[2],
+                        "status": row[3],
+                        "objective": row[4],
+                    }
+                )
+
+        events: list[dict[str, Any]] = []
+        async with st.conn.execute(
+            """SELECT seq, ts, type, payload FROM events
+               WHERE lower(type) LIKE ? ESCAPE '\\' OR lower(payload) LIKE ? ESCAPE '\\'
+               ORDER BY seq DESC LIMIT ?""",
+            (like, like, limit),
+        ) as cur:
+            async for row in cur:
+                events.append(
+                    {"seq": row[0], "ts": row[1], "type": row[2], "snippet": str(row[3])[:120]}
+                )
+
+        files: list[dict[str, Any]] = []
+        notes: list[dict[str, Any]] = []
+        tainted = False
+        degraded = False
+        knowledge_error = ""
+        know_args: dict[str, Any] = {"query": q, "limit": max(limit * 2, 12)}
+        if project:
+            know_args["project"] = project
+        outcome = await st.executor.execute("know.search", know_args)
+        if outcome.ok and outcome.result is not None:
+            payload = outcome.result.model_dump()
+            tainted = bool(payload.get("tainted"))
+            degraded = bool(payload.get("degraded"))
+            for hit in payload.get("results", []):
+                target = notes if hit.get("collection") == "notes" else files
+                if len(target) < limit:
+                    target.append(hit)
+        else:
+            knowledge_error = outcome.error.message if outcome.error else "know.search failed"
+
+        git: list[dict[str, Any]] = []
+        git_error = ""
+        git_searched = False
+        if project:
+            row_match = await st.project_store.by_name(project)
+            if row_match is None:
+                git_error = f"no registered project named {project!r}"
+            else:
+                git_searched = True
+                log = await st.executor.execute(
+                    "git.log", {"path": str(row_match.root), "limit": 50}
+                )
+                if log.ok and log.result is not None:
+                    for commit in log.result.model_dump().get("commits", []):
+                        if needle in str(commit.get("subject", "")).lower() and len(git) < limit:
+                            git.append(commit)
+                else:
+                    git_error = log.error.message if log.error else "git.log failed"
+
+        return {
+            "query": q,
+            "elapsed_ms": round((perf_counter() - t0) * 1000, 1),
+            "projects": projects,
+            "tasks": tasks,
+            "events": events,
+            "files": files,
+            "notes": notes,
+            "tainted": tainted,
+            "degraded": degraded,
+            "knowledge_error": knowledge_error,
+            "git": git,
+            "git_searched": git_searched,
+            "git_error": git_error,
+        }
 
     @app.get("/api/v1/briefing")
     async def briefing() -> dict[str, Any]:

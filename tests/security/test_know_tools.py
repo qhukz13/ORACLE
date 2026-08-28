@@ -30,6 +30,19 @@ def engine() -> PolicyEngine:
     return PolicyEngine(load_policy(REPO_ROOT / "config/policy.yaml"))
 
 
+def test_the_tools_query_with_the_model_that_built_the_index() -> None:
+    """`know.*` pinned `E5_BASE` while the indexer moved to `bge-m3` (2026-08-24), and
+    from that day every live `know.*` call through the toolhost failed `bind()` with a
+    SchemaMismatch — invisible to fixture tests, whose empty tmp indexes self-
+    consistently bind whatever the tool asks for. Found 2026-08-28 by a latency
+    measurement. The tool layer must not keep a private copy of the model name: this
+    pins its alias to `embedding.DEFAULT`, the indexer's single switch."""
+    from oracle.rag import embedding
+    from oracle.tools import knowledge
+
+    assert knowledge._MODEL is embedding.DEFAULT
+
+
 class TestEveryToolIsGoverned:
     def test_the_shipped_policy_has_a_rule_for_each(self, engine: PolicyEngine) -> None:
         """A tool with no policy entry is denied by default — which is safe, but it means
