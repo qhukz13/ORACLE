@@ -156,8 +156,20 @@ GET    /api/v1/approvals                pending
 POST   /api/v1/approvals/{id}           {decision, nonce}
 
 POST   /api/v1/search                   {query, sources[], filters} → grouped results
-GET    /api/v1/collections              index health per collection
-POST   /api/v1/collections/{id}/reindex
+GET    /api/v1/knowledge                BUILT 2026-08-22: index health — built?, model,
+                                        per-collection counts, what failed (RAG.md §9)
+POST   /api/v1/knowledge/reindex        BUILT 2026-08-28: ?full=&collection= — executes
+                                        `know.reindex` (T1) through the ToolExecutor, so
+                                        it crosses the policy gate like every invocation.
+                                        Holds until the tool returns; reflects its result
+                                        or the gate's refusal as {ok, ...}, never a 5xx
+GET    /api/v1/collections              PLANNED: per-collection health detail
+POST   /api/v1/collections/{id}/reindex PLANNED: the whole-index form shipped first —
+                                        the health view's reindex is ONE action on the
+                                        whole index (ADR-0023, UI.md §"Layout"), and
+                                        ?collection= on the built endpoint already
+                                        scopes it. A path-addressed resource waits for
+                                        a per-collection UI to need it
 
 GET    /api/v1/memory/facts             ?scope=&project=
 PATCH  /api/v1/memory/facts/{id}

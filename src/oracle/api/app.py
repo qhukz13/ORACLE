@@ -715,6 +715,45 @@ def _register_routes(app: FastAPI) -> None:
             # built by a different model, so it is not stale, it is wrong.
             return {"built": False, "path": str(path), "stale": True, "error": str(exc)}
 
+    @app.post("/api/v1/knowledge/reindex")
+    async def knowledge_reindex(
+        full: bool = Query(False, description="re-embed everything, not only what changed"),
+        collection: str = Query("", description="one collection, or empty for the whole index"),
+    ) -> dict[str, Any]:
+        """The health view's one action: bring the index up to date.
+
+        Routed through `ToolExecutor` as `know.reindex`, never into `rag/` directly —
+        the gate is the only chokepoint, and an endpoint that indexed on its own would
+        be a second execution path (ROADMAP sequencing rule 2). The tool is T1, a
+        reversible local write, so the call auto-runs today; if policy refuses it
+        (HALT, read-only lockdown) or ever prices it as needing approval, that comes
+        back as `{ok: false}` naming the executor's reason — matching the MCP call
+        path, because a policy answer is something to render, not a broken server.
+
+        Synchronous on purpose. Incremental is the default and the fast path; `full`
+        re-embeds everything — measured at roughly an hour on this CPU in the tool
+        contract — which is why it is never implicit here either, and why the UI's
+        button holds its disabled "Building…" state for exactly as long as this
+        request runs. A running reindex also occupies the toolhost's single lane, so
+        other tool calls queue behind it — the same cost a chat-invoked
+        `know.reindex` already carries.
+        """
+        st = state_of(app)
+        args: dict[str, Any] = {"full": full}
+        if collection:
+            args["collection"] = collection
+        outcome = await st.executor.execute("know.reindex", args)
+        if not outcome.ok or outcome.result is None:
+            error = outcome.error
+            return {
+                "ok": False,
+                "error": {
+                    "kind": error.kind if error else "execution_failed",
+                    "message": error.message if error else "know.reindex failed",
+                },
+            }
+        return {"ok": True, **outcome.result.model_dump()}
+
     # ---------------------------------------------------------------- MCP inbound
     #
     # A delegated agent calling back into ORACLE (INTEGRATIONS.md §4). Loopback only,

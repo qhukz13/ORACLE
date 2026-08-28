@@ -282,6 +282,172 @@ class TestKnowledgeHealth:
         assert "reindex" in body["error"]
 
 
+class TestKnowledgeReindex:
+    """The health view's one action. The endpoint owns no indexing code: everything it
+    does is ask the executor for `know.reindex`, so the call crosses the policy gate
+    like every other invocation (ROADMAP sequencing rule 2)."""
+
+    def test_a_trigger_goes_through_the_executor_and_reports_what_the_tool_did(
+        self, client: TestClient
+    ) -> None:
+        """A successful run answers with the tool's own summary — not a bare 202. The
+        request holds until the index is up to date, so the result IS the report."""
+        from oracle.api.app import state_of
+        from oracle.policy.model import Decision, PolicyVerdict, Tier
+        from oracle.tools.executor import ToolOutcome
+        from oracle.tools.knowledge import KnowReindexResult
+
+        st = state_of(client.app)
+        asked: list[tuple[str, dict]] = []
+
+        class Recorder:
+            async def execute(self, tool_id: str, raw_args: dict, **_: object) -> ToolOutcome:
+                asked.append((tool_id, raw_args))
+                return ToolOutcome(
+                    tool=tool_id,
+                    ok=True,
+                    result=KnowReindexResult(
+                        documents=3,
+                        unchanged=2,
+                        chunks=5,
+                        embedded=4,
+                        cached=1,
+                        pruned=0,
+                        failed=0,
+                        seconds=1.2,
+                        degraded=False,
+                    ),
+                    verdict=PolicyVerdict(
+                        decision=Decision.ALLOW,
+                        tier=Tier.T1,
+                        base_tier=Tier.T1,
+                        rule="tools.know.reindex",
+                    ),
+                    duration_ms=7,
+                )
+
+        st.executor = Recorder()  # type: ignore[assignment]
+
+        body = client.post("/api/v1/knowledge/reindex", params={"full": True}).json()
+
+        assert asked == [("know.reindex", {"full": True})]
+        assert body["ok"] is True
+        assert body["documents"] == 3 and body["chunks"] == 5 and body["embedded"] == 4
+        assert body["cached"] == 1 and body["seconds"] == 1.2 and body["degraded"] is False
+
+    def test_a_bare_trigger_is_incremental_and_a_collection_rides_through(
+        self, client: TestClient
+    ) -> None:
+        """`full` re-embeds everything — roughly an hour on this CPU per the tool
+        contract — so it must never be implicit: an unqualified click gets the
+        incremental path. Scoping to one collection passes through unchanged."""
+        from oracle.api.app import state_of
+        from oracle.policy.model import Decision, PolicyVerdict, Tier
+        from oracle.tools.executor import ToolOutcome
+        from oracle.tools.knowledge import KnowReindexResult
+
+        st = state_of(client.app)
+        asked: list[tuple[str, dict]] = []
+
+        class Recorder:
+            async def execute(self, tool_id: str, raw_args: dict, **_: object) -> ToolOutcome:
+                asked.append((tool_id, raw_args))
+                return ToolOutcome(
+                    tool=tool_id,
+                    ok=True,
+                    result=KnowReindexResult(
+                        documents=0,
+                        unchanged=0,
+                        chunks=0,
+                        embedded=0,
+                        cached=0,
+                        pruned=0,
+                        failed=0,
+                        seconds=0.1,
+                        degraded=False,
+                    ),
+                    verdict=PolicyVerdict(
+                        decision=Decision.ALLOW,
+                        tier=Tier.T1,
+                        base_tier=Tier.T1,
+                        rule="tools.know.reindex",
+                    ),
+                    duration_ms=2,
+                )
+
+        st.executor = Recorder()  # type: ignore[assignment]
+
+        client.post("/api/v1/knowledge/reindex")
+        client.post("/api/v1/knowledge/reindex", params={"collection": "notes"})
+
+        assert asked == [
+            ("know.reindex", {"full": False}),
+            ("know.reindex", {"full": False, "collection": "notes"}),
+        ]
+
+    def test_a_policy_refusal_is_reported_not_worked_around(self, client: TestClient) -> None:
+        """A HALTed or locked-down daemon refuses `know.reindex` at the gate. The
+        endpoint reflects the executor's answer — `ok: false`, naming the reason —
+        rather than reaching into `rag/` itself, which would be exactly the second
+        execution path sequencing rule 2 forbids. An HTTP error would be wrong too:
+        a policy refusal is something to render, not a broken server."""
+        from oracle.api.app import state_of
+        from oracle.policy.model import Decision, PolicyVerdict, Tier
+        from oracle.tools.executor import ToolError, ToolErrorKind, ToolOutcome
+
+        st = state_of(client.app)
+
+        class Refuser:
+            async def execute(self, tool_id: str, raw_args: dict, **_: object) -> ToolOutcome:
+                return ToolOutcome(
+                    tool=tool_id,
+                    ok=False,
+                    result=None,
+                    verdict=PolicyVerdict(
+                        decision=Decision.DENY,
+                        tier=Tier.T1,
+                        base_tier=Tier.T1,
+                        rule="halt",
+                        reason="halted: user requested halt",
+                    ),
+                    duration_ms=1,
+                    error=ToolError(ToolErrorKind.DENIED, "halted: user requested halt"),
+                )
+
+        st.executor = Refuser()  # type: ignore[assignment]
+
+        resp = client.post("/api/v1/knowledge/reindex")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is False
+        assert body["error"]["kind"] == "denied"
+        assert "halted" in body["error"]["message"]
+
+    def test_malformed_input_is_refused_before_the_executor_is_consulted(
+        self, client: TestClient
+    ) -> None:
+        """`full=banana` is the client's error: a 422 from validation, not a 500 —
+        and nothing reaches the executor, because "it returned an error" and "it
+        never ran" are different properties and only the second is the claim."""
+        from oracle.api.app import state_of
+
+        st = state_of(client.app)
+        asked: list[str] = []
+
+        class Recorder:
+            async def execute(self, tool_id: str, raw_args: dict, **_: object) -> object:
+                asked.append(tool_id)
+                raise AssertionError("validation should have refused this request")
+
+        st.executor = Recorder()  # type: ignore[assignment]
+
+        resp = client.post("/api/v1/knowledge/reindex", params={"full": "banana"})
+
+        assert resp.status_code == 422
+        assert asked == []
+
+
 def test_the_task_graph_endpoint_is_a_projection_of_the_table(client: TestClient) -> None:
     """`GET /api/v1/tasks` reads the rows and shapes them; it is not a second source of
     truth (ORCHESTRATION.md §6). A graph nobody ran is an empty tree, not a 404 — the
