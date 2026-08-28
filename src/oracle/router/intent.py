@@ -40,10 +40,12 @@ IntentLabel = Literal[
     #: planning call, not a tool call. The router stays a router — it does not decide
     #: the work, it decides that the work is unknown and must be planned.
     #:
-    #: `TO VERIFY` — the 30-case intent eval has NOT been re-run since this was added.
-    #: Accuracy was 93.3% with ten labels; the named risk is confusion with `run` and
-    #: `modify`, which are one word away ("run the Asterim tests" / "continue Asterim").
-    #: See OQ-25.
+    #: `MEASURED 2026-08-28` (OQ-25): 97.1% intent accuracy on 34 cases with this label
+    #: in — up from 93.3% with ten labels — and all four `continue` cases route AND
+    #: resolve their project slot. The feared run/continue confusion appeared once, in
+    #: reverse ("собери GameRecs" -> continue). One deterministic exception: the model
+    #: never emits the project name ORACLE (9/9 null; a prompt instruction did not move
+    #: it) — `_named_project` in pipeline.py carries that case by design.
     "continue",
 ]
 
