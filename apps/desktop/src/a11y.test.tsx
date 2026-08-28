@@ -35,6 +35,7 @@ import { MemoryView } from "./components/MemoryView";
 import { PipelineCard } from "./components/PipelineCard";
 import { ProjectList, toProjects } from "./components/ProjectList";
 import { TaskTree } from "./components/TaskTree";
+import { Timeline } from "./components/Timeline";
 import { ConfirmationCenter } from "./components/ConfirmationCenter";
 import { TerminalDock } from "./components/TerminalDock";
 import { ToolCard } from "./components/ToolCard";
@@ -535,6 +536,39 @@ describe("the components the audit missed, and the T5 surfaces", () => {
         tainted
         degraded
         onOpen={() => {}}
+      />,
+    );
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it("timeline", async () => {
+    const { container } = render(
+      <Timeline
+        events={[
+          {
+            v: 1,
+            seq: 1,
+            ts: "2026-08-28T20:00:00.000Z",
+            type: "turn.started",
+            session_id: "s1",
+            turn_id: "t1",
+            task_id: null,
+            trace_id: "tr_1",
+            payload: { text: "continue ORACLE" },
+          },
+          {
+            v: 1,
+            seq: 2,
+            ts: "2026-08-28T20:00:01.000Z",
+            type: "tool.finished",
+            session_id: "s1",
+            turn_id: "t1",
+            task_id: null,
+            trace_id: "tr_1",
+            payload: { tool: "git.status", ok: false, error: "not a repository" },
+          },
+        ]}
+        onInspect={() => {}}
       />,
     );
     expect(await violations(container)).toEqual([]);

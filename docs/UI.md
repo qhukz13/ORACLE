@@ -78,7 +78,7 @@ in the command bar. This is the resolution of "beautiful centrepiece vs. useful 
 is the ambient/idle view, chat is the working view, and the transition is automatic.
 
 > **As built — P11-T5, 2026-08-28.** The switcher exists (`ViewTabs`, a real tablist with
-> arrow-key roving) over the stages that exist: **Chat · Tasks · Events · Memory · Briefing ·
+> arrow-key roving) over the stages that exist: **Chat · Tasks · Timeline · Memory · Briefing ·
 > Knowledge**, with `Ctrl+1..4` on the first four (§16 has the corrected table and the reason).
 > The auto-switch to Chat on a new conversation is implemented and is the one stage change the
 > app makes for you (§21 rule 6); the briefing's once-only first-paint takeover (§7b) is the
@@ -373,6 +373,20 @@ project/task/tool/level.
 `[inspect]` opens the exact context or result that was used. **This is the debugging surface for the
 agent itself** — when ORACLE does something strange, this is where I find out why. Retention matches
 the event log; older entries are summarised per turn.
+
+> **As built — 2026-08-28 evening (`components/Timeline.tsx`).** The grouped, filterable stream
+> replaced the flat event table on the `Ctrl+3` stage, and the tab finally says Timeline because
+> it finally is one. Groups fold **contiguous** events of one turn (or one task, for turn-less
+> graph events) — contiguity, never a re-sort: the log's order is the truth being displayed. The
+> newest group opens itself; the filter is one substring over type, ids and payload and forces
+> its matches open (a filter that hides matches inside closed groups is useless); `[inspect]` is
+> per **group**, driving the app-wide selection (§21 rule 1) into the inspector's turn or task
+> branch. Two shapes the audit chose, not taste: the disclosure is a `button[aria-expanded]`
+> rather than `<details>` because the header carries a second control and a button nested in
+> `<summary>` is a serious axe violation; and collapsed rows stay mounted under `hidden` so
+> `aria-controls` never dangles. Still future, honestly: `[inspect]` down to the exact
+> per-event context (the inspector has no event branch), per-turn summarisation of old
+> entries, and faceted filters — the substring earns an upgrade when somebody outgrows it.
 
 ---
 
@@ -806,7 +820,7 @@ tests, not assumed.
 |---|---|
 | `Ctrl+K` | Command palette |
 | `Ctrl+Shift+F` | Global search |
-| `Ctrl+1..4` | Chat / Tasks / Events / Memory — see note below |
+| `Ctrl+1..4` | Chat / Tasks / Timeline / Memory — see note below |
 | `Ctrl+B` / `Ctrl+I` | Toggle sidebar / inspector |
 | `Ctrl+\`` / `Ctrl+Shift+\`` | Cycle dock / expand dock |
 | `Ctrl+Enter` | Send message |
@@ -823,13 +837,14 @@ hotkey so it works when the window isn't focused — which is exactly when I'd n
 
 > **`Ctrl+1..4`, corrected 2026-08-28 (P11-T5).** This table originally read
 > `Orbit / Chat / Timeline / Tasks`, written before Memory and the Briefing existed as views.
-> Two of those four cannot be bound today: Orbit is P11-T2 and gated on
-> [OQ-14](OPEN_QUESTIONS.md#oq-14), and §7's grouped TimelineView is unbuilt — the flat event
-> table is what exists, and the tab is labelled **Events** because labelling it Timeline would
-> claim a view that is not there. So the keys bind to the four primary stages that exist:
-> **1 Chat · 2 Tasks · 3 Events · 4 Memory**. Briefing and Knowledge are tabs without digits —
-> the briefing has its own arrival affordance (§7b) and index health is a maintenance view.
-> When Orbit lands it takes a digit and this table changes again, with the date attached.
+> Orbit still cannot be bound — it is P11-T2, gated on [OQ-14](OPEN_QUESTIONS.md#oq-14) — so
+> the keys bind to the four primary stages that exist:
+> **1 Chat · 2 Tasks · 3 Timeline · 4 Memory**. (For a few hours that third tab said
+> **Events**, because the timeline slot held only a flat event table and labelling it Timeline
+> would have claimed a view that was not there; §7's grouped timeline was built the same
+> evening and the label caught up.) Briefing and Knowledge are tabs without digits — the
+> briefing has its own arrival affordance (§7b) and index health is a maintenance view. When
+> Orbit lands it takes a digit and this table changes again, with the date attached.
 > The AltGr guard matters: `Ctrl+Alt+digit` types characters on some layouts, so the binding
 > requires Alt **up**.
 
@@ -914,9 +929,10 @@ AppShell
     ├── ToastStack      └── OnboardingFlow
 
 > **As built — P11-T5, 2026-08-28.** `ViewTabs` ships as drawn; the stages behind it are the
-> ones that exist (Chat · Tasks · Events · Memory · Briefing · Knowledge — the last two are
+> ones that exist (Chat · Tasks · Timeline · Memory · Briefing · Knowledge — two of which are
 > views this chart predates), and `CenterStage` as a component is folded into the app shell
-> until Orbit gives it a second consumer. `TasksView` is `TaskTree` in its own stage;
+> until Orbit gives it a second consumer. `TimelineView` shipped the same evening
+> (`components/Timeline.tsx`, §7). `TasksView` is `TaskTree` in its own stage;
 > `KnowledgeHealth` (index health, not the §11b graph) is mounted as the Knowledge stage; the
 > inspector's task branch is the first slice of `TaskInspector`. Approvals and delegations stay
 > above the switched panel on every stage — the safety surface is not a tab, because approvals

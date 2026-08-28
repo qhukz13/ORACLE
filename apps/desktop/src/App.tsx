@@ -25,6 +25,7 @@ import { KnowledgeHealth, toHealth } from "./components/KnowledgeHealth";
 import type { KnowledgeHealthData } from "./components/KnowledgeHealth";
 import { TaskTree } from "./components/TaskTree";
 import { Inspector } from "./components/Inspector";
+import { Timeline } from "./components/Timeline";
 import { TerminalDock } from "./components/TerminalDock";
 import { ToolCard } from "./components/ToolCard";
 import { ViewTabs } from "./components/ViewTabs";
@@ -569,26 +570,13 @@ export default function App() {
               <p className="muted">Reading the index…</p>
             )
           ) : stage === "events" ? (
-            <table className="events">
-              <thead>
-                <tr>
-                  <th>seq</th>
-                  <th>type</th>
-                  <th>trace</th>
-                  <th>payload</th>
-                </tr>
-              </thead>
-              <tbody>
-                {s.events.map((e) => (
-                  <tr key={e.seq}>
-                    <td className="num">{e.seq}</td>
-                    <td className="type">{e.type}</td>
-                    <td className="muted">{e.trace_id}</td>
-                    <td className="muted">{JSON.stringify(e.payload).slice(0, 90)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <Timeline
+              events={s.events}
+              onInspect={(sel) => {
+                setSelection(sel);
+                setInspector(true);
+              }}
+            />
           ) : s.turns.length === 0 ? (
             <div className="empty">
               <p>Nothing yet.</p>

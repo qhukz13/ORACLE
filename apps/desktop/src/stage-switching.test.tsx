@@ -117,7 +117,7 @@ describe("Ctrl+1..4", () => {
     expect(screen.getByText("No task graphs yet.")).toBeTruthy();
 
     fireEvent.keyDown(window, { key: "3", ctrlKey: true });
-    expect(selectedTab()).toContain("Events");
+    expect(selectedTab()).toContain("Timeline");
 
     fireEvent.keyDown(window, { key: "4", ctrlKey: true });
     expect(selectedTab()).toContain("Memory");
@@ -144,7 +144,7 @@ describe("the one automatic switch", () => {
     useStore.getState().setConnection("online", 0);
     render(<App />);
     fireEvent.keyDown(window, { key: "3", ctrlKey: true });
-    expect(selectedTab()).toContain("Events");
+    expect(selectedTab()).toContain("Timeline");
 
     const input = screen.getByLabelText("Message");
     fireEvent.change(input, { target: { value: "run the tests" } });

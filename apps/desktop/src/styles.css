@@ -91,12 +91,28 @@ button.ghost { background: transparent; }
   margin-left: 3px; vertical-align: text-bottom; animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 
-.events { width: 100%; border-collapse: collapse; font-size: 12px; }
-.events th { text-align: left; color: var(--fg-2); font-weight: 500;
-  border-bottom: 1px solid var(--line); padding: 5px 8px; position: sticky; top: 0; background: var(--bg-0); }
-.events td { padding: 3px 8px; border-bottom: 1px solid var(--bg-1); }
-.events .num { color: var(--fg-2); text-align: right; }
-.events .type { color: var(--st-think); }
+/* The activity timeline (UI.md §7) — replaced the flat .events table 2026-08-28. */
+.timeline { font-size: 12px; }
+.tl-filter { width: 100%; font: inherit; padding: 7px 11px; margin-bottom: 8px;
+  background: var(--bg-2); color: var(--fg-0); border: 1px solid var(--line); border-radius: 4px; }
+.tl-group { border-bottom: 1px solid var(--bg-1); }
+.tl-head { display: flex; align-items: baseline; gap: 8px; }
+/* The disclosure is a real button (aria-expanded) — a button nested in <summary> is a
+   nested-interactive violation, which is why this is not a <details>. */
+.tl-disclose { flex: 1; display: flex; align-items: baseline; gap: 10px; min-width: 0;
+  background: transparent; border: none; padding: 6px 4px; text-align: left;
+  font: inherit; color: inherit; cursor: pointer; }
+.tl-disclose:hover:not(:disabled) { border: none; }
+.tl-caret { width: 1em; color: var(--fg-2); }
+.tl-disclose .tl-label { color: var(--fg-0); flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-rows { list-style: none; margin: 0 0 6px; padding: 0 0 0 18px; }
+.tl-row { display: flex; align-items: baseline; gap: 8px; padding: 2px 0; }
+.tl-time { color: var(--fg-2); white-space: nowrap; }
+.tl-mark { width: 1em; text-align: center; }
+.tl-type { color: var(--st-think); white-space: nowrap; }
+.tl-summary { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-seq { font-size: 10px; }
 
 .composer { display: flex; gap: 8px; padding: 12px 14px; flex: none;
   background: var(--bg-1); border-top: 1px solid var(--line); }

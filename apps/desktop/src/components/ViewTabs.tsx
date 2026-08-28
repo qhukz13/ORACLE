@@ -6,10 +6,11 @@
  * A registry cannot have per-button rules, which is the point of it.
  *
  * The stage ids are the views that exist, not the four names UI.md §16 was written with
- * (`Orbit / Chat / Timeline / Tasks`): Orbit is P11-T2 and gated on OQ-14, and the
- * timeline slot is currently the flat event table, labelled as what it is. §16 is
- * corrected in place alongside this file — a keybinding doc that names two views the app
- * cannot show is worse than one that names the real ones.
+ * (`Orbit / Chat / Timeline / Tasks`): Orbit is P11-T2 and gated on OQ-14. The timeline
+ * slot was the flat event table and said "Events" for as long as that was true; since
+ * 2026-08-28 evening it is §7's grouped, filterable timeline and the label caught up.
+ * §16 is corrected in place alongside this file — a keybinding doc that names views the
+ * app cannot show is worse than one that names the real ones.
  *
  * This is a real tablist, not buttons wearing the class: `role="tab"`, `aria-selected`,
  * and arrow-key roving with automatic activation (ARIA APG "Tabs"). The house rule from
@@ -32,7 +33,7 @@ export interface StageDef {
 export const STAGES: readonly StageDef[] = [
   { id: "chat", label: "Chat", title: "the conversation", hotkey: "1" },
   { id: "tasks", label: "Tasks", title: "task graphs, workers and their evidence", hotkey: "2" },
-  { id: "events", label: "Events", title: "the raw event stream", hotkey: "3" },
+  { id: "events", label: "Timeline", title: "the event log, grouped by turn", hotkey: "3" },
   { id: "memory", label: "Memory", title: "what ORACLE has recorded, and why", hotkey: "4" },
   { id: "briefing", label: "Briefing", title: "what happened while you were away" },
   { id: "knowledge", label: "Knowledge", title: "index health" },
