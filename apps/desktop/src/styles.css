@@ -576,3 +576,33 @@ button.ghost.small { font-size: 10px; padding: 1px 6px; }
 .bf-line.st-running .bf-mark, .bf-line.st-running .bf-status,
 .bf-line.st-ready .bf-mark, .bf-line.st-pending .bf-mark { color: var(--st-run); }
 .bf-line.st-cancelled .bf-status, .bf-line.st-skipped .bf-status { color: var(--fg-2); }
+
+/* ─────────────────────────────────────────────────────── Phase 11 T5: centre stage
+   The switcher (ViewTabs) and the inspector's task branch. Tabs live in the command
+   bar; the selected one is filled, the rest are quiet — same density rule as the rest
+   of the bar. */
+
+.tabs { display: inline-flex; gap: 2px; background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 5px; padding: 2px; }
+.tab { position: relative; background: transparent; border: none; border-radius: 3px;
+  padding: 4px 10px; color: var(--fg-2); }
+.tab:hover:not(:disabled) { color: var(--fg-0); border: none; }
+.tab[aria-selected="true"] { background: var(--bg-3); color: var(--fg-0); }
+/* The one tab allowed to demand attention (the briefing, until acknowledged) — the same
+   colour the sidebar's WAITING ON ME uses, because it is the same kind of demand. */
+.tab.attn { color: var(--st-wait); }
+.tab-dot { position: absolute; top: 3px; right: 3px; width: 5px; height: 5px;
+  border-radius: 50%; background: var(--st-wait); }
+
+/* The task id doubles as the inspect affordance when the tree can select. A button,
+   restyled to the id's face — underline on hover is the interactivity signal. */
+button.tt-id { background: transparent; border: none; padding: 0; cursor: pointer; }
+button.tt-id:hover { text-decoration: underline; border: none; }
+
+/* The inspector's task branch. */
+.ins-pair { display: contents; } /* keep dt/dd in the .ins-facts grid through the wrapper */
+.ins-claim { margin: 0; padding: 6px 10px; border-left: 2px solid var(--fg-2);
+  color: var(--fg-1); font-style: italic; word-break: break-word; }
+
+/* The selected row's observed half — read fresh, held nowhere (OQ-24). */
+.pj-git { color: var(--fg-2); font-size: 11px; margin-left: auto; white-space: nowrap; }

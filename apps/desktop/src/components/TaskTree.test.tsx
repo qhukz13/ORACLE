@@ -47,6 +47,27 @@ describe("TaskTree", () => {
     expect(container.firstChild).toBeNull();
   });
 
+  it("selects a task for the inspector when asked, and only then is the id a button", () => {
+    // Selection drives the inspector — one selection model (UI.md §21). The id is a
+    // plain span where nothing inspects, so older mounts and fixtures stay inert.
+    const onSelect = vi.fn();
+    render(
+      <TaskTree
+        graphs={[graph]}
+        onCancelTask={vi.fn()}
+        onCancelGraph={vi.fn()}
+        onSelect={onSelect}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /inspect check/ }));
+    expect(onSelect).toHaveBeenCalledWith("check");
+  });
+
+  it("renders task ids as plain text when nothing can inspect them", () => {
+    renderTree();
+    expect(screen.queryByRole("button", { name: /inspect/ })).toBeNull();
+  });
+
   it("shows every task with its dependencies", () => {
     renderTree();
     expect(screen.getByText("look")).toBeTruthy();

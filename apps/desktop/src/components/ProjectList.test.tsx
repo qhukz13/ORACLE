@@ -9,7 +9,7 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ProjectList, toProjects } from "./ProjectList";
+import { ProjectList, toObservation, toProjects } from "./ProjectList";
 
 /** Exactly what `GET /api/v1/projects` serialises. */
 const WIRE = {
@@ -165,13 +165,101 @@ describe("ProjectList", () => {
     expect(screen.getByText("none tracked yet — register one below")).toBeTruthy();
   });
 
-  it("renders no git state at all", () => {
-    // OQ-24: producing branch and dirty count per row is an unmeasured subprocess
-    // fan-out, and caching them would make the sidebar lie after a branch switch.
+  it("renders no git state unless an observation is handed to it", () => {
+    // OQ-24, measured 2026-08-28: the full fan-out misses the 1 s budget 2–3×, so git
+    // state exists only as a per-selected-row observation. With none passed, none may
+    // appear — the eager fan-out stays impossible by default, and caching would make
+    // the sidebar lie after a branch switch.
     const { container } = render(
       <ProjectList data={toProjects(WIRE)} onSelect={() => {}} onRegister={() => {}} />,
     );
     const text = container.textContent ?? "";
     expect(text).not.toMatch(/main|branch|dirty|↑|↓/);
+  });
+});
+
+/** Exactly what `GET /api/v1/projects/{id}` serialises for the observed half. */
+const DETAIL_WIRE = {
+  id: "pj_1",
+  name: "Asterim",
+  observation: {
+    branch: "main",
+    upstream: "origin/main",
+    ahead: 3,
+    behind: 1,
+    dirty: 2,
+    clean: false,
+    last_commit: ["abc1234", "2026-08-28T10:00:00.000Z", "fix: timeout"],
+    kinds: ["node"],
+    test: ["npm test"],
+    agent_docs: [],
+    error: null,
+  },
+};
+
+describe("the observed half (OQ-24: lazy, per selected row)", () => {
+  it("parses the detail wire shape", () => {
+    const o = toObservation(DETAIL_WIRE);
+    expect(o.branch).toBe("main");
+    expect(o.ahead).toBe(3);
+    expect(o.behind).toBe(1);
+    expect(o.dirty).toBe(2);
+    expect(o.error).toBe("");
+  });
+
+  it("renders the git line on the selected row only", () => {
+    render(
+      <ProjectList
+        data={toProjects(WIRE)}
+        selected="pj_1"
+        observation={toObservation(DETAIL_WIRE)}
+        onSelect={vi.fn()}
+        onRegister={vi.fn()}
+      />,
+    );
+    const line = screen.getByText("⎇ main ↑3 ↓1 ~2");
+    // On the Asterim row, not floating loose somewhere in the list.
+    expect(line.closest("button")?.textContent).toContain("Asterim");
+  });
+
+  it("renders no git line while nothing is observed, and none for an errored one", () => {
+    const { rerender } = render(
+      <ProjectList
+        data={toProjects(WIRE)}
+        selected="pj_1"
+        observation={null}
+        onSelect={vi.fn()}
+        onRegister={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/⎇/)).toBeNull();
+
+    // A project that is not a repository has no branch to show; the status word
+    // already carries what is wrong. No line beats a made-up one.
+    rerender(
+      <ProjectList
+        data={toProjects(WIRE)}
+        selected="pj_2"
+        observation={toObservation({ observation: { error: "root does not exist" } })}
+        onSelect={vi.fn()}
+        onRegister={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/⎇/)).toBeNull();
+  });
+
+  it("keeps zeros out of the line rather than rendering them", () => {
+    render(
+      <ProjectList
+        data={toProjects(WIRE)}
+        selected="pj_1"
+        observation={toObservation({
+          observation: { branch: "main", ahead: 0, behind: 0, dirty: 0, clean: true, error: null },
+        })}
+        onSelect={vi.fn()}
+        onRegister={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("⎇ main")).toBeTruthy();
   });
 });

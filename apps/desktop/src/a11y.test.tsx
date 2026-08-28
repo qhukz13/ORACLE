@@ -24,9 +24,12 @@ import { render } from "@testing-library/react";
 import axe from "axe-core";
 import { describe, expect, it } from "vitest";
 import { Briefing, toBriefing } from "./components/Briefing";
+import { Citations } from "./components/Citations";
 import { CommandPalette } from "./components/CommandPalette";
 import { DelegationPanel } from "./components/DelegationPanel";
+import { EgressPreview } from "./components/EgressPreview";
 import { GraphCard } from "./components/GraphCard";
+import { Inspector } from "./components/Inspector";
 import { KnowledgeHealth } from "./components/KnowledgeHealth";
 import { MemoryView } from "./components/MemoryView";
 import { PipelineCard } from "./components/PipelineCard";
@@ -35,7 +38,9 @@ import { TaskTree } from "./components/TaskTree";
 import { ConfirmationCenter } from "./components/ConfirmationCenter";
 import { TerminalDock } from "./components/TerminalDock";
 import { ToolCard } from "./components/ToolCard";
-import type { Approval, ToolCall } from "./protocol";
+import { ViewTabs } from "./components/ViewTabs";
+import type { Approval, GraphTask, ToolCall } from "./protocol";
+import type { Turn } from "./store";
 
 /** Rules happy-dom cannot answer honestly, because it does not lay anything out. */
 const DISABLED = {
@@ -448,6 +453,110 @@ describe("the P12 surfaces pass the standing audit", () => {
     );
     expect(new Set(labels).size).toBe(labels.length);
     expect(labels.some((l) => l?.includes("fix pipeline timeout"))).toBe(true);
+  });
+});
+
+// The three components the audit did not cover until 2026-08-28 — recorded as a gap in
+// current_state.md item 4 — plus P11-T5's new tab strip. Same rule as the 2026-08-26
+// additions: each renders the shape the app actually produces, not an empty one.
+
+const inspectedTask: GraphTask = {
+  taskId: "tk_2",
+  kind: "delegation",
+  status: "failed",
+  dependsOn: ["tk_1"],
+  objective: "make the regression tests pass",
+  role: "implementer",
+  agent: "claude",
+  attempt: 2,
+  maxAttempts: 3,
+  startedAt: "2026-08-28T10:00:00.000Z",
+  finishedAt: "2026-08-28T10:02:05.000Z",
+  cost: { tokens: 14000, usd: 0.42 },
+  evidence: { diff_lines: 120, observed: { passed: 40, failed: 3 } },
+  claim: "everything passes now",
+  supersedes: "tk_0",
+};
+
+describe("the components the audit missed, and the T5 surfaces", () => {
+  it("view tabs, with the panel they control", async () => {
+    // The tabs never render without their tabpanel in the app, and axe rightly flags a
+    // dangling `aria-controls` — so the audit renders the real pair.
+    const { container } = render(
+      <>
+        <ViewTabs stage="chat" onSwitch={() => {}} attn={{ briefing: true }} />
+        <div role="tabpanel" id="stage-panel" aria-labelledby="tab-chat" />
+      </>,
+    );
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it("inspector, with both a task and a turn", async () => {
+    const turn: Turn = {
+      turnId: "t1",
+      sessionId: "s1",
+      userText: "continue ORACLE",
+      reply: "dispatched",
+      done: true,
+      outcome: "completed",
+      tools: [call],
+    };
+    const { container } = render(
+      <Inspector turn={turn} traceId="tr_abc" onUndo={() => {}} task={inspectedTask} />,
+    );
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it("citations, including the tainted and degraded states", async () => {
+    const { container } = render(
+      <Citations
+        citations={[
+          {
+            chunkId: "ch_1",
+            project: "ORACLE",
+            path: "docs/SECURITY.md",
+            absPath: "C:\\Projects\\ORACLE\\docs\\SECURITY.md",
+            anchor: "6. Taint",
+            score: 0.81,
+            provenance: "local_owned",
+            indexedAt: "2026-08-27T10:00:00.000Z",
+          },
+          {
+            chunkId: "ch_2",
+            project: "notes",
+            path: "vault/agents.md",
+            absPath: "D:\\Vault\\agents.md",
+            anchor: "(file)",
+            score: 0.66,
+            provenance: "local_foreign",
+            indexedAt: "2026-08-27T10:00:00.000Z",
+          },
+        ]}
+        tainted
+        degraded
+        onOpen={() => {}}
+      />,
+    );
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it("egress preview", async () => {
+    const { container } = render(
+      <EgressPreview
+        preview={{
+          adapter: "claude",
+          destination: "api.anthropic.com",
+          tokens: 2820,
+          files: ["docs/current_task.md", "docs/ROADMAP.md"],
+          redactions: ["OPENAI_API_KEY"],
+          tainted_sources: ["docs/current_task.md"],
+          allowed_tools: ["fs.read", "dev.run_tests"],
+          dropped_excerpts: 1,
+          packet_dir: "D:\\ORACLE\\packets\\tk_9",
+        }}
+      />,
+    );
+    expect(await violations(container)).toEqual([]);
   });
 });
 

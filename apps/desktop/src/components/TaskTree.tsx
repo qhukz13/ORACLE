@@ -28,7 +28,9 @@
 import { depth, rankByLongestPath } from "../graph/rank";
 import type { Graph, GraphTask } from "../protocol";
 
-const STATUS_LABEL: Record<string, string> = {
+/** ORCHESTRATION.md §2's vocabulary, exactly, and in exactly one place — the Inspector's
+ *  task branch renders the same words, and two copies would drift. */
+export const STATUS_LABEL: Record<string, string> = {
   pending: "waiting on dependencies",
   ready: "ready",
   waiting: "NEEDS YOU",
@@ -46,6 +48,9 @@ export interface TaskTreeProps {
   graphs: Graph[];
   onCancelTask(rootId: string, taskId: string): void;
   onCancelGraph(rootId: string): void;
+  /** Selection drives the inspector — one selection model across the app (UI.md §21).
+   *  Optional so the tree can render where nothing inspects (fixtures, older tests). */
+  onSelect?(taskId: string): void;
 }
 
 function evidenceLine(task: GraphTask): string | null {
@@ -118,6 +123,7 @@ function TaskRow({
   rootId,
   stage,
   onCancel,
+  onSelect,
   superseded = [],
 }: {
   task: GraphTask;
@@ -125,6 +131,7 @@ function TaskRow({
   /** Longest-path column: how many stages must complete before this one can start. */
   stage?: number;
   onCancel(rootId: string, taskId: string): void;
+  onSelect?(taskId: string): void;
   /** The attempts this row replaced, newest first. Rendered inside this row so a replan
    *  reads as one story rather than as several unrelated failures. */
   superseded?: GraphTask[];
@@ -139,7 +146,18 @@ function TaskRow({
             {stage + 1}
           </span>
         )}
-        <span className="tt-id">{task.taskId}</span>
+        {onSelect ? (
+          <button
+            type="button"
+            className="tt-id"
+            aria-label={`inspect ${task.taskId}${task.objective ? ` — ${task.objective}` : ""}`}
+            onClick={() => onSelect(task.taskId)}
+          >
+            {task.taskId}
+          </button>
+        ) : (
+          <span className="tt-id">{task.taskId}</span>
+        )}
         <span className="tt-kind">{task.kind}</span>
         {task.role && <span className="tt-role">{task.role}</span>}
         {/* Absent, not em-dashed: a TOOL task genuinely has no agent, and a placeholder
@@ -189,6 +207,7 @@ function TaskRow({
                 task={attempt}
                 rootId={rootId}
                 onCancel={onCancel}
+                onSelect={onSelect}
               />
             ))}
           </ol>
@@ -236,7 +255,7 @@ function arrange(tasks: GraphTask[]): { task: GraphTask; superseded: GraphTask[]
   return rows;
 }
 
-export function TaskTree({ graphs, onCancelTask, onCancelGraph }: TaskTreeProps) {
+export function TaskTree({ graphs, onCancelTask, onCancelGraph, onSelect }: TaskTreeProps) {
   if (graphs.length === 0) return null;
   return (
     <section className="task-trees" aria-label="Task graphs">
@@ -276,6 +295,7 @@ export function TaskTree({ graphs, onCancelTask, onCancelGraph }: TaskTreeProps)
                   superseded={superseded}
                   rootId={graph.rootId}
                   onCancel={onCancelTask}
+                  onSelect={onSelect}
                 />
               ))}
             </ol>

@@ -17,14 +17,18 @@ import { ConfirmationCenter } from "./components/ConfirmationCenter";
 import { DelegationPanel } from "./components/DelegationPanel";
 import { Briefing, toBriefing } from "./components/Briefing";
 import type { BriefingData } from "./components/Briefing";
-import { ProjectList, toProjects } from "./components/ProjectList";
-import type { ProjectRow, ProjectsData } from "./components/ProjectList";
+import { ProjectList, toObservation, toProjects } from "./components/ProjectList";
+import type { Observation, ProjectRow, ProjectsData } from "./components/ProjectList";
 import { MemoryView, toFacts } from "./components/MemoryView";
 import type { MemoryFact } from "./components/MemoryView";
+import { KnowledgeHealth, toHealth } from "./components/KnowledgeHealth";
+import type { KnowledgeHealthData } from "./components/KnowledgeHealth";
 import { TaskTree } from "./components/TaskTree";
 import { Inspector } from "./components/Inspector";
 import { TerminalDock } from "./components/TerminalDock";
 import { ToolCard } from "./components/ToolCard";
+import { ViewTabs } from "./components/ViewTabs";
+import type { Stage } from "./components/ViewTabs";
 import { useStore } from "./store";
 
 const STATE_LABEL: Record<string, string> = {
@@ -40,7 +44,14 @@ const STATE_LABEL: Record<string, string> = {
   halted: "HALTED",
 };
 
-type Stage = "chat" | "events" | "memory" | "briefing";
+/** What is selected, app-wide: a turn or a task. One selection model drives the
+ *  inspector (docs/UI.md §21 rule 1) — the P12-T4 stopgap that pushed a task id into a
+ *  turn-only selector is exactly the bug a second selection model produces. */
+type Selection = { kind: "turn" | "task"; id: string } | null;
+
+/** Ctrl+digit → stage, for the four primary views (docs/UI.md §16, corrected in place:
+ *  Orbit takes a slot when it exists — it is P11-T2, gated on OQ-14). */
+const STAGE_KEYS: Record<string, Stage> = { "1": "chat", "2": "tasks", "3": "events", "4": "memory" };
 
 const NO_PROJECTS: ProjectsData = { projects: [], candidates: [], projectsRoot: "" };
 
@@ -52,10 +63,11 @@ export default function App() {
   const [sidebar, setSidebar] = useState(true);
   const [dock, setDock] = useState(false);
   const [inspector, setInspector] = useState(true);
-  const [selectedTurn, setSelectedTurn] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Selection>(null);
   const [projects, setProjects] = useState<string[]>([]);
   const [tracked, setTracked] = useState<ProjectsData>(NO_PROJECTS);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [observation, setObservation] = useState<Observation | null>(null);
   const [briefing, setBriefing] = useState<BriefingData | null>(null);
   //: Set once, after the first briefing arrives. Without it, dismissing the briefing
   //: would be undone by the next fetch deciding to show it again.
@@ -63,6 +75,7 @@ export default function App() {
   const [pipelines, setPipelines] = useState<PipelineEntry[]>([]);
   const [projectsRoot, setProjectsRoot] = useState("");
   const [facts, setFacts] = useState<MemoryFact[]>([]);
+  const [health, setHealth] = useState<KnowledgeHealthData | null>(null);
   const clientRef = useRef<OracleClient | null>(null);
   const logEnd = useRef<HTMLDivElement>(null);
 
@@ -117,6 +130,29 @@ export default function App() {
       cancelled = true;
     };
   }, [s.connection, projectSeq]);
+
+  // The SELECTED project's observed half — branch, ahead/behind, dirty — read fresh on
+  // every selection and every task event, held nowhere else. One row by design: the
+  // full fan-out misses the 1 s budget 2–3× and the toolhost serialises invocations, so
+  // observing rows nobody is looking at would queue behind real work (OQ-24, measured
+  // 2026-08-28 by scripts/measure_observation.py).
+  useEffect(() => {
+    if (!selectedProject) {
+      setObservation(null);
+      return;
+    }
+    let cancelled = false;
+    setObservation(null); // never show one project's branch on another project's row
+    fetch(`/api/v1/projects/${encodeURIComponent(selectedProject)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d) setObservation(toObservation(d));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProject, projectSeq]);
 
   // The briefing is fetched, never streamed, and **reading it does not consume it**
   // (docs/PROJECT_STATE.md#6). Only the dismiss button acknowledges.
@@ -200,6 +236,37 @@ export default function App() {
     clientRef.current?.send({ type: "memory.forget", payload: { fact_id: factId } });
   }, []);
 
+  // Index health is named state like the rest: REST, re-read when a knowledge event
+  // lands. The watcher indexes in the background, so the numbers move without a turn.
+  const knowledgeSeq = useMemo(
+    () => s.events.filter((e) => e.type.startsWith("knowledge.")).length,
+    [s.events],
+  );
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/v1/knowledge")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d) setHealth(toHealth(d));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [s.connection, knowledgeSeq]);
+
+  const reindex = useCallback((full: boolean) => {
+    // Through the API and therefore through the tool layer and the policy gate — the
+    // UI computes nothing and executes nothing (docs/API.md, `POST /knowledge/reindex`).
+    fetch(`/api/v1/knowledge/reindex?full=${full ? "true" : "false"}`, { method: "POST" })
+      .then(() => fetch("/api/v1/knowledge"))
+      .then((r) => (r && r.ok ? r.json() : null))
+      .then((d) => {
+        if (d) setHealth(toHealth(d));
+      })
+      .catch(() => undefined);
+  }, []);
+
   useEffect(() => {
     logEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [s.turns, s.events, stage]);
@@ -208,12 +275,17 @@ export default function App() {
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return false;
-      return Boolean(
+      const sent = Boolean(
         clientRef.current?.send({
           type: "session.message",
           payload: { text: trimmed, session_id: s.sessionId },
         }),
       );
+      // §2: a new conversation auto-switches to Chat. This is the one stage change the
+      // agent may make (§21 rule 6) — and it is really the user's: every caller of
+      // submit is the composer, the palette, or a sidebar click.
+      if (sent) setStage("chat");
+      return sent;
     },
     [s.sessionId],
   );
@@ -315,6 +387,16 @@ export default function App() {
       } else if (e.ctrlKey && e.altKey && e.shiftKey && e.key.toLowerCase() === "h") {
         e.preventDefault();
         halt();
+      } else {
+        // Ctrl+1..4 → the four primary stages (UI.md §16). `!altKey` matters: AltGr
+        // arrives as Ctrl+Alt, and a layout where AltGr+digit types a character must
+        // not lose the character to a stage switch.
+        const to =
+          (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey ? STAGE_KEYS[e.key] : undefined;
+        if (to) {
+          e.preventDefault();
+          setStage(to);
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -329,6 +411,13 @@ export default function App() {
   }, [s.connection, s.retryInSec]);
 
   const waiting = s.approvals.length;
+
+  // Resolved from the store on every render, never held: MAX_GRAPHS bounds the search
+  // to at most 5 × 12 tasks, and a held copy is a projection that gets to disagree.
+  const selectedTask =
+    selection?.kind === "task"
+      ? (s.graphs.flatMap((g) => g.tasks).find((t) => t.taskId === selection.id) ?? null)
+      : null;
 
   return (
     <div className="app">
@@ -348,25 +437,13 @@ export default function App() {
           </span>
         )}
         <span className="meta">seq {s.lastSeq}</span>
-        <button className="ghost" onClick={() => setStage(stage === "chat" ? "events" : "chat")}>
-          {stage === "chat" ? "Events" : "Chat"}
-        </button>
-        <button
-          className="ghost"
-          onClick={() => setStage(stage === "memory" ? "chat" : "memory")}
-          title="what ORACLE has recorded, and why"
-        >
-          {stage === "memory" ? "Chat" : "Memory"}
-        </button>
-        {/* Demoted to a badge once acknowledged, never removed: the briefing is where
-            "what happened while I was away" lives, and it must stay reachable. */}
-        <button
-          className={`ghost${briefing && !briefing.empty ? " attn" : ""}`}
-          onClick={() => setStage(stage === "briefing" ? "chat" : "briefing")}
-          title="what happened while you were away"
-        >
-          {stage === "briefing" ? "Chat" : "Briefing"}
-        </button>
+        {/* The briefing tab keeps its badge until acknowledged, never removed: "what
+            happened while I was away" must stay reachable (docs/UI.md §7b). */}
+        <ViewTabs
+          stage={stage}
+          onSwitch={setStage}
+          attn={{ briefing: Boolean(briefing && !briefing.empty) }}
+        />
         <button className="halt" onClick={halt} title="HALT — Ctrl+Alt+Shift+H">
           HALT
         </button>
@@ -412,6 +489,7 @@ export default function App() {
             <ProjectList
               data={tracked}
               selected={selectedProject}
+              observation={observation}
               onSelect={(p: ProjectRow) => {
                 setSelectedProject(p.id);
                 submit(`continue ${p.name}`);
@@ -435,23 +513,61 @@ export default function App() {
         )}
 
         <main className="stage">
+          {/* The safety surface is not a tab. Approvals and running delegations stay
+              visible on every stage — a card that can be hidden behind a view switch is
+              a card that expires unseen (approvals expire in 180 s). */}
           <ConfirmationCenter approvals={s.approvals} decided={s.decided} onRespond={respond} />
           <DelegationPanel delegations={s.delegations} onDiscard={discard} />
-          <TaskTree
-            graphs={s.graphs}
-            onCancelTask={cancelTask}
-            onCancelGraph={cancelGraph}
-          />
 
+          <div role="tabpanel" id="stage-panel" aria-labelledby={`tab-${stage}`}>
           {stage === "briefing" ? (
             <Briefing
               data={briefing ?? { throughSeq: 0, sinceTs: null, empty: true, text: "", projects: [], system: { restartedAt: null, unclean: false, degraded: [], errors: 0 } }}
               onAcknowledge={acknowledge}
-              onInspect={(taskId) => setSelectedTurn(taskId)}
+              // A task id selects a TASK. Until 2026-08-28 this pushed the id into the
+              // turn selector, where it matched nothing and the inspector silently showed
+              // the latest turn instead — it looked right and was wrong (the P12-T4
+              // stopgap). Opening the rail is part of the affordance: an inspect button
+              // that selects into a closed inspector did nothing visible.
+              onInspect={(taskId) => {
+                setSelection({ kind: "task", id: taskId });
+                setInspector(true);
+              }}
               onOpenProject={openProject}
             />
           ) : stage === "memory" ? (
             <MemoryView facts={facts} onForget={forget} />
+          ) : stage === "tasks" ? (
+            s.graphs.length > 0 ? (
+              <TaskTree
+                graphs={s.graphs}
+                onCancelTask={cancelTask}
+                onCancelGraph={cancelGraph}
+                onSelect={(taskId) => {
+                  setSelection({ kind: "task", id: taskId });
+                  setInspector(true);
+                }}
+              />
+            ) : (
+              // §17: empty is a stated absence, never a blank page.
+              <div className="empty">
+                <p>No task graphs yet.</p>
+                <p className="muted">
+                  A graph appears when a plan is approved. The <code>oracle-selfcheck</code>{" "}
+                  pipeline is the local, no-egress way to run a first one.
+                </p>
+              </div>
+            )
+          ) : stage === "knowledge" ? (
+            health ? (
+              <KnowledgeHealth
+                data={health}
+                reindexing={s.indexing?.state === "indexing"}
+                onReindex={reindex}
+              />
+            ) : (
+              <p className="muted">Reading the index…</p>
+            )
           ) : stage === "events" ? (
             <table className="events">
               <thead>
@@ -486,8 +602,10 @@ export default function App() {
               {s.turns.map((t) => (
                 <li
                   key={t.turnId}
-                  className={t.turnId === selectedTurn ? "sel" : undefined}
-                  onClick={() => setSelectedTurn(t.turnId)}
+                  className={
+                    selection?.kind === "turn" && selection.id === t.turnId ? "sel" : undefined
+                  }
+                  onClick={() => setSelection({ kind: "turn", id: t.turnId })}
                 >
                   <div className="msg user">{t.userText}</div>
                   {t.tools.map((call, i) => (
@@ -504,15 +622,24 @@ export default function App() {
               ))}
             </ul>
           )}
+          </div>
           <div ref={logEnd} />
         </main>
 
         {inspector && (
           <Inspector
-            // Defaults to the most recent turn: that is the one being watched.
-            turn={s.turns.find((t) => t.turnId === selectedTurn) ?? s.turns.at(-1) ?? null}
+            // Defaults to the most recent turn: that is the one being watched. A task
+            // selection renders above it rather than instead of it (the inspector's own
+            // header explains why).
+            turn={
+              selection?.kind === "turn"
+                ? (s.turns.find((t) => t.turnId === selection.id) ?? s.turns.at(-1) ?? null)
+                : (s.turns.at(-1) ?? null)
+            }
             traceId={s.events.at(-1)?.trace_id ?? ""}
             onUndo={undo}
+            task={selectedTask}
+            taskMissing={selection?.kind === "task" && !selectedTask ? selection.id : null}
           />
         )}
       </div>

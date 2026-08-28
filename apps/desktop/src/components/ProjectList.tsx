@@ -10,11 +10,14 @@
  *     root on this machine holds `New folder` and `docs.zip` next to the real ones, which
  *     is exactly why registration is an explicit act and why these are collapsed.
  *
- * **Branch and dirty count are deliberately absent.** Producing them for every row means a
- * `git` subprocess per project on every render, and that fan-out is unmeasured
- * (docs/OPEN_QUESTIONS.md#oq-24). Caching them instead would make the sidebar lie the
- * moment somebody switches branches in their editor — the failure the whole subsystem is
- * shaped to avoid. They arrive per-row, lazily, once OQ-24 has a number.
+ * **Branch and dirty count arrive lazily, for the selected row only.** OQ-24 has its
+ * number (2026-08-28, `scripts/measure_observation.py`): the full 8-row fan-out costs
+ * 1.7–2.7 s warm under load — 2–3× over the 1 s budget — and the toolhost serialises
+ * invocations, so an eager fan-out would also queue behind real work. So the row that is
+ * being looked at is the row that gets observed, read fresh on every selection and every
+ * task event, held nowhere. Caching instead would make the sidebar lie the moment
+ * somebody switches branches in their editor — the failure the whole subsystem is shaped
+ * to avoid.
  */
 
 import { asRecord, num, str } from "../protocol";
@@ -36,6 +39,29 @@ export interface ProjectsData {
   projects: ProjectRow[];
   candidates: string[];
   projectsRoot: string;
+}
+
+/** The observed half of one project — `GET /api/v1/projects/{id}`'s `observation`,
+ *  which the server reads fresh through the tool layer on every call. */
+export interface Observation {
+  branch: string;
+  ahead: number;
+  behind: number;
+  dirty: number;
+  clean: boolean;
+  error: string;
+}
+
+export function toObservation(raw: unknown): Observation {
+  const o = asRecord(asRecord(raw).observation);
+  return {
+    branch: str(o.branch),
+    ahead: num(o.ahead),
+    behind: num(o.behind),
+    dirty: num(o.dirty),
+    clean: o.clean === true,
+    error: str(o.error),
+  };
 }
 
 const STATUSES: ReadonlySet<string> = new Set(["active", "idle", "archived", "missing"]);
@@ -77,11 +103,23 @@ const MARK: Record<ProjectStatus, string> = {
 export interface ProjectListProps {
   data: ProjectsData;
   selected?: string | null;
+  /** Fresh observation for the SELECTED row, or null while it loads / when nothing is
+   *  selected. One row's worth by design — the fan-out misses the budget (OQ-24). */
+  observation?: Observation | null;
   onSelect(project: ProjectRow): void;
   onRegister(name: string): void;
 }
 
-export function ProjectList({ data, selected, onSelect, onRegister }: ProjectListProps) {
+/** `⎇ main ↑3 ↓1 ~2` — the UI.md §4 line, with zeros absent rather than rendered. */
+function gitLine(o: Observation): string {
+  const parts = [`⎇ ${o.branch}`];
+  if (o.ahead > 0) parts.push(`↑${o.ahead}`);
+  if (o.behind > 0) parts.push(`↓${o.behind}`);
+  if (o.dirty > 0) parts.push(`~${o.dirty}`);
+  return parts.join(" ");
+}
+
+export function ProjectList({ data, selected, observation, onSelect, onRegister }: ProjectListProps) {
   const { projects, candidates } = data;
 
   return (
@@ -118,6 +156,17 @@ export function ProjectList({ data, selected, onSelect, onRegister }: ProjectLis
               {p.openTasks > 0 && (
                 <span className="pj-count" title={`${p.openTasks} open`}>
                   {p.openTasks}
+                </span>
+              )}
+              {/* Only on the selected row, read fresh each time (OQ-24). An observation
+                  that errored renders nothing extra: the status word already carries
+                  `missing`, and a not-a-repo project has no branch to show. */}
+              {selected === p.id && observation && !observation.error && observation.branch && (
+                <span
+                  className="pj-git"
+                  title={`branch ${observation.branch} · ${observation.ahead} ahead · ${observation.behind} behind · ${observation.dirty} dirty`}
+                >
+                  {gitLine(observation)}
                 </span>
               )}
             </button>
