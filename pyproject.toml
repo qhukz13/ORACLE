@@ -42,6 +42,7 @@ dev = [
     "ruff>=0.7",
     "mypy>=1.13",
     "hypothesis>=6.100",
+    "pytest-timeout>=2.4.0",
 ]
 
 [project.scripts]
@@ -69,6 +70,9 @@ ignore = ["S101"]
 # The security suite must build REAL junctions with mklink; a mocked reparse point
 # would encode the very assumption the suite exists to disprove.
 "tests/security/*" = ["S105", "S106", "RUF001", "S603", "S607", "ASYNC221", "ASYNC240"]
+# Delegation tests assert on workspace paths after awaiting the service; the Path
+# calls are on tmp dirs and the suite is not trio/anyio.
+"tests/test_delegation_service.py" = ["ASYNC240"]
 # Few-shot examples are literal prompt content, not code. Wrapping them would change
 # what the model sees, and RUF001 flags Cyrillic as "ambiguous" in what is deliberately
 # a bilingual prompt.
@@ -78,6 +82,16 @@ ignore = ["S101"]
 # "ambiguous" in what is deliberately a bilingual prompt.
 "src/oracle/router/selection.py" = ["E501", "RUF001"]
 "scripts/*" = ["E501"]
+# A one-shot CLI, not the daemon: an async main that touches Path is fine here, and
+# the alternative is threading every stat call in a script that runs once by hand.
+"scripts/verify_mcp_live.py" = ["E501", "ASYNC240"]
+# ASYNC250: the egress confirmation is a blocking `input()` inside an async main, and
+# that is the point — nothing else may proceed while a human decides whether ~20 planning
+# calls leave the machine. Same one-shot-CLI reasoning as verify_mcp_live.py above.
+"scripts/verify_agy_planning.py" = ["E501", "ASYNC240", "ASYNC250"]
+# Same one-shot-CLI reasoning: it reads the fixture file and writes one JSON result from
+# an async main, and there is no event loop with anything else on it to starve.
+"scripts/translate_fixtures.py" = ["E501", "ASYNC240"]
 # ASYNC240: tool handlers do blocking file I/O on purpose. They execute inside the
 # toolhost child, which handles exactly one invocation at a time and has no event loop
 # to starve (ADR-0003). Making them async-file-aware would add noise to every handler
@@ -116,3 +130,9 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 filterwarnings = ["error"]
+# A hang under a CPU-starved gate run is expensive to bisect (one hung on 2026-08-26,
+# passed on retry). 120 s is far above any legitimate test — the slowest, the
+# terminal/recovery ones, finish well under 60 s — so this only converts hangs into
+# failures with a name. timeout_method stays unset: the plugin defaults to the thread
+# method on Windows, and the signal method does not exist here.
+timeout = 120

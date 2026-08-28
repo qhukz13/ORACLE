@@ -38,6 +38,27 @@ CRITICAL_TYPES: Final[frozenset[str]] = frozenset(
         "task.created",
         "task.updated",
         "task.finished",
+        # A pipeline run's boundary. Critical because `pipeline.finished` carries the run
+        # record — the one thing about a run that is not reconstructible from the task
+        # rows, since it also holds what the parameters *omitted*. The steps themselves
+        # emit ordinary `task.*`: a pipeline is a task graph, so there is no second
+        # per-step event type and a consumer needs no new vocabulary to render one.
+        "pipeline.started",
+        "pipeline.finished",
+        # Where a `continue` objective came from: how many open tasks ORACLE found, and
+        # which of the project's own files were quoted into it (PROJECT_STATE.md §5).
+        # Critical rather than coalescable because it is the provenance record for a
+        # planning decision — the approval card that follows says the objective is
+        # partly untrusted, and this is the event that says how it got that way. One
+        # per `continue`, so it costs the queue nothing.
+        "continue.derived",
+        # The daemon's own lifecycle. Critical because the briefing's answer to "did
+        # ORACLE die while nobody was looking?" is built from them: a silent gap in the
+        # log is indistinguishable from "nothing happened", so the boot event carries
+        # whether the previous run ended cleanly. This is the mitigation for ADR-0025's
+        # named risk — a background service failing invisibly at 04:00.
+        "system.boot",
+        "system.shutdown",
         "error",
         "system.degraded",
     }
@@ -60,6 +81,9 @@ KNOWN_TYPES: Final[frozenset[str]] = CRITICAL_TYPES | frozenset(
         "term.output",
         "term.opened",
         "term.closed",
+        # A delegated agent's live feed. Coalescable on purpose: a dropped `thinking`
+        # line is cosmetic, and every decision lives on the critical `task.*` types.
+        "delegate.event",
         "log.entry",
         "system.metrics",
     }
@@ -99,6 +123,9 @@ class Event(BaseModel):
             "type": self.type,
             "session_id": self.session_id,
             "turn_id": self.turn_id,
+            # Added with `delegate.event`/`task.*` (P6-T2): the UI groups a delegation's
+            # feed by this. Older clients ignore unknown fields by contract.
+            "task_id": self.task_id,
             "trace_id": self.trace_id,
             "payload": self.payload,
         }

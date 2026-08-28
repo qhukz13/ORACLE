@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
@@ -42,6 +43,14 @@ MAX_PER_FILE = 3
 #: `has_lexical_purchase` — it is a floor under the percentage, not an alternative to it.
 MIN_DF_CEILING = 5
 
+#: The share of a question's answerable terms that must survive the gate before the
+#: lexical list is admitted at all. Below it, BM25 is ranking on a fragment of the
+#: question while RRF treats its thirty results as a peer opinion — measured on the one
+#: Latin word inside a Russian sentence, which cost `ru-token-refresh` its top-5 slot
+#: under both embedding models. Chosen from a plateau: 30%, 40% and 50% score
+#: identically, and 60% starts dropping English questions that BM25 does answer.
+MIN_QUESTION_COVERAGE = 0.40
+
 BOOST_SAME_PROJECT = 1.30
 BOOST_RECENT = 1.15
 BOOST_ANCHOR_MATCH = 1.20
@@ -61,6 +70,10 @@ class Retrieved:
     strategy: str
     dense_count: int
     lexical_count: int
+    #: Candidates from the translated probe, 0 when it did not run or produced nothing.
+    #: Reported rather than inferred from `strategy` so "translation was on and returned
+    #: nothing" is distinguishable from "translation was never asked for".
+    translated_count: int = 0
 
 
 def _fts_term(term: str) -> str:
@@ -102,31 +115,52 @@ def discriminating_terms(
     evidence either. `max_df_ratio` has a floor (`MIN_DF_CEILING`) so a small index does
     not classify every term as ubiquitous and gate itself out entirely.
 
-    **The denominator is per script, and that was a bug.** Document frequency measures
-    rarity *in the corpus*, which is only the same thing as uninformativeness when the
-    corpus and the query share a language. `the` appears in most of an English corpus and
-    is correctly dropped; `как` — the same kind of word — appeared in 0.8% of this corpus
-    and read as highly discriminating, because the corpus is mostly English. A Russian
-    question then retrieved GrowAMonster's Russian documentation for every query, matching
-    on `как`, `внутри`, `она` and `имеет`, and RRF pushed the correct dense hits down.
-    Measured against the Cyrillic sub-corpus instead, `как` is 10% and drops out.
+    **A term in a script the corpus is not written in is dropped, at any frequency.**
+    This supersedes the per-script denominator of 2026-08-22, which was the right
+    diagnosis and the wrong remedy. Document frequency measures rarity *in the corpus*,
+    which is only the same thing as uninformativeness when the corpus and the query share
+    a language: `как` was in 0.8% of this mostly-English corpus and so read as highly
+    discriminating. Scoping its denominator to the Cyrillic sub-corpus did drop `как` —
+    and moved recall not at all, because the words underneath it are no better. In a
+    corpus that is 6% Cyrillic, `если` sits at 4% of the Russian and survives; the rare
+    ones (`обучения`, df=1) match the one unrelated Russian project in the corpus. Either
+    way BM25 answers from the wrong neighbourhood and RRF admits it as an equal opinion.
+
+    Measured over the full corpus (2026-08-24, `logs/development/2026-08-24-oq02-bge-m3.md`):
+    admitting minority-script terms costs **12 points of cross-language recall@5** and
+    5 overall. Dropping them is not "ignore Cyrillic" — the test is *minority*, so a
+    Russian-majority corpus gates out Latin instead, and the majority path is untouched.
     """
     total = store.db.execute("SELECT COUNT(*) AS n FROM chunks").fetchone()["n"]
     if not total:
         return []
-    # None on an index built before the census existed; falling back to the whole corpus
-    # is exactly the old behaviour, which is the right thing for an older index.
+    # None on an index built before the census existed. Without it the script of the
+    # corpus is unknown, so no term can be called minority and the filter does not
+    # apply — an index built by an older version is not a broken one.
     cyrillic = store.script_census()
+    majority_is_cyrillic = cyrillic is not None and cyrillic * 2 > total
+    ceiling = max(MIN_DF_CEILING, total * max_df_ratio)
+
     kept: list[str] = []
+    answerable = 0
     for term in dict.fromkeys(t for t in _TERM.findall(question) if len(t) > 2):
-        scoped = cyrillic if (cyrillic and _CYRILLIC.search(term)) else total
-        ceiling = max(MIN_DF_CEILING, scoped * max_df_ratio)
-        row = store.db.execute(
+        df = store.db.execute(
             "SELECT COUNT(*) AS n FROM chunks_fts WHERE chunks_fts MATCH ?",
             (_fts_term(term),),
-        ).fetchone()
-        if 0 < row["n"] < ceiling:
+        ).fetchone()["n"]
+        # A term in no document is not something BM25 declined to answer — it is not
+        # part of the question BM25 was asked. Counting it would let a typo or a novel
+        # identifier close the gate on a question the lexical half handles well.
+        if df == 0:
+            continue
+        answerable += 1
+        if cyrillic is not None and bool(_CYRILLIC.search(term)) is not majority_is_cyrillic:
+            continue
+        if df < ceiling:
             kept.append(term)
+
+    if not kept or len(kept) / answerable < MIN_QUESTION_COVERAGE:
+        return []
     return kept
 
 
@@ -187,8 +221,21 @@ def retrieve(
     project: str | None = None,
     limit: int = TOP_K,
     now: datetime | None = None,
+    translator: Callable[[str], str | None] | None = None,
 ) -> Retrieved:
-    """The full pipeline: two retrievers, fusion, boosts, diversity, top-k."""
+    """The full pipeline: two retrievers, fusion, boosts, diversity, top-k.
+
+    `translator` adds a **second dense probe** for a question written in a script the
+    corpus is not (OQ-18, `rag/translate.py`). It is a plain callable returning `None`
+    rather than a provider, for two reasons: this function is synchronous and runs in a
+    worker thread, and — more importantly — a retrieval path must not be able to reach
+    the LLM layer. What arrives here is a string or nothing.
+
+    Passing it is a caller's decision, not a default, and the callers disagree on purpose:
+    the Handoff Packet passes one because a delegation takes minutes, and `know.search`
+    does not because the interactive budget has ~70 ms of headroom against a 63 ms p50
+    probe (RAG.md §5).
+    """
     now = now or datetime.now(UTC)
 
     vector = embedder.encode([question], QUERY)[0]
@@ -203,8 +250,28 @@ def retrieve(
         )
         strategy = "hybrid" if lexical else "dense"
 
-    by_id = {h.chunk_id: h for h in (*dense, *lexical)}
+    # The second probe. Everything about it is allowed to be missing: no translator, no
+    # model, a refusal, a timeout, a translation that did not translate. Each lands here
+    # as `None` and leaves the ranking exactly as it was.
+    translated: list[Hit] = []
+    # Truthiness, not `is not None`: an empty translation is not a translation, and
+    # embedding `""` produces a probe that ranks the corpus by nothing in particular.
+    # `translate_to_english` already refuses one — this is the second lock, because the
+    # seam is a plain callable and the next caller to pass one may not.
+    if translator is not None and (english := translator(question)):
+        translated = store.search_dense(
+            embedder.encode([english], QUERY)[0],
+            CANDIDATES,
+            collection=collection,
+            project=project,
+        )
+        if translated:
+            strategy += "+translated"
+
+    by_id = {h.chunk_id: h for h in (*dense, *translated, *lexical)}
     rankings = [[h.chunk_id for h in dense]]
+    if translated:
+        rankings.append([h.chunk_id for h in translated])
     if lexical:
         rankings.append([h.chunk_id for h in lexical])
     fused = rrf(rankings)
@@ -220,6 +287,7 @@ def retrieve(
         "rag.retrieved",
         strategy=strategy,
         dense=len(dense),
+        translated=len(translated),
         lexical=len(lexical),
         returned=len(hits),
     )
@@ -233,6 +301,7 @@ def retrieve(
         strategy=strategy,
         dense_count=len(dense),
         lexical_count=len(lexical),
+        translated_count=len(translated),
     )
 
 

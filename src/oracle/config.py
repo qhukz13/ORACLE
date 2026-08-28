@@ -46,6 +46,21 @@ class Settings(BaseSettings):
     #: which directories ORACLE is allowed to read, and that decision is versioned.
     collections_path: Path = Path("config/collections.yaml")
 
+    #: Which agent may hold which role (PLANNER.md §5). Beside policy for the third time
+    #: and the same reason: a plan must not be able to give itself an executor, so the
+    #: list of executors is versioned data a human edits.
+    registry_path: Path = Path("config/agents.yaml")
+    #: Rung 2 of the planner ladder (PLANNER.md §6). Data, beside the registry and
+    #: policy, and read the same way: an unreadable file means no templates, which the
+    #: ladder already knows how to handle.
+    plan_templates_path: Path = Path("config/plan_templates.yaml")
+
+    #: Owner-authored pipelines (PIPELINES.md §2), beside policy and the registry and for
+    #: the same reason: a file that decides what runs unattended is a file a human edits
+    #: and git records. Per-project pipelines are discovered separately, under each
+    #: project's `.oracle/pipelines/`, and are treated as untrusted repository content.
+    pipelines_dir: Path = Path("config/pipelines")
+
     #: Start the tool host at boot so the first tool call does not pay ~1.2 s of
     #: process startup. Tests disable it to stay hermetic and fast.
     prewarm_toolhost: bool = True
@@ -53,6 +68,16 @@ class Settings(BaseSettings):
     #: Keep `knowledge.db` current while the daemon runs (RAG.md §6). Off in tests: it
     #: would put real filesystem watches on the developer's projects during a unit run.
     watch_knowledge: bool = True
+
+    #: Translate a minority-script question into the corpus's language and retrieve with
+    #: a second dense probe, **on the Handoff Packet path only** (OQ-18, RAG.md §5).
+    #:
+    #: A switch rather than a constant because it is the rollback: turning it off returns
+    #: packet retrieval to exactly today's behaviour, and nothing else in the system
+    #: depends on it. It is also the honest place to put a mechanism whose benefit was
+    #: measured on this corpus and this router model — somebody with a different corpus
+    #: should be able to turn it off without editing code.
+    translate_queries: bool = True
 
     @property
     def db_path(self) -> Path:

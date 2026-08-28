@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -248,15 +249,65 @@ class TestAttribution:
         assert result.tainted is False
 
 
-class TestTheDenominatorIsPerScript:
-    """Document frequency measures rarity in the corpus, not uninformativeness.
+class TestTheGateNeedsMostOfTheQuestion:
+    """One surviving term is a thin basis for a thirty-result second opinion.
 
-    Those are the same thing only when the corpus and the query share a language. `the`
-    is in most of an English corpus and is correctly dropped; `как` — the same kind of
-    word — was in 0.8% of this corpus and read as *highly discriminating*, because the
-    corpus is mostly English. Every Russian question then pulled in whichever Russian
-    documents existed, matching on `как`, `внутри` and `она`, and RRF pushed the correct
-    dense hits down. Measured in `logs/development/2026-08-22-fusion-denominator.md`.
+    BM25 ranking on a fragment of a question is still a full ranking, and RRF admits it
+    as a peer. The measured case is a Latin word inside a Russian sentence — `refresh` in
+    `ru-token-refresh` — which opened the gate on its own and cost that case its top-5
+    slot under *both* embedding models. See `MIN_QUESTION_COVERAGE`.
+    """
+
+    def index(self, tmp_path: Path) -> KnowledgeStore:
+        store = KnowledgeStore(tmp_path / "coverage.db", DIM)
+        store.bind("fake", DIM)
+        for i in range(190):
+            extra = " PairingService" if i == 0 else ""
+            _put(store, f"en{i}.md", [f"the service handles request {i}{extra}"], [[1.0, 0, 0, 0]])
+        store.record_script_census()
+        return store
+
+    def test_one_term_out_of_many_does_not_open_the_gate(self, tmp_path: Path) -> None:
+        store = self.index(tmp_path)
+        # `the`, `service` and `request` are in every chunk; only `PairingService` is
+        # discriminating, and one term in five is not enough of the question.
+        assert discriminating_terms("the service that handles request PairingService", store) == []
+
+    def test_a_bare_identifier_is_the_whole_question_and_does(self, tmp_path: Path) -> None:
+        """The rule is a *share*, not a count — searching for one identifier is the case
+        the lexical half exists for, and it must survive the fix that closed the gate on
+        a stray word."""
+        assert discriminating_terms("PairingService", self.index(tmp_path)) == ["PairingService"]
+
+    def test_a_term_in_no_document_is_not_counted_against_coverage(self, tmp_path: Path) -> None:
+        """A term BM25 cannot answer is not a term BM25 declined to answer. Counting
+        absent words would let one typo close the gate on a question it handles well."""
+        store = self.index(tmp_path)
+        assert discriminating_terms("PairingService zzzznotinthecorpus", store) == [
+            "PairingService"
+        ]
+
+
+class TestOnlyTheMajorityScriptReachesBM25:
+    """BM25 sees a query term only if the corpus is written in that term's script.
+
+    Document frequency measures rarity in the corpus, not uninformativeness, and those
+    are the same thing only when the corpus and the query share a language. `the` is in
+    most of an English corpus and is correctly dropped; `как` — the same kind of word —
+    was in 0.8% of this corpus and read as *highly discriminating*, because the corpus is
+    mostly English. Every Russian question then pulled in whichever Russian documents
+    existed, matching on `как`, `внутри` and `она`, and RRF pushed the correct dense
+    hits down (`logs/development/2026-08-22-fusion-denominator.md`).
+
+    **The first remedy was a per-script denominator, and it was not enough.** Counting
+    `как` against the Cyrillic sub-corpus does drop it — and recall did not move, because
+    the words underneath it are no better: `если` is 4% of the Russian and survives, and
+    the genuinely rare ones match the one unrelated Russian project in the corpus. On the
+    full corpus, admitting minority-script terms at any frequency costs **12 points of
+    cross-language recall@5** (`logs/development/2026-08-24-oq02-bge-m3.md`).
+
+    The rule is *minority*, not *Cyrillic*: the last test here builds a Russian-majority
+    corpus and asserts that Latin is what gets gated out.
     """
 
     def index(self, tmp_path: Path) -> KnowledgeStore:
@@ -291,16 +342,45 @@ class TestTheDenominatorIsPerScript:
         """The change must not alter the majority-language path at all."""
         assert "the" not in discriminating_terms("the token service", self.index(tmp_path))
 
-    def test_a_rare_russian_word_still_counts(self, tmp_path: Path) -> None:
-        """The fix must not be "ignore Cyrillic".
+    def test_even_a_rare_minority_script_word_is_dropped(self, tmp_path: Path) -> None:
+        """This is the assertion that reversed, and it reversed on evidence.
 
-        A term in one Russian document out of ten is exactly the evidence the lexical half
-        exists to supply — the same property that makes `MAX_YAML_DEPTH` worth a query.
-        Only the words that are rare *because the corpus is not in that language* had to
-        go.
+        It used to read "a rare Russian word still counts", on the reasoning that a term
+        in one document out of ten is exactly the evidence the lexical half exists to
+        supply. That reasoning is sound and the measurement refutes its premise: in a
+        corpus that is 6% Cyrillic the rare Russian words are rare *because the corpus is
+        not in that language*, so what they match is the one Russian project in it rather
+        than the subject of the question. BM25 answers from the wrong neighbourhood and
+        RRF admits it as an equal opinion, which is worth minus 12 points on the
+        cross-language column.
         """
         store = self.index(tmp_path)
-        assert "миграциями" in discriminating_terms("как работать с миграциями", store)
+        assert discriminating_terms("как работать с миграциями", store) == []
+
+    def test_a_russian_corpus_gates_out_latin_instead(self, tmp_path: Path) -> None:
+        """The rule is minority, not Cyrillic — so it has to reverse with the corpus."""
+        store = KnowledgeStore(tmp_path / "russian.db", DIM)
+        store.bind("fake", DIM)
+        for i in range(190):
+            # `миграций` is in exactly one chunk: rare, and in the corpus's own script.
+            extra = " миграций" if i == 0 else ""
+            _put(
+                store,
+                f"ru{i}.md",
+                [f"сервис проверяет токен запроса номер {i}{extra}"],
+                [[1.0, 0, 0, 0]],
+            )
+        for i in range(10):
+            _put(
+                store,
+                f"en{i}.md",
+                [f"the service validates the token number {i}"],
+                [[0, 1.0, 0, 0]],
+            )
+        store.record_script_census()
+
+        assert "миграций" in discriminating_terms("миграций запроса", store)
+        assert discriminating_terms("what does TokenService do", store) == []
 
     def test_an_index_without_a_census_keeps_the_old_behaviour(self, tmp_path: Path) -> None:
         """An index built before the census is not a broken index."""
@@ -309,3 +389,112 @@ class TestTheDenominatorIsPerScript:
         store.db.commit()
         assert store.script_census() is None
         assert "как" in discriminating_terms("как работает токен", store)
+
+
+class TestTranslatedProbe:
+    """OQ-18's second dense probe: the question asked again in the corpus's language.
+
+    These pin what fusing a third ranking actually *does*, including what it cannot do.
+    The evidence that it helps is the corpus measurement, not a six-document fixture —
+    what belongs here is the mechanism, and one property of RRF that a reader has to
+    know before trusting either number.
+
+    The ranks below are chosen, not discovered, and the arithmetic is the point:
+    RRF scores a document `Σ 1/(60 + rank + 1)` over the lists it appears in.
+    """
+
+    #: (rank under the native probe, rank under the translated probe). `a` is the
+    #: component the Russian query reads, `b` the component its English translation
+    #: reads; they are independent dimensions, which is what lets one document rank
+    #: fourth for one probe and first for the other.
+    DOCS: ClassVar[dict[str, tuple[float, float]]] = {
+        #                     a     b     native rank / translated rank
+        "unrelated.ts": (0.90, 0.05),  # 0 / 5  →  1/61 + 1/66 = 0.03154
+        "views.ts": (0.80, 0.40),  # 1 / 4  →  1/62 + 1/65 = 0.03151
+        "session.ts": (0.70, 0.50),  # 2 / 3  →  1/63 + 1/64 = 0.03150
+        "TokenService.ts": (0.60, 0.79),  # 3 / 0  →  1/64 + 1/61 = 0.03202  ← wins
+        "cache.ts": (0.50, 0.70),  # 4 / 1  →  1/65 + 1/62 = 0.03151
+        "log.ts": (0.40, 0.60),  # 5 / 2  →  1/66 + 1/63 = 0.03103
+    }
+
+    RU = "как работает refresh токена"
+    EN = "how does token refresh work"
+
+    def index(self, tmp_path: Path) -> KnowledgeStore:
+        store = KnowledgeStore(tmp_path / "xl.db", DIM)
+        store.bind("fake", DIM)
+        for rel, (a, b) in self.DOCS.items():
+            # The third component pads to unit norm so every document is the same length
+            # and only the two query axes decide the ranking.
+            pad = (1.0 - a * a - b * b) ** 0.5
+            _put(store, rel, [f"chunk of {rel}"], [[a, b, pad, 0.0]])
+        store.record_script_census()
+        return store
+
+    def embedder(self) -> FakeEmbedder:
+        return FakeEmbedder({self.RU: [1.0, 0, 0, 0], self.EN: [0, 1.0, 0, 0]})
+
+    def test_the_native_probe_alone_ranks_the_wrong_document_first(self, tmp_path: Path) -> None:
+        """The measured failure, in miniature: the Russian embedding points somewhere
+        the answer is not, and nothing downstream can fix that."""
+        got = retrieve(self.RU, self.index(tmp_path), self.embedder(), limit=1)
+        assert got.hits[0].rel_path == "unrelated.ts"
+        assert got.translated_count == 0
+        assert "+translated" not in got.strategy
+
+    def test_a_document_both_probes_like_beats_one_only_the_native_probe_likes(
+        self, tmp_path: Path
+    ) -> None:
+        """What the second probe buys: fourth on the native ranking and first on the
+        translated one outscores first-then-sixth. That is the whole mechanism."""
+        got = retrieve(
+            self.RU,
+            self.index(tmp_path),
+            self.embedder(),
+            limit=1,
+            translator=lambda _q: self.EN,
+        )
+        assert got.hits[0].rel_path == "TokenService.ts"
+        assert got.translated_count == len(self.DOCS)
+        assert "+translated" in got.strategy
+
+    def test_fusion_adds_a_ranking_it_does_not_replace_one(self, tmp_path: Path) -> None:
+        """A wrong translation must cost a rank, not the result. This is what makes a
+        translator that fails 5 times in 25 survivable rather than dangerous."""
+        got = retrieve(
+            self.RU, self.index(tmp_path), self.embedder(), limit=8, translator=lambda _q: self.EN
+        )
+        assert "unrelated.ts" in [h.rel_path for h in got.hits]
+
+
+class TestRrfBuriesASingleListDocument:
+    """The arithmetic behind `en-relay-dockerfile`, asserted where it is exact.
+
+    `retrieve` fuses with **unweighted** RRF: a document scores `Σ 1/(60 + rank + 1)`
+    over the lists it appears in. Two consequences follow, and the second is a measured
+    miss in the fixture set rather than a hypothetical:
+
+    1. Appearing in *both* lists is worth far more than ranking well in one.
+    2. So a document only one retriever can produce is unreachable at the top, however
+       certain that retriever is.
+
+    `en-relay-dockerfile` expects `Asterim/Dockerfile.relay`. Config files are indexed
+    lexically and **never embedded** (RAG.md §2), so it exists in the lexical list and
+    cannot exist in the dense one. BM25 ranks it inside the top 5 on its own; fusion puts
+    it out. That is not a broken fixture and not a tuning opportunity — RAG.md §5 chose
+    RRF precisely for having no weights, and weighting it to rescue one fixture would
+    trade the property for the case.
+    """
+
+    def test_first_in_one_list_loses_to_second_in_two(self) -> None:
+        scores = rrf([["dense_hit", "shared"], ["config_only", "shared"]])
+        assert scores["shared"] > scores["config_only"]
+        assert scores["config_only"] == pytest.approx(1 / 61)
+        assert scores["shared"] == pytest.approx(1 / 62 + 1 / 62)
+
+    def test_the_gap_does_not_close_at_any_rank(self) -> None:
+        """Even against the worst-placed document that both lists hold: `1/61` is the
+        ceiling for one list, and two lists start at `1/61 + 1/(60 + n + 1)`."""
+        long_list = [f"d{i}" for i in range(30)]
+        scores = rrf([[*long_list, "shared"], ["config_only", "shared"]])
+        assert scores["shared"] > scores["config_only"]

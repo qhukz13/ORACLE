@@ -1,0 +1,13 @@
+-- A per-task wall-clock ceiling, so a graph can run a tool whose own timeout is longer
+-- than the scheduler's per-kind default.
+--
+-- This is a P7 defect that Phase 10 uncovered rather than a pipeline feature.
+-- `Limits.timeout_s[TaskKind.TOOL]` is 120 s; `dev.run_tests` declares 630 s and
+-- `dev.build` declares 930 s. **Any TOOL task running either is killed at two minutes**,
+-- and it fails as TIMEOUT, which reads as "the tests hung" rather than "the scheduler
+-- did not wait". ORCHESTRATION.md §3 already specifies the layering it should have had —
+-- tool contract < step < task < graph — so this adds the level that was missing, not a
+-- new concept.
+--
+-- NULL means "use the per-kind default", which is every task written before now.
+ALTER TABLE tasks ADD COLUMN timeout_s REAL;

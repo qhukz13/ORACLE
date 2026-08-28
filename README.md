@@ -23,27 +23,43 @@ your code. Heavy reasoning is delegated to agents that are good at it; ORACLE's 
 
 ## Status
 
-★ **The MVP is complete.** Phases 0–4 done. Next: [Phase 5 — Project knowledge](docs/ROADMAP.md#phase-5--project-knowledge-rag--post-mvp).
+★ **Phases 0–10 are built.** In progress: [Phase 11 — Execution visualisation](docs/ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc).
+Next: [Phase 12 — Project state & the continue loop](docs/ROADMAP.md#phase-12--project-state--the-continue-loop--residency-arc),
+the phase that makes *"continue Asterim"* answerable. What the product is meant to *be* is
+[docs/VISION.md](docs/VISION.md).
 
-ORACLE runs, routes, acts, and has an interface. Ask it to check a repository and it runs `git.status`
-and shows you the card. Ask it to push and it stops and shows you the commits that would leave the
-machine. Type in the terminal dock and your keystrokes reach a real ConPTY inside a Job Object that
-the HALT key can kill.
+ORACLE runs, routes, acts, retrieves, delegates, plans and remembers. Ask it to check a repository
+and it runs `git.status` and shows you the card. Ask it to push and it stops and shows you the
+commits that would leave the machine. Give it an objective and it produces a plan, turns the plan
+into a task graph, and runs the graph across local tools and Claude — asking before every side
+effect and before anything leaves the machine. Type in the terminal dock and your keystrokes reach
+a real ConPTY inside a Job Object that the HALT key can kill.
 
 | | |
 |---|---|
-| Tools | **29** behind the policy gate (26 offerable, 11 reachable from a routed turn) |
-| Tests | **370 Python** + **77 TypeScript**; the security suite is a merge gate |
+| Tools | **33** contracts behind the policy gate |
+| Pipelines | declarative YAML workflows that **compile to task graphs** — one approval up front, no second executor |
+| Tests | **1,061 Python** + **171 TypeScript**; the security suite is a merge gate |
 | Router | `qwen3.5:0.8b`, 93.3% intent accuracy, 100% tool selection on the eval set |
+| Knowledge | hybrid retrieval over the real corpus, `bge-m3`; the recall gate is **unmet and stated** ([OQ-18](docs/OPEN_QUESTIONS.md#oq-18)) |
+| Supervision | task graphs, a planner tier with a fallback ladder, bounded replanning, crash recovery |
 | Isolation | every tool runs in a separate low-privilege process inside a Job Object |
 
-What is not there yet: knowledge retrieval, delegation to Claude/Antigravity, pipelines, mobile, and
-the orbital view.
+What is not there yet: **a persistent notion of a project** (a project is still a directory name —
+[docs/PROJECT_STATE.md](docs/PROJECT_STATE.md)), **residency** (nothing starts ORACLE at boot, and
+nothing tells you what happened overnight), the knowledge-graph and orbital views, mobile, and voice.
+
+And the caveat that outranks the others: **the supervisor arc has never run for real.** `tasks` is
+0 rows and `memory_facts` is 0 rows — everything Phases 7–9 ship is exercised by tests and fixtures
+only. One item is deliberately reserved for a person rather than an agent: a supervised live run on
+a real project with every preview human-approved.
 
 Read `docs/` first — this repository is design-first and the documents lead the code.
 
 | Question | File |
 |---|---|
+| What is this *for*, as a day rather than a diagram? | [docs/VISION.md](docs/VISION.md) |
+| Where is the code actually, warts included? | [docs/current_state.md](docs/current_state.md) |
 | What is this and how is it shaped? | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | What am I supposed to build right now? | [docs/current_task.md](docs/current_task.md) |
 | What happened last? | [docs/current_report.md](docs/current_report.md) |
@@ -87,7 +103,9 @@ constrains the model choice more than anything else in the design.
 | Disk | C: 39.8 GB free (tight), D: 187 GB free, E: 190 GB free |
 | OS | Windows 10 Pro 19045 |
 
-**4 GB of VRAM is the binding constraint of this entire project.** See
+**4 GB of VRAM is the binding constraint of this entire project.** A GPU upgrade has been
+mentioned but not specified; when one lands it re-opens ADR-0004 as a set of measurements to re-run,
+not settings to edit ([ADR-0026](docs/DECISIONS.md#adr-0026--the-local-tier-ladder-is-capability-shaped-and-gpu-conditional)). See
 [docs/TECH_STACK.md](docs/TECH_STACK.md#3-local-llm) for what actually fits and
 [ADR-0004](docs/DECISIONS.md#adr-0004--two-tier-local-model-router--reasoner).
 

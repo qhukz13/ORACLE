@@ -21,14 +21,24 @@ export interface PaletteItem {
   id: string;
   label: string;
   hint: string;
-  kind: "command" | "project" | "chat";
+  kind: "command" | "project" | "pipeline" | "chat" | "delegate";
   /** What actually gets sent. For commands this is the slash form the pre-router eats. */
   send: string;
+}
+
+export interface PipelineEntry {
+  name: string;
+  description: string;
+  project: string | null;
+  source: string;
+  steps: number;
 }
 
 export interface CommandPaletteProps {
   open: boolean;
   projects: string[];
+  /** Discovered workflows, from `/api/v1/status`. Empty is a normal state, not an error. */
+  pipelines?: PipelineEntry[];
   onClose(): void;
   onSubmit(text: string): void;
 }
@@ -43,7 +53,11 @@ const COMMANDS: ReadonlyArray<{ name: string; summary: string }> = [
   { name: "events", summary: "Show the raw event stream" },
 ];
 
-export function buildItems(query: string, projects: string[]): PaletteItem[] {
+export function buildItems(
+  query: string,
+  projects: string[],
+  pipelines: PipelineEntry[] = [],
+): PaletteItem[] {
   const q = query.trim();
   const lower = q.toLowerCase();
   const items: PaletteItem[] = [];
@@ -69,6 +83,29 @@ export function buildItems(query: string, projects: string[]): PaletteItem[] {
     }
   }
 
+  // Named workflows, offered by name (PIPELINES.md §5). Above projects because a person
+  // who types "selfcheck" means the pipeline, and below commands because a slash query is
+  // unambiguous. The step count and the source are on the row: running one from a
+  // repository is a different decision from running one of your own, and the palette is
+  // where that decision starts.
+  if (!wantsCommand && !wantsProject) {
+    for (const pl of pipelines) {
+      const r = rank(pl.name.toLowerCase());
+      if (r < 0) continue;
+      items.push({
+        id: `pipe:${pl.name}`,
+        label: pl.name,
+        hint:
+          `${pl.steps} step${pl.steps === 1 ? "" : "s"}` +
+          (pl.project ? ` · ${pl.project}` : "") +
+          (pl.source === "project" ? " · from the repository" : "") +
+          (pl.description ? ` — ${pl.description}` : ""),
+        kind: "pipeline",
+        send: pl.name,
+      });
+    }
+  }
+
   if (!wantsCommand) {
     for (const p of projects) {
       const r = rank(p.toLowerCase());
@@ -79,6 +116,22 @@ export function buildItems(query: string, projects: string[]): PaletteItem[] {
         hint: "ask about this project",
         kind: "project",
         send: `what is the status of ${p}`,
+      });
+    }
+  }
+
+  // Delegation, offered per project once the user has typed something to delegate.
+  // The wording says where it goes, because the palette entry is the first half of a
+  // decision whose second half is the egress preview (docs/INTEGRATIONS.md#6).
+  if (!wantsCommand && !wantsProject && needle.length > 3) {
+    for (const p of projects) {
+      if (!lower.includes(p.toLowerCase())) continue;
+      items.push({
+        id: `delegate:${p}`,
+        label: `Delegate to a coding agent: “${q}”`,
+        hint: `${p} · you approve what is sent`,
+        kind: "delegate",
+        send: `ask Claude to ${q}`,
       });
     }
   }
@@ -96,12 +149,21 @@ export function buildItems(query: string, projects: string[]): PaletteItem[] {
   return items;
 }
 
-export function CommandPalette({ open, projects, onClose, onSubmit }: CommandPaletteProps) {
+export function CommandPalette({
+  open,
+  projects,
+  pipelines = [],
+  onClose,
+  onSubmit,
+}: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const items = useMemo(() => buildItems(query, projects), [query, projects]);
+  const items = useMemo(
+    () => buildItems(query, projects, pipelines),
+    [query, projects, pipelines],
+  );
 
   useEffect(() => {
     if (open) {
@@ -131,11 +193,21 @@ export function CommandPalette({ open, projects, onClose, onSubmit }: CommandPal
         role="dialog"
         aria-label="Command palette"
       >
+        {/* The APG combobox pattern, because focus never leaves this input: the list is
+            navigated with the arrow keys while `aria-activedescendant` tells assistive
+            tech which option is active. Before 2026-08-28 the options existed only
+            visually — `role="option"` rows with an onClick that no screen reader could
+            reach from the input (the last item of the a11y audit's debt list). */}
         <input
           ref={inputRef}
           value={query}
           placeholder="run a command, name a project, or just ask…"
           aria-label="Command palette query"
+          role="combobox"
+          aria-expanded={items.length > 0}
+          aria-controls="palette-listbox"
+          aria-autocomplete="list"
+          aria-activedescendant={items.length > 0 ? `palette-option-${index}` : undefined}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
@@ -153,11 +225,14 @@ export function CommandPalette({ open, projects, onClose, onSubmit }: CommandPal
             }
           }}
         />
-        <ul className="palette-list" role="listbox" aria-label="Results">
-          {items.length === 0 && <li className="muted palette-empty">Type to search</li>}
+        <ul className="palette-list" id="palette-listbox" role="listbox" aria-label="Results">
           {items.map((item, i) => (
             <li
               key={item.id}
+              // Index-based rather than item-derived: pipeline and project names can hold
+              // characters an HTML id cannot, and `aria-activedescendant` above points at
+              // whichever row is active, not at a stable identity.
+              id={`palette-option-${i}`}
               role="option"
               aria-selected={i === index}
               className={i === index ? "sel" : ""}
@@ -169,6 +244,13 @@ export function CommandPalette({ open, projects, onClose, onSubmit }: CommandPal
             </li>
           ))}
         </ul>
+        {/* Outside the listbox: a listbox may contain only options, and this is a status
+            line, not a choice. */}
+        {items.length === 0 && (
+          <p className="muted palette-empty" role="status">
+            Type to search
+          </p>
+        )}
       </div>
     </div>
   );

@@ -106,7 +106,7 @@ from an invented string.
 ## 3. State machine
 
 The runtime's states are exactly what the UI renders in the core visualisation — one vocabulary, no
-translation layer. See [UI.md](UI.md#3-the-core-orbital-view--phase-9).
+translation layer. See [UI.md](UI.md#3-the-core-orbital-view--phase-11).
 
 ```
         ┌──────────────────────── halted ◀──── HALT (from any state)
@@ -127,6 +127,29 @@ translation layer. See [UI.md](UI.md#3-the-core-orbital-view--phase-9).
 Rules: transitions are events (§ event log); `halted` is reachable from every state and leaves only
 by explicit human action; `error` is terminal for the turn but never for the session; every state has
 a timeout that moves it to `error` rather than hanging forever.
+
+### What `delegating` actually does today  `IMPLEMENTED 2026-08-24`
+
+It is a **handoff**, not a wait. The state is emitted while the delegation is created; the turn then
+finishes with `outcome: "delegated"` and the delegation continues under its own `task.*` stream. A
+turn that stayed open for a ten-minute delegation would block the session for work the user can
+already watch in the delegation panel, and the diagram's arrow back to `summarizing` describes the
+*delegation's* completion rather than the turn's.
+
+Two ways in, and neither is a second prompt (INTEGRATIONS.md §8):
+
+- **Explicit** — "ask Claude to …", recognised by the pre-router in ~5 ms. An unnamed project is
+  asked about, never guessed.
+- **Escalation** — a verification tool (`dev.run_tests`, `dev.build`, `dev.lint`) reported failure
+  in this turn. Deterministic: a fact about the turn's outcomes, not a second model call. What
+  ORACLE already tried is carried into the packet so the delegate does not repeat it.
+
+The egress preview is the only prompt on either path.
+
+A third way in arrives with Phase 8: an intent whose objective needs decomposition routes to the
+**supervisor**, which creates a root task and runs the planning flow instead of a turn-scoped
+delegation. The turn still finishes `delegated`; the graph continues under `task.*` like a single
+delegation does today ([ORCHESTRATION.md §7](ORCHESTRATION.md#7-end-to-end-example)).
 
 ### What `planning` actually does today  `IMPLEMENTED 2026-08-21`
 
@@ -159,6 +182,20 @@ Measured: **100% on 18 cases**, p50 1157 ms
 ---
 
 ## 4. Planning
+
+> **Superseded 2026-08-24, never implemented as written.** The in-turn `Plan`/`PlanStep` loop
+> below was designed for Phase 1 and deliberately not built — the shipped `planning` state is
+> single-tool selection (§3), and the audit confirmed no planner or critic exists in source.
+> Multi-step work is now the **task graph** ([ORCHESTRATION.md](ORCHESTRATION.md)), authored by a
+> **delegated planner** ([PLANNER.md](PLANNER.md)) rather than the local model — see
+> [ADR-0019](DECISIONS.md#adr-0019--the-supervisor-completes-the-orchestrator) and
+> [ADR-0020](DECISIONS.md#adr-0020--the-task-graph-is-a-durable-dag-with-append-only-replanning).
+> The section is retained because its principles survive the move and bind the new design too:
+> a plan is data with a schema; every element validates against a registry; never execute a
+> partially valid plan; one repair attempt; bounded replanning. What changed is *who authors the
+> plan* (a planner-role agent, not the router model) and *where it runs* (the durable graph, not
+> inside one turn). The 8-step cap becomes the graph's 12-task cap; the critic's replan budget
+> (≤ 2) becomes the root task's replan budget.
 
 A plan is **data with a schema**, not a chain of thought. The model fills in slots; it does not
 invent control flow.

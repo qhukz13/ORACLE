@@ -19,6 +19,9 @@ Update **both**:
 - `docs/current_report.md` — overwrite with what you did (it is a snapshot, not a changelog).
 - `docs/current_task.md` — set it to the next task, or mark the current one `DONE` and state what's next.
 
+After:
+- Commit all files and push them into the GitHub Repo.
+
 Write a development log to `logs/development/YYYY-MM-DD-<slug>.md` for any non-obvious investigation,
 benchmark, or dead end. Dead ends are the most valuable thing you can record.
 

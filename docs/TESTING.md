@@ -31,7 +31,7 @@ no regression safety at all.
 
 ## 3. Security tests are a merge gate
 
-From [Phase 2](ROADMAP.md#phase-2--tool-system--policy-gate--mvp) onward, `tests/security/` must pass
+From Phase 2 (built 2026-08-21; see the foundation table in [ROADMAP.md](ROADMAP.md)) onward, `tests/security/` must pass
 before anything merges. It is not a suite that grows when convenient; every new surface adds a case.
 
 ```
@@ -113,9 +113,27 @@ Regressions here are silent and cumulative, so they are asserted:
 | WS event fan-out | < 20 ms |
 | Global search | p95 < 300 ms |
 | Orbit view, idle | < 5% CPU |
+| Knowledge-graph layout, cold (1.4k docs) | < 10 min — **measured 27.8 s** |
+| Knowledge-graph layout, peak RSS | < 500 MB — **measured 121 MB** |
+| Knowledge-graph incremental placement | < 250 ms — **measured 0.032 ms p95** |
+| Knowledge-graph canvas pan/zoom | p95 frame < 16.7 ms — **not yet measured** |
 
 Measured nightly on this hardware. These numbers are hardware-specific by design — a budget that
 passes on a different machine tells us nothing about the machine ORACLE runs on.
+
+**These budgets still have no automated test to live in**: `make eval` exists as of 2026-08-28, but
+`make perf` still does not, and §8 no longer claims it does. The graph numbers above come from
+`scripts/measure_graph.py` run by hand ([OQ-22](OPEN_QUESTIONS.md#oq-22),
+[dev log](../logs/development/2026-08-26-oq22-knowledge-graph.md)), and the canvas row is honestly
+blank because it needs a compositing window on this GPU inside WebView2.
+
+**And one budget that is not in this table but bit twice on 2026-08-26**: several tests here carry
+implicit *wall-clock* assumptions — a watcher filtering 5,000 paths in under 2 s, a ConPTY burst
+arriving intact — and both failed while another process held all 24 threads, then passed idle. A
+budget asserted on a loaded machine measures the load. Worth deciding whether those become explicit
+perf tests (which may be skipped under load) or keep tighter deadlines. Since 2026-08-28
+`pytest-timeout` bounds the worst case at 120 s per test — a hang becomes a named failure instead of
+a stuck gate.
 
 ## 7. What is not tested automatically
 
@@ -124,7 +142,7 @@ Stated so nobody assumes coverage that doesn't exist:
 - Actual model *quality* of prose answers — judged by use, not by a metric.
 - The real Claude/Antigravity CLIs in CI — costly, non-deterministic, and rate-limited. Contract tests
   against recorded fixtures cover the integration; **the fixtures can go stale**, which is why
-  quarterly re-verification is a standing item ([ROADMAP P11](ROADMAP.md#phase-11--hardening--continuous)).
+  quarterly re-verification is a standing item ([ROADMAP P17](ROADMAP.md#phase-17--hardening--continuous)).
 - Voice accuracy — manual.
 - Visual design — visual regression catches layout breakage, not whether it looks good.
 
@@ -133,8 +151,13 @@ Stated so nobody assumes coverage that doesn't exist:
 ```bash
 make check      # ruff · mypy --strict (core, policy, tools) · pytest · vitest · security suite
 make eval       # model fixture suites — on prompt/model change
-make perf       # performance budgets — nightly
+                # (or `uv run python scripts/eval_intent.py` / `eval_selection.py` —
+                # make is not installed on this machine)
 ```
 
 `make check` must be green before any commit. The security suite is part of it from Phase 2, not a
 separate optional step — a gate that has to be remembered is not a gate.
+
+There is deliberately no `make perf`: performance numbers come from `scripts/measure_graph.py` (and
+now `scripts/measure_observation.py`) run by hand, and the target stays absent until there is a perf
+suite for it to run.

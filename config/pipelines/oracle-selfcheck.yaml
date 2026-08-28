@@ -1,0 +1,78 @@
+# ORACLE running its own quality gate, as a pipeline.
+#
+# PIPELINES.md §7 calls this "the most honest dogfooding available", and it is: these are
+# the same five commands `scripts/check.py` runs, expressed as a graph and executed
+# through the policy gate like any other work. If a pipeline cannot express ORACLE's own
+# merge gate, the format is not good enough for anything else.
+#
+# It is also the live demonstration of §8's third acceptance criterion. Four of its six
+# steps are `dev.execute` at T2, so the run asks **once**, up front, with all four listed
+# and their exact argv shown - and never asks again once it is running.
+version: 1
+name: oracle-selfcheck
+description: Format, lint, types, tests, security suite, audit chain - ORACLE's own gate.
+project: ORACLE
+
+params:
+  # The security suite is the merge gate and is never optional (AGENTS.md), so there is
+  # no parameter to skip it. This one only skips the slow *full* suite when you already
+  # know you are iterating on the security cases.
+  security_only: { type: bool, default: false }
+
+steps:
+  # `scripts/check.py` runs `ruff format --check` and `ruff check` as two steps, and
+  # `dev.lint` is only the second of them (it derives `uv run ruff check .` from the
+  # project kind). Mirroring the real gate therefore takes two steps, not one - and
+  # calling a single `dev.lint` step "format" would have been a pipeline that looks like
+  # the gate and is not.
+  - id: format
+    tool: dev.execute
+    with:
+      path: "{{ project.root }}"
+      program: uv
+      args: ["run", "ruff", "format", "--check", "src", "tests"]
+    timeout: 120
+    on_failure: continue          # a formatting complaint must not hide a type error
+
+  - id: lint
+    tool: dev.lint
+    with: { path: "{{ project.root }}" }
+    on_failure: continue
+
+  - id: types
+    tool: dev.execute
+    with:
+      path: "{{ project.root }}"
+      program: uv
+      args: ["run", "mypy"]
+    timeout: 600
+    on_failure: continue
+
+  - id: tests
+    tool: dev.run_tests
+    with: { path: "{{ project.root }}" }
+    when: "not params.security_only"
+    # `dev.run_tests` declares 630 s of its own; without this the scheduler's per-kind
+    # default of 120 s would kill it at two minutes and record it as TIMEOUT.
+    timeout: 900
+    on_failure: continue
+
+  - id: security
+    tool: dev.execute
+    with:
+      path: "{{ project.root }}"
+      program: uv
+      args: ["run", "pytest", "-q", "tests/security"]
+    timeout: 900
+
+  - id: audit
+    tool: dev.execute
+    with:
+      path: "{{ project.root }}"
+      program: uv
+      args: ["run", "python", "scripts/audit.py", "verify"]
+    timeout: 120
+
+artifacts:
+  - { from: tests, capture: stdout, as: tests.log }
+  - { from: security, capture: stdout, as: security.log }

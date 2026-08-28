@@ -228,3 +228,46 @@ cases:
     why: >
       no intent, no target, no referent. The correct behaviour is to ask.
       A confident answer here is worse than no answer.
+
+  # ---------------------------------------------------------------- continue
+  # Added 2026-08-28 for OQ-25: the eleventh label, never measured. The live P12-T5
+  # runs routed the LABEL correctly both times but returned project: null both times,
+  # on an input whose second word is a registered project — so these cases pin the
+  # SLOT as deliberately as the label.
+  - id: en-continue-project
+    text: "continue Asterim"
+    lang: en
+    intent: continue
+    project: Asterim
+    why: >
+      the vision's headline utterance. The live runs (2026-08-28) classified the
+      intent and lost the project to a string-match fallback; the slot is the test.
+
+  - id: ru-continue-project
+    text: "продолжи работу над GameRecs"
+    lang: ru
+    intent: continue
+    project: GameRecs
+    why: >
+      Russian continue with a different verb form and a different project than the
+      few-shot carries, so a pass is generalisation rather than parroting
+
+  - id: en-continue-boundary-run
+    text: "keep going on the Asterim work"
+    lang: en
+    intent: continue
+    project: Asterim
+    why: >
+      one word away from "run the Asterim tests" — the confusion OQ-25 names as the
+      expensive one, because run would send this to tool selection instead of
+      reading project state
+
+  - id: en-continue-bare
+    text: "pick up where we left off"
+    lang: en
+    intent: continue
+    project: null
+    why: >
+      no project named, and none may be invented. The ask lives downstream:
+      _continue_project refuses to guess and asks which project (pipeline.py), so
+      the classifier's job here is only the label and an empty slot.

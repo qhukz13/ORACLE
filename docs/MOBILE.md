@@ -114,7 +114,7 @@ default, which likely blocks **PWA installation** and **Web Push**. Options, non
 
 **v1 decision: no push.** WS notifications while the app is open, and that is stated plainly rather
 than half-built. The pairing/TLS work is unaffected either way, so this question does not block
-Phase 8 — it only bounds it.
+Phase 14 — it only bounds it.
 
 ### Remote access — Post-MVP
 
@@ -133,7 +133,7 @@ exposure, no change to the security model. Any other approach requires a new thr
 
 ## 7. Acceptance criteria
 
-Mirrors [ROADMAP Phase 8](ROADMAP.md#phase-8--mobile--post-mvp):
+Mirrors [ROADMAP Phase 14](ROADMAP.md#phase-14--mobile--capability-arc):
 
 - Pairing completes in under 30 s from scanning the QR.
 - Approving a T2 action works; **T3 is refused server-side** with a clear explanation.

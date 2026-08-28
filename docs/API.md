@@ -77,8 +77,31 @@ never produces duplicates or holes. If `since_seq` is older than retention, the 
 | `undo` | `{undo_id?}` | reverses one journalled mutation; omit the id for the most recent |
 | `term.input` | `{pty_id, data}` | human input only; agent PTY writes go through the tool path |
 | `term.resize` | `{pty_id, cols, rows}` | |
+| `delegate` | `{task, project, allowed_tools?}` | starts a delegation (P6-T2). The service asks its own question — the egress preview rides `approval.requested` — before anything leaves the machine |
+| `delegate.discard` | `{task_id}` | throw away a finished delegation's worktree; the packet stays on disk as the record of what was sent |
+| `graph.plan` | `{objective}` | `BUILT 2026-08-25` (P8-T1). An objective becomes a plan, a graph, and a run — with two approvals in between: the planning egress, then the graph's shape. Refusing either is a full stop |
+| `graph.cancel` | `{root_id, task_id?}` | `BUILT 2026-08-25` (P7-T3). With `task_id`, stops one task and its dependents become `SKIPPED`; without, stops the whole graph. Independent branches keep running. Not HALT — HALT is above this and stops graphs this daemon never started |
 | `halt` | `{reason}` | must work in every state, never touches the LLM |
 | `subscribe` | `{topics[]}` | mobile subscribes narrowly to save battery |
+
+### Inbound MCP (P6-T3)
+
+Two loopback endpoints a *delegated agent's* bridge process calls, authorised by a delegation
+capability rather than by being on the box ([INTEGRATIONS.md §4](INTEGRATIONS.md#4-oracle-as-an-mcp-server--supported)):
+
+| Route | Body | Notes |
+|---|---|---|
+| `POST /api/v1/mcp/tools` | `{token}` | the tools this capability lends, as MCP descriptors. An unverifiable token gets an empty list — the client renders that as a server error, and a bridge that cannot list must not look like a working one |
+| `POST /api/v1/mcp/call` | `{token, tool, arguments}` | executes through the ordinary `ToolExecutor`. Refusals are `{ok: false}` results, not HTTP errors: the delegate should read them and adapt, not conclude the server is broken and shell out |
+
+Deliberately **not** on the WS protocol: the bridge is a short-lived child of the delegate's CLI, and
+handing it the event socket would hand a delegated agent the whole command surface.
+
+**Delegation events.** A delegation streams over the reserved `task.*` types (`created` →
+`updated` with `rendering`/`awaiting_egress`/`running`/`verifying` → `finished` with diff stat,
+gate-run test verdict and cost) plus a coalescable `delegate.event` feed (the delegate's normalised
+started/thinking/tool_use/text stream). All carry `task_id` on the wire — added to the envelope with
+this feature; clients ignore unknown fields by contract.
 
 **On `nonce` and `scope`.** Both were in the original sketch and neither is implemented, on purpose.
 A `nonce` guards against a replayed approval; approvals are already single-use and keyed by an
@@ -106,24 +129,47 @@ runtime judgement call.
 GET    /health                          liveness; no auth
 GET    /api/v1/status                   agent state, model, versions, degradations
 
-GET    /api/v1/projects                 registry with detected type + git state
-GET    /api/v1/projects/{id}
-POST   /api/v1/projects/{id}/scan
+GET    /api/v1/projects                 BUILT 2026-08-26: tracked projects + candidates.
+                                        Deliberately NO git state — see below
+POST   /api/v1/projects?name=           BUILT 2026-08-26: register a discovered directory
+GET    /api/v1/projects/{id}            BUILT 2026-08-26: the row + a fresh observation
+POST   /api/v1/projects/{id}/scan       PLANNED — and probably never: there is nothing to
+                                        scan into, because observed state is not stored
+
+GET    /api/v1/briefing                 BUILT 2026-08-26: what changed since you last
+                                        acknowledged. Reading does NOT consume it
+POST   /api/v1/briefing/ack?through_seq= BUILT 2026-08-26: the only thing that advances
+                                        the watermark. ?project_id= scopes it to one
 
 GET    /api/v1/sessions                 list
 GET    /api/v1/sessions/{id}/events     paged history (?since_seq=&limit=)
 DELETE /api/v1/sessions/{id}
 
-GET    /api/v1/tasks                    ?status=active|waiting|done|failed
-GET    /api/v1/tasks/{id}               full record incl. steps and costs
-POST   /api/v1/tasks/{id}/cancel
+GET    /api/v1/tasks?root_id=          BUILT 2026-08-25: one graph as a tree
+GET    /api/v1/tasks                    PLANNED: ?status=active|waiting|done|failed
+GET    /api/v1/tasks/{id}               PLANNED: full record incl. costs
+POST   /api/v1/tasks/{id}/cancel        PLANNED as REST; the built path is the `graph.cancel`
+                                        command, because cancelling is a live action on a live
+                                        graph and the WS stream is where the answer arrives
 
 GET    /api/v1/approvals                pending
 POST   /api/v1/approvals/{id}           {decision, nonce}
 
 POST   /api/v1/search                   {query, sources[], filters} → grouped results
-GET    /api/v1/collections              index health per collection
-POST   /api/v1/collections/{id}/reindex
+GET    /api/v1/knowledge                BUILT 2026-08-22: index health — built?, model,
+                                        per-collection counts, what failed (RAG.md §9)
+POST   /api/v1/knowledge/reindex        BUILT 2026-08-28: ?full=&collection= — executes
+                                        `know.reindex` (T1) through the ToolExecutor, so
+                                        it crosses the policy gate like every invocation.
+                                        Holds until the tool returns; reflects its result
+                                        or the gate's refusal as {ok, ...}, never a 5xx
+GET    /api/v1/collections              PLANNED: per-collection health detail
+POST   /api/v1/collections/{id}/reindex PLANNED: the whole-index form shipped first —
+                                        the health view's reindex is ONE action on the
+                                        whole index (ADR-0023, UI.md §"Layout"), and
+                                        ?collection= on the built endpoint already
+                                        scopes it. A path-addressed resource waits for
+                                        a per-collection UI to need it
 
 GET    /api/v1/memory/facts             ?scope=&project=
 PATCH  /api/v1/memory/facts/{id}
@@ -148,6 +194,160 @@ project and collection reads · `Idempotency-Key` required on every POST that st
 retry cannot launch a pipeline twice.
 
 ---
+
+### `system.boot` / `system.shutdown`  `BUILT 2026-08-26`
+
+The daemon brackets its own life. **Critical** event types: a lost one turns a crash report
+into silence.
+
+```json
+{"unclean": true, "last_event": "tool.finished",
+ "last_seen": "2026-08-26T04:11:58.402Z", "schema_version": 7}
+```
+
+`unclean` is computed at boot by looking at what the last event in the log actually **was**.
+A `system.shutdown` means somebody stopped it; anything else means it died. This exists
+because a crash leaves *no trace of itself* — the log simply stops, and a silent gap is
+indistinguishable from an idle night, which would make ADR-0025's named risk unreportable.
+
+A **first-ever boot is not unclean**: there was no previous run for the absence of a shutdown
+to mean anything about.
+
+> **Protocol note.** A client connecting with `since_seq=0` against a fresh database now
+> receives `system.boot` as its **first** event, where it previously received
+> `session.created`. Clients already MUST ignore unknown types and MUST NOT depend on the
+> type at a given index; this is the first change that makes the second rule bite.
+
+---
+
+### `GET /api/v1/briefing` — what happened while I wasn't looking  `BUILT 2026-08-26`
+
+The delta since the reader last acknowledged, grouped by project, bounded, with a
+deterministic `text` rendering alongside the structured fields
+([PROJECT_STATE.md §6](PROJECT_STATE.md#6-the-briefing--what-happened-while-i-was-away)).
+
+**Reading it does not consume it.** A client may poll this, and a person may glance at it
+and walk away, without losing what they came back for. Only `POST /api/v1/briefing/ack`
+advances the watermark — a surface that cleared itself on sight would be a notification,
+and notifications are how people miss things.
+
+**No model is called.** Every number is arithmetic over task rows, so the surface with the
+tightest latency budget has none, and a summary of the owner's own work cannot be invented.
+A test asserts the module imports no provider.
+
+Two fields are **current state rather than delta**, and appear regardless of the watermark:
+`waiting` (a task parked on an approval is a *block* — acknowledging a briefing must never
+bury it) and `in_flight` (pending, ready or running — otherwise the briefing goes blank
+mid-run).
+
+`through_seq` is the log head at the moment of the request. Send it back on acknowledgement:
+work that arrived while the reader was looking is then not marked as seen.
+
+`system` reports the daemon's own news — chiefly whether the previous run ended cleanly.
+`unclean: true` means it died; the briefing says so rather than showing a silent gap that
+reads like an idle night.
+
+### `POST /api/v1/briefing/ack` — the only thing that consumes it  `BUILT 2026-08-26`
+
+`?through_seq=` is required, `?project_id=` optional. Without a project id it acknowledges
+every project **and** the system section; with one it acknowledges that project alone, so a
+per-project dismissal cannot sweep up a crash report. Monotonic: a stale client returning
+with an old sequence cannot rewind a pointer a later acknowledgement already advanced.
+
+An unknown `project_id` is a **404** rather than a silent acknowledgement of everything.
+
+---
+
+### `continue.derived` — where a continue objective came from  `BUILT 2026-08-26`
+
+Emitted once per `continue`, before planning. **Critical**, not coalescable: it is the
+provenance record for a planning decision, and the approval card that follows says the
+objective is partly untrusted without saying how it got that way.
+
+```json
+{"project": "Asterim", "open_tasks": 3, "dropped": 0,
+ "notes": ["docs/current_task.md"], "tainted": true}
+```
+
+`notes` names the project's own files that were quoted into the objective
+([PROJECT_STATE.md §5](PROJECT_STATE.md#5-unfinished-work--where-continue-gets-its-list)).
+`dropped` is how many open tasks did not fit the cap — present so a client can say
+"3 of 40" rather than implying it saw everything.
+
+---
+
+### `GET /api/v1/projects` — the registry  `BUILT 2026-08-26`
+
+Two lists, and the split is the point ([PROJECT_STATE.md §3](PROJECT_STATE.md#3-the-model)):
+
+- **`projects`** — rows ORACLE tracks. Registration is an explicit human act, so this stays
+  short enough to brief.
+- **`candidates`** — directories `discover_projects()` found that nobody has registered.
+  The real projects root on this machine holds `New folder` and `docs.zip` next to the real
+  ones; auto-registering everything would fill the briefing with them.
+
+**This endpoint runs no `git`.** A sidebar with twenty projects would otherwise be twenty
+subprocesses on a page-load. `status` is the stored value corrected by a fresh `is_dir()` —
+a directory deleted since boot reports `missing` immediately rather than at the next
+restart, because existence is observed state too.
+
+`POST /api/v1/projects?name=` registers. `name` **must be one `discover_projects()` actually
+found**; anything else is a 404. That is a safety rule, not a convenience — a name outside
+the candidate list would be a filesystem path assembled from a request. Registering is
+idempotent by name, and it **grants nothing**: scopes live in `config/policy.yaml` where a
+human edits them and git records the edit, asserted in `tests/security/`.
+
+### `GET /api/v1/projects/{id}` — one project  `BUILT 2026-08-26`
+
+The stored row, plus an `observation` object read **fresh on every call** through
+`git.status` and `git.log` (both T0, both across the policy gate). Nothing in it is cached
+or persisted: a cached branch name is wrong the moment someone switches branches, silently,
+with no event that could correct it.
+
+`observation.error` is a **field, not a status code**. A directory that is not a repository,
+a root that has been deleted, and a path the policy engine refuses all return `200` with the
+reason in that field — because every caller of this is a surface that has to render
+something, and a crashed sidebar is worse than a row that says why it is empty.
+
+---
+
+### `GET /api/v1/tasks?root_id=` — the execution tree  `BUILT 2026-08-25`
+
+A **projection over the `tasks` table** (ORCHESTRATION.md §6), not a second source of truth: no
+cache, no second writer, and the same shape whether the graph is running or finished.
+
+```json
+{
+  "root_id": "tk_root",
+  "live": true,
+  "status": "running",
+  "tasks": [
+    {
+      "id": "check", "kind": "verify", "status": "failed",
+      "depends_on": ["fix"], "objective": "…", "role": "tester",
+      "agent": null, "attempt": 1, "supersedes": null,
+      "started_at": "…", "finished_at": "…",
+      "summary": "1 test that passed before this work now fails",
+      "evidence": {"observed": {"passed": 583, "failed": 29}, "new_failures": ["…"]},
+      "claim": "everything passes",
+      "error": {"kind": "execution_failed", "message": "…", "retryable": false}
+    }
+  ]
+}
+```
+
+Three properties worth stating, because each is a decision:
+
+* **`evidence` and `claim` arrive as separate fields** and must stay separate on screen. Evidence
+  is what ORACLE measured; the claim is what the worker said about its own work. A client that
+  renders them together has undone the verification design at the last possible moment.
+* **`live` is the only thing not in the table** — it means "this process is still running it".
+* **An unknown `root_id` returns an empty tree, not 404.** A client asking has already seen a
+  `task.*` event; a 404 would tell it to retry something that will never appear.
+
+Live updates ride the existing WS `task.*` events, which carry `"source": "graph"`. That stamp
+matters: a `DELEGATION` task emits `task.*` twice over — once as graph state, once as its own
+lifecycle — under the same `task_id`, and both are wanted.
 
 ## 4. Errors
 

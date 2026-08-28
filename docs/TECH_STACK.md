@@ -228,7 +228,7 @@ per model and break the "provider is replaceable" property.
 | **Vector store** | **sqlite-vec** in `knowledge.db` | see below |
 | **Lexical** | SQLite **FTS5** (BM25) | same file, same transaction, no second engine |
 | **Fusion** | Reciprocal Rank Fusion | no tuning knobs, robust; beats dense-only on code and on exact identifiers |
-| **Embeddings** | multilingual-e5-base (768d) via **ONNX Runtime on CPU** | Russian + English; CPU keeps VRAM free |
+| **Embeddings** | bge-m3 (1024d) via **ONNX Runtime on CPU** | Russian + English; CPU keeps VRAM free |
 | **Code structure** | tree-sitter (**built, off by default**) | function/class-level chunks with real symbol names — but measurably worse recall on the current fixture set; see the ledger row |
 | **Watching** | `watchfiles` (Rust notify) | far better Windows behaviour than `watchdog` |
 | **PDF** | `pypdfium2` | Apache/BSD licensing; `PyMuPDF` is AGPL and we avoid that entanglement |
@@ -263,9 +263,13 @@ and an embedding model causes constant load/unload thrash that costs far more th
 compute saves. Meanwhile 24 idle threads sit next to it. Indexing is a background batch job; latency
 does not matter, and the GPU staying warm does.
 
-`EXPERIMENT NEEDED` — [OQ-02](OPEN_QUESTIONS.md): compare `multilingual-e5-base` against `bge-m3` on
-mixed Russian/English notes and code identifiers; measure CPU throughput and quality. Also evaluate
-Matryoshka truncation to 384d — halves storage and scan time, usually at little cost.
+**RESOLVED 2026-08-24** — [OQ-02](OPEN_QUESTIONS.md#oq-02): `bge-m3` wins on the full corpus, 61%
+recall@5 against `multilingual-e5-base`'s 55% and 44% against 36% on Russian questions — but only
+once the fusion gate stopped admitting BM25 on every query. Measured with the old gate it *lost*, at
+53%. **`DEFAULT` is `bge-m3` as of 2026-08-24**, at ~3 GB resident instead of ~1.5 GB; `e5-base`
+keeps its `ModelSpec` one line away. Matryoshka truncation to 384d was evaluated and **rejected** — it costs 9
+points here, not "little", because E5 is not Matryoshka-trained
+([log](../logs/development/2026-08-24-oq02-bge-m3.md)).
 
 No reranker in v1. Post-MVP: ONNX `bge-reranker-base` on CPU, top-30 → top-8, only if measured
 retrieval quality demands it.
@@ -390,19 +394,25 @@ channel), raw TCP (rebuilding HTTP badly).
 |---|---|---|
 | **Claude Code** | `claude -p --bare --output-format stream-json` + `--json-schema`, `--resume`, `--allowedTools`; installed here (v2.1.234) | **Supported** |
 | **Anthropic API** | Messages API via `anthropic` SDK, for cheap non-agentic calls | **Supported** |
-| **MCP (inbound)** | ORACLE exposes its guarded tools as an MCP server so delegated agents call back in instead of running raw shell | **Supported** |
-| **Antigravity** | `agy -p --output-format stream-json` (CLI v1.1.x, SDK v0.1.x) — but see the open non-TTY stdout bug | **Potential** — blocked on [OQ-05](OPEN_QUESTIONS.md) |
+| **MCP (inbound)** | ORACLE exposes its guarded tools as an MCP server so delegated agents call back in instead of running raw shell. **Built P6-T3 with no new dependency**: four JSON-RPC methods over stdio, pinned by tests that drive raw frames. `mcp==2.0.0` was installed and verified working first — it costs **24 packages** (`cryptography`, `pywin32`, `opentelemetry-api`, `jsonschema`…) in the daemon's trusted base, which is not a trade worth making for a wire format this small. Take the SDK if a client ever rejects the hand-rolled surface; that measurement is the justification ([INTEGRATIONS.md §4](INTEGRATIONS.md#4-oracle-as-an-mcp-server--supported)) | **Supported** |
+| **Antigravity** | `agy -p --output-format stream-json` (+ `--json-schema` for planning) — the non-TTY stdout bug is default-text-mode only, resolved by always passing `--output-format` ([OQ-05](OPEN_QUESTIONS.md#oq-05), resolved) | **Supported** — adapter is P6-T5; planner role pending [OQ-20](OPEN_QUESTIONS.md#oq-20) |
 | **Handoff Packet** | Write a self-contained task to disk; collect results via git diff | **Fallback** — works with any agent, including ones that don't exist yet |
+
+**The supervisor arc adds zero dependencies.** The task graph is in-house pure functions (partly
+ported from Asterim, [ASTERIM_REUSE.md](ASTERIM_REUSE.md)); LangGraph, CrewAI, ACP adapters and
+the Claude Agent SDK were evaluated and not adopted — reasons and revisit-triggers in
+[ADR-0022](DECISIONS.md#adr-0022--external-agent-frameworks-evaluated-not-adopted) and
+[INTEGRATIONS.md §9](INTEGRATIONS.md#9-the-external-landscape--surveyed-2026-08-24-decisions-in-adr-0022).
 
 ---
 
-## 10. Voice (Phase 10 — deliberately unresolved)
+## 10. Voice (Phase 15 — deliberately unresolved)
 
 The landscape moved: `VERIFIED 2026-08-21` **Piper TTS was archived in October 2025**, so the obvious
 default is gone. Recommending it now would be exactly the stale assumption this document exists to
 prevent.
 
-Current shape of the decision, to be made at Phase 10, not before:
+Current shape of the decision, to be made at Phase 15, not before:
 
 - **STT**: `faster-whisper` (CTranslate2, int8, CPU) or `whisper.cpp`. Russian needs `small` or better;
   `tiny/base` are inadequate for it. 24 threads should manage near real-time at `small`.
@@ -424,7 +434,7 @@ same WS API**. It can be built, replaced, or abandoned without the agent core no
 | Package/venv | `uv` (fast, lockfile, manages the Python toolchain itself) |
 | Lint + format | `ruff` (replaces black + isort + flake8 + several plugins) |
 | Types | `mypy --strict` on `packages/core`, `packages/policy`, `packages/tools`; looser elsewhere |
-| Tests | `pytest`, `pytest-asyncio`, `hypothesis` (property tests for the path canonicaliser) |
+| Tests | `pytest`, `pytest-asyncio`, `pytest-timeout` (a hang becomes a named failure; added 2026-08-28 after a gate run hung under CPU starvation), `hypothesis` (property tests for the path canonicaliser) |
 | Frontend | `vitest`, `@testing-library/react`, `playwright` for E2E |
 | Git | already in use; ORACLE itself is not yet a repo — `git init` is task 1 of Phase 0 |
 | Docker | installed (29.5.3); used *as a tool ORACLE drives*, not to run ORACLE |

@@ -1,0 +1,47 @@
+# PIPELINES.md §2's worked example, corrected to what the tools actually take.
+#
+# Three things in the spec's version do not exist and cannot be made to:
+#   * `with: { project: "{{ project }}" }` - no tool takes a `project` argument, and the
+#     header's `project:` is a NAME while every tool argument needs a PATH. Split into
+#     `{{ project.name }}` and `{{ project.root }}`.
+#   * `retry: { on: ["timeout"] }` - §3 of the same document says the tool decides which
+#     failures are retryable, and `runners/tool.py` is where that judgement lives.
+#     `retry.max` says how many attempts; it does not say which failures earn one.
+#   * a `report` step calling `oracle.report` - no such tool, and a step downstream of a
+#     failure is SKIPPED, so a reporting *step* could never report on a failed run. The
+#     run record is written by `PipelineService` from the task rows instead.
+version: 1
+name: asterim-check
+description: Full health check before pushing Asterim.
+project: Asterim
+
+params:
+  skip_frontend: { type: bool, default: false }
+
+steps:
+  - id: status
+    tool: git.status
+    with: { path: "{{ project.root }}" }
+
+  - id: backend_tests
+    tool: dev.run_tests
+    with: { path: "{{ project.root }}", filter: "apps/server" }
+    timeout: 600
+    on_failure: abort
+
+  - id: frontend_tests
+    tool: dev.run_tests
+    with: { path: "{{ project.root }}", filter: "apps/web" }
+    when: "not params.skip_frontend"
+    timeout: 600
+    on_failure: continue          # report, but keep going
+
+  - id: build
+    tool: dev.build
+    with: { path: "{{ project.root }}" }
+    timeout: 900
+    retry: { max: 1 }
+
+artifacts:
+  - { from: backend_tests, capture: stdout, as: backend.log }
+  - { from: build, capture: stdout, as: build.log }

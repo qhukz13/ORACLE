@@ -68,12 +68,25 @@ collections:
     enabled: true
     obsidian: true
     roots:
-      - "C:/Users/qhukz/Documents/AI/ML Learning"      # 157 notes, the AI-ML-Vault
+      - "C:/Users/qhukz/Documents/AI/ML Learning"      # 182 notes + the PDF shelf, the AI-ML-Vault
       - "C:/Users/qhukz/Documents/ObsidianNotes"       # see the `deny` block above
-      - "C:/Users/qhukz/Documents/MLAI NOTES/ML/AI"    # 1 note + a 32 MB PDF
+      # Removed 2026-08-26: `C:/Users/qhukz/Documents/MLAI NOTES/ML/AI` does not exist on
+      # this machine and had not for some time. A declared root that is absent is not
+      # harmless — `watchfiles` refuses to start on a path that is neither a file nor a
+      # directory, so the ONE missing root took the whole live re-indexing watcher down
+      # with it (`rag.watch_failed`), for every collection, silently apart from one
+      # warning at boot. The indexer skipped it and carried on; the watcher could not.
+      #
+      # It is deleted rather than commented back in as a TODO because a root is a
+      # human's declaration that ORACLE may read something, and a declaration about a
+      # directory nobody has is not one worth keeping. If those notes reappear, adding
+      # the line back is the deliberate act it is supposed to be.
     exclude:
       - "**/.obsidian/**"
-    max_file_bytes: 50000000                            # the 32 MB PDF is in scope
+    # The AI-ML-Vault keeps textbooks in `16 - Books/`, several of which are tens of MB.
+    # They are the reason for this ceiling — not, as this comment used to say, a single
+    # 32 MB PDF under the root removed above.
+    max_file_bytes: 50000000
 
 # Deliberately absent, and each absence is a decision:
 #   Documents/ at large  — game data, saves, configs

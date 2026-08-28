@@ -19,6 +19,8 @@ export interface OracleEvent {
   type: string;
   session_id: string | null;
   turn_id: string | null;
+  /** Present on `task.*` and `delegate.event` — groups a delegation's stream. */
+  task_id?: string | null;
   trace_id: string;
   payload: Record<string, unknown>;
 }
@@ -99,6 +101,80 @@ export interface ToolCall {
   tainted?: boolean;
   /** True when the embedding model was unavailable and only BM25 ran. */
   degraded?: boolean;
+}
+
+/** One normalised event from a delegated agent's stream (`delegate.event`). */
+export interface DelegateEvent {
+  kind: string;
+  text: string;
+  tool: string | null;
+  fromSubagent: boolean;
+}
+
+/**
+ * One delegation, folded from `task.created` / `task.updated` / `delegate.event` /
+ * `task.finished`. Like everything else in the store, it is a projection of events —
+ * the UI never knows more about a delegation than the server has said.
+ */
+export interface Delegation {
+  taskId: string;
+  task: string;
+  adapter: string;
+  /** rendering | awaiting_egress | running | verifying — then "finished". */
+  state: string;
+  /** success | failed | fallback | refused | expired | halted. Set at the end. */
+  outcome?: string;
+  feed: DelegateEvent[];
+  /** The `task.finished` payload: cost, diff stat, test verdict, workspace path. */
+  result?: Record<string, unknown>;
+}
+
+/**
+ * One task of a graph, folded from the `task.*` events that carry `source: "graph"`.
+ *
+ * The delegation lifecycle emits `task.*` for the same task id with its own payload
+ * shape, which is why the discriminator exists: both streams are wanted, and a client
+ * that guessed from payload keys would fold a delegation's "rendering" into a graph's
+ * status column.
+ */
+export interface GraphTask {
+  taskId: string;
+  kind: string;
+  status: string;
+  /** The tasks this one waits on. Populated from `task.created` since 2026-08-26 — before
+   *  that the scheduler never sent it, so this was always `[]` in the running app while a
+   *  test that hand-wrote the field asserted it rendered. A list is not a graph without it. */
+  dependsOn: string[];
+  /** What the task is for, verbatim. An objective summarised on the way to the screen is an
+   *  objective nobody read — the same rule the graph approval card follows. */
+  objective?: string;
+  role?: string;
+  agent?: string;
+  project?: string;
+  /** Which try this is. A *retry* (`attempt 2` of the same row) is a different thing from a
+   *  *replan* (`supersedes` a failed row), and §6b draws them differently. */
+  attempt?: number;
+  maxAttempts?: number;
+  startedAt?: string;
+  finishedAt?: string;
+  /** What the row cost, where the runner knew. `undefined` means nobody measured — which is
+   *  the honest answer for a local tool call, and is not the same as zero. */
+  cost?: { tokens?: number; usd?: number };
+  summary?: string;
+  /** What ORACLE measured. Never merged with `claim` — that distinction is the whole
+   *  verification design (docs/ORCHESTRATION.md §2). */
+  evidence?: Record<string, unknown>;
+  /** What the worker said about its own work. Shown as a quote, never as a verdict. */
+  claim?: string;
+  /** The failed attempt this task replaces (docs/ORCHESTRATION.md §4). Replanning is
+   *  append-only: the superseded row is still here, still failed, and the tree shows it
+   *  under its replacement rather than instead of it. */
+  supersedes?: string;
+}
+
+export interface Graph {
+  rootId: string;
+  tasks: GraphTask[];
 }
 
 export function asRecord(value: unknown): Record<string, unknown> {

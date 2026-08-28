@@ -76,8 +76,13 @@ def test_message_produces_the_full_event_sequence(client: TestClient) -> None:
             if ev["type"] == "turn.finished":
                 break
 
-    assert types[0] == "session.created"
-    assert "turn.started" in types
+    # `since_seq=0` replays the whole log, and since 2026-08-26 the first thing in a
+    # fresh one is `system.boot` — the daemon announcing itself so the next start can
+    # tell a clean stop from a crash (PROJECT_STATE.md §6). What this test is actually
+    # about is the ordering *within* a turn, so it asserts that rather than an index.
+    assert types[0] == "system.boot"
+    assert "session.created" in types
+    assert types.index("session.created") < types.index("turn.started")
     assert "message.completed" in types
     assert types[-1] == "turn.finished"
 
@@ -222,11 +227,14 @@ class TestKnowledgeHealth:
 
         from oracle.rag.chunking import Chunk
         from oracle.rag.collections import ContentKind, Document
-        from oracle.rag.embedding import E5_BASE
+        from oracle.rag.embedding import DEFAULT
         from oracle.rag.store import KnowledgeStore
 
-        store = KnowledgeStore(settings.data_dir / "knowledge.db", E5_BASE.out_dim)
-        store.bind(E5_BASE.name, E5_BASE.out_dim)
+        # `DEFAULT`, not a named spec: this asserts that an index built by the model
+        # this build ships reads back as healthy, and it has to keep doing that across
+        # a model switch.
+        store = KnowledgeStore(settings.data_dir / "knowledge.db", DEFAULT.out_dim)
+        store.bind(DEFAULT.name, DEFAULT.out_dim)
         doc = Document(
             collection="projects",
             project="Asterim",
@@ -240,7 +248,7 @@ class TestKnowledgeHealth:
         store.put(
             doc,
             [chunk],
-            np.zeros((1, E5_BASE.out_dim), dtype=np.float32),
+            np.zeros((1, DEFAULT.out_dim), dtype=np.float32),
             content_hash="h",
             provenance="local_owned",
             indexed_at="2026-08-22T00:00:00Z",
@@ -261,14 +269,294 @@ class TestKnowledgeHealth:
     ) -> None:
         """Not stale — wrong. Querying it returns confident nonsense, so the health view
         has to say so rather than reporting a healthy row count."""
-        from oracle.rag.embedding import E5_BASE
+        from oracle.rag.embedding import DEFAULT
         from oracle.rag.store import KnowledgeStore
 
-        store = KnowledgeStore(settings.data_dir / "knowledge.db", E5_BASE.out_dim)
-        store.bind("some-other-model", E5_BASE.out_dim)
+        store = KnowledgeStore(settings.data_dir / "knowledge.db", DEFAULT.out_dim)
+        store.bind("some-other-model", DEFAULT.out_dim)
         store.close()
 
         body = client.get("/api/v1/knowledge").json()
         assert body["built"] is False
         assert body["stale"] is True
         assert "reindex" in body["error"]
+
+
+class TestKnowledgeReindex:
+    """The health view's one action. The endpoint owns no indexing code: everything it
+    does is ask the executor for `know.reindex`, so the call crosses the policy gate
+    like every other invocation (ROADMAP sequencing rule 2)."""
+
+    def test_a_trigger_goes_through_the_executor_and_reports_what_the_tool_did(
+        self, client: TestClient
+    ) -> None:
+        """A successful run answers with the tool's own summary — not a bare 202. The
+        request holds until the index is up to date, so the result IS the report."""
+        from oracle.api.app import state_of
+        from oracle.policy.model import Decision, PolicyVerdict, Tier
+        from oracle.tools.executor import ToolOutcome
+        from oracle.tools.knowledge import KnowReindexResult
+
+        st = state_of(client.app)
+        asked: list[tuple[str, dict]] = []
+
+        class Recorder:
+            async def execute(self, tool_id: str, raw_args: dict, **_: object) -> ToolOutcome:
+                asked.append((tool_id, raw_args))
+                return ToolOutcome(
+                    tool=tool_id,
+                    ok=True,
+                    result=KnowReindexResult(
+                        documents=3,
+                        unchanged=2,
+                        chunks=5,
+                        embedded=4,
+                        cached=1,
+                        pruned=0,
+                        failed=0,
+                        seconds=1.2,
+                        degraded=False,
+                    ),
+                    verdict=PolicyVerdict(
+                        decision=Decision.ALLOW,
+                        tier=Tier.T1,
+                        base_tier=Tier.T1,
+                        rule="tools.know.reindex",
+                    ),
+                    duration_ms=7,
+                )
+
+        st.executor = Recorder()  # type: ignore[assignment]
+
+        body = client.post("/api/v1/knowledge/reindex", params={"full": True}).json()
+
+        assert asked == [("know.reindex", {"full": True})]
+        assert body["ok"] is True
+        assert body["documents"] == 3 and body["chunks"] == 5 and body["embedded"] == 4
+        assert body["cached"] == 1 and body["seconds"] == 1.2 and body["degraded"] is False
+
+    def test_a_bare_trigger_is_incremental_and_a_collection_rides_through(
+        self, client: TestClient
+    ) -> None:
+        """`full` re-embeds everything — roughly an hour on this CPU per the tool
+        contract — so it must never be implicit: an unqualified click gets the
+        incremental path. Scoping to one collection passes through unchanged."""
+        from oracle.api.app import state_of
+        from oracle.policy.model import Decision, PolicyVerdict, Tier
+        from oracle.tools.executor import ToolOutcome
+        from oracle.tools.knowledge import KnowReindexResult
+
+        st = state_of(client.app)
+        asked: list[tuple[str, dict]] = []
+
+        class Recorder:
+            async def execute(self, tool_id: str, raw_args: dict, **_: object) -> ToolOutcome:
+                asked.append((tool_id, raw_args))
+                return ToolOutcome(
+                    tool=tool_id,
+                    ok=True,
+                    result=KnowReindexResult(
+                        documents=0,
+                        unchanged=0,
+                        chunks=0,
+                        embedded=0,
+                        cached=0,
+                        pruned=0,
+                        failed=0,
+                        seconds=0.1,
+                        degraded=False,
+                    ),
+                    verdict=PolicyVerdict(
+                        decision=Decision.ALLOW,
+                        tier=Tier.T1,
+                        base_tier=Tier.T1,
+                        rule="tools.know.reindex",
+                    ),
+                    duration_ms=2,
+                )
+
+        st.executor = Recorder()  # type: ignore[assignment]
+
+        client.post("/api/v1/knowledge/reindex")
+        client.post("/api/v1/knowledge/reindex", params={"collection": "notes"})
+
+        assert asked == [
+            ("know.reindex", {"full": False}),
+            ("know.reindex", {"full": False, "collection": "notes"}),
+        ]
+
+    def test_a_policy_refusal_is_reported_not_worked_around(self, client: TestClient) -> None:
+        """A HALTed or locked-down daemon refuses `know.reindex` at the gate. The
+        endpoint reflects the executor's answer — `ok: false`, naming the reason —
+        rather than reaching into `rag/` itself, which would be exactly the second
+        execution path sequencing rule 2 forbids. An HTTP error would be wrong too:
+        a policy refusal is something to render, not a broken server."""
+        from oracle.api.app import state_of
+        from oracle.policy.model import Decision, PolicyVerdict, Tier
+        from oracle.tools.executor import ToolError, ToolErrorKind, ToolOutcome
+
+        st = state_of(client.app)
+
+        class Refuser:
+            async def execute(self, tool_id: str, raw_args: dict, **_: object) -> ToolOutcome:
+                return ToolOutcome(
+                    tool=tool_id,
+                    ok=False,
+                    result=None,
+                    verdict=PolicyVerdict(
+                        decision=Decision.DENY,
+                        tier=Tier.T1,
+                        base_tier=Tier.T1,
+                        rule="halt",
+                        reason="halted: user requested halt",
+                    ),
+                    duration_ms=1,
+                    error=ToolError(ToolErrorKind.DENIED, "halted: user requested halt"),
+                )
+
+        st.executor = Refuser()  # type: ignore[assignment]
+
+        resp = client.post("/api/v1/knowledge/reindex")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is False
+        assert body["error"]["kind"] == "denied"
+        assert "halted" in body["error"]["message"]
+
+    def test_malformed_input_is_refused_before_the_executor_is_consulted(
+        self, client: TestClient
+    ) -> None:
+        """`full=banana` is the client's error: a 422 from validation, not a 500 —
+        and nothing reaches the executor, because "it returned an error" and "it
+        never ran" are different properties and only the second is the claim."""
+        from oracle.api.app import state_of
+
+        st = state_of(client.app)
+        asked: list[str] = []
+
+        class Recorder:
+            async def execute(self, tool_id: str, raw_args: dict, **_: object) -> object:
+                asked.append(tool_id)
+                raise AssertionError("validation should have refused this request")
+
+        st.executor = Recorder()  # type: ignore[assignment]
+
+        resp = client.post("/api/v1/knowledge/reindex", params={"full": "banana"})
+
+        assert resp.status_code == 422
+        assert asked == []
+
+
+def test_the_task_graph_endpoint_is_a_projection_of_the_table(client: TestClient) -> None:
+    """`GET /api/v1/tasks` reads the rows and shapes them; it is not a second source of
+    truth (ORCHESTRATION.md §6). A graph nobody ran is an empty tree, not a 404 — the
+    client asking is a client that already saw a `task.*` event and wants the whole
+    picture, and an error would tell it to retry something that will never appear."""
+    import asyncio
+
+    from oracle.api.app import state_of
+    from oracle.orchestration.models import Task, TaskKind, TaskResult, TaskSpec, TaskStatus
+
+    st = state_of(client.app)
+    task = Task(
+        id="tk_a",
+        root_id="tk_root",
+        kind=TaskKind.TOOL,
+        spec=TaskSpec(objective="look at it", role="coder"),
+    ).with_status(
+        TaskStatus.SUCCEEDED,
+        result=TaskResult(ok=True, summary="done", evidence={"rule": "fs.read"}, claim="I looked"),
+    )
+    # `TestClient` is synchronous and owns the app's loop, so the row goes in on a loop
+    # of this test's own. Safe because `aiosqlite` binds each call's future to whichever
+    # loop is running when it is made, and the connection's worker thread resolves it
+    # there — but it is the only reason this looks odd.
+    asyncio.run(_save(st, task))
+
+    body = client.get("/api/v1/tasks", params={"root_id": "tk_root"}).json()
+    assert body["root_id"] == "tk_root"
+    assert body["live"] is False
+    assert body["status"] == "succeeded"
+    [only] = body["tasks"]
+    assert only["id"] == "tk_a" and only["kind"] == "tool"
+    # Evidence and claim arrive separate, all the way to the client.
+    assert only["evidence"] == {"rule": "fs.read"} and only["claim"] == "I looked"
+
+    empty = client.get("/api/v1/tasks", params={"root_id": "tk_nothing"}).json()
+    assert empty["tasks"] == [] and empty["live"] is False
+
+
+async def _save(st: object, task: object) -> None:
+    await st.task_store.save(task)  # type: ignore[attr-defined]
+
+
+# -- rung 4: a plan a person wrote  (P8-T3) ------------------------------------
+
+
+def _typed_plan(**overrides: object) -> dict:
+    body: dict = {
+        "objective": "tidy the docs",
+        "summary": "one pass",
+        "tasks": [
+            {
+                "id": "A",
+                "role": "coder",
+                "objective": "tidy the docs",
+                "acceptance": ["the suite still passes"],
+                "expected_outcome": "diff",
+            }
+        ],
+        "risks": [],
+    }
+    body.update(overrides)
+    return body
+
+
+def test_a_submitted_plan_that_names_a_tool_is_rejected_like_any_other(
+    client: TestClient,
+) -> None:
+    """Rung 4 of the ladder (docs/PLANNER.md §6) is a path, not a privilege. "The author
+    is trusted" is exactly the control ADR-0021 says never to build, so a plan a person
+    typed meets the same parser a vendor's does."""
+    hostile = _typed_plan()
+    hostile["tasks"][0]["tool"] = "fs.write"
+    with client.websocket_connect("/api/v1/stream?since_seq=0") as ws:
+        ws.send_json({"type": "graph.submit_plan", "payload": {"plan": hostile}})
+        problems: list[str] = []
+        for _ in range(40):
+            ev = ws.receive_json()
+            if ev["type"] == "plan.rejected":
+                problems = list(ev["payload"]["problems"])
+                assert ev["payload"]["authored_by"] == "human"
+                break
+    assert problems and any("tool" in p for p in problems), problems
+
+
+def test_a_submitted_plan_still_has_to_be_approved(client: TestClient) -> None:
+    """It reaches the same card, priced the same way. Denying it is a full stop."""
+    with client.websocket_connect("/api/v1/stream?since_seq=0") as ws:
+        ws.send_json({"type": "graph.submit_plan", "payload": {"plan": _typed_plan()}})
+        asked = None
+        for _ in range(60):
+            ev = ws.receive_json()
+            if ev["type"] == "approval.requested":
+                asked = ev["payload"]
+                break
+        assert asked is not None, "a plan a person typed ran without being approved"
+        assert asked["tool"] == "ai.graph"
+        assert asked["preview"]["authored_by"] == "human"
+        assert asked["preview"]["rung"] == 4
+        ws.send_json(
+            {
+                "type": "approval.respond",
+                "payload": {"approval_id": asked["approval_id"], "decision": "deny"},
+            }
+        )
+        for _ in range(40):
+            ev = ws.receive_json()
+            if ev["type"] == "approval.resolved":
+                assert ev["payload"]["resolution"] == "refused"
+                break
+        else:  # pragma: no cover - the loop above always finds it
+            raise AssertionError("the refusal was never recorded")

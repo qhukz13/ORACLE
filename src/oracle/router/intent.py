@@ -35,6 +35,18 @@ IntentLabel = Literal[
     "delegate",
     "pipeline",
     "control",
+    #: Added 2026-08-26 (P12-T2). The first label whose object is a **project rather
+    #: than a request**: it means "read this project's state and decide", which is a
+    #: planning call, not a tool call. The router stays a router — it does not decide
+    #: the work, it decides that the work is unknown and must be planned.
+    #:
+    #: `MEASURED 2026-08-28` (OQ-25): 97.1% intent accuracy on 34 cases with this label
+    #: in — up from 93.3% with ten labels — and all four `continue` cases route AND
+    #: resolve their project slot. The feared run/continue confusion appeared once, in
+    #: reverse ("собери GameRecs" -> continue). One deterministic exception: the model
+    #: never emits the project name ORACLE (9/9 null; a prompt instruction did not move
+    #: it) — `_named_project` in pipeline.py carries that case by design.
+    "continue",
 ]
 
 #: MEASURED FINDING (2026-08-21): Ollama's structured output enforces enums and
@@ -86,6 +98,7 @@ Decide by what the user WANTS TO HAPPEN, not by the grammar of the sentence.
 
 control      stop / cancel / halt the assistant. Highest priority.
 status       "what is happening right now" — agent state, git state, is it clean
+continue     resume unfinished work on a project. No specific task is named.
 run          execute something that already exists: tests, build, lint, a script
 pipeline     run a NAMED predefined workflow (the word pipeline, or a workflow name)
 investigate  something is BROKEN, failing, slow or unexpected -> find out why
@@ -101,6 +114,8 @@ Boundaries that matter:
 - "fix the typo in README" -> modify. "rewrite the whole auth module" -> delegate.
 - "ask Claude to ..." -> delegate, always.
 - "is my repo clean" -> status, not investigate.
+- "continue Asterim" -> continue. NO specific work is named; the assistant must look it up.
+- "run the Asterim tests" -> run. A specific, already-existing thing is named.
 
 project: copy EXACTLY one name from the known list, or null. NEVER invent one.
          null if the request does not clearly name a project.
@@ -133,6 +148,10 @@ _EXAMPLES = """Examples:
 "hey" -> {"intent":"chat","project":null,"confidence":"high"}
 "привет" -> {"intent":"chat","project":null,"confidence":"high"}
 "stop what you're doing" -> {"intent":"control","project":null,"confidence":"high"}
+"continue Asterim" -> {"intent":"continue","project":"Asterim","confidence":"high"}
+"продолжай работу над Asterim" -> {"intent":"continue","project":"Asterim","confidence":"high"}
+"look at our unfinished tasks and keep working" -> {"intent":"continue","project":null,"confidence":"medium"}
+"pick up where we left off in GameRecs" -> {"intent":"continue","project":"GameRecs","confidence":"high"}
 "run the tests" -> {"intent":"run","project":null,"confidence":"low"}
 "почини это" -> {"intent":"modify","project":null,"confidence":"low"}"""
 

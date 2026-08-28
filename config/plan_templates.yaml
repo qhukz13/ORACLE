@@ -1,0 +1,78 @@
+# ORACLE deterministic plan templates — rung 2 of the planner ladder (docs/PLANNER.md §6).
+#
+# A template is the shape of a plan with the objective left out. No model is involved:
+# ORACLE fills in the objective and the project it already resolved, and the result goes
+# through the SAME validator a vendor's plan does. A template that names a role no agent
+# holds is rejected exactly as a planner's plan would be, and the ladder descends again.
+#
+# Loaded at startup like the capability registry and like policy: data, versioned,
+# human-edited, never writable from a tool. An unreadable file means there are no
+# templates - which is a routing fact, not a crash.
+#
+# Two things a template deliberately cannot say:
+#
+#   * `project` - ORACLE supplies the project it resolved. A template that could name one
+#     would be a hallucinated path with a YAML file's authority behind it.
+#   * `tool` / `args` - the same rule as a plan (ADR-0021). `extra: forbid` on the model
+#     rejects the whole template file if one appears, rather than trimming it.
+#
+# Placeholders substituted in `objective`, `acceptance` and `constraints`: `{objective}`
+# only, by literal replacement rather than by `str.format` - the objective is user text,
+# and a format string is a small language nobody meant to expose.
+
+version: 1
+
+templates:
+  # The escalation path Phase 6 already built, written down as a shape. This is the
+  # default because it is the honest answer to "continue development on X" when no model
+  # is available to decompose it: look first, change second, prove third, read it back.
+  investigate_fix_verify_review:
+    default: true
+    when: [continue_project, investigate, fix, debug]
+    summary: >-
+      A deterministic template plan: investigate, fix, verify, review. No planner was
+      available, so the shape is ORACLE's rather than a model's.
+    tasks:
+      - id: A
+        role: researcher
+        objective: "Investigate and report on what is actually wrong, before changing anything: {objective}"
+        expected_outcome: report
+      - id: B
+        role: coder
+        objective: "Make the change: {objective}"
+        acceptance:
+          - "the project's existing test suite has no new failures"
+          - "the change is limited to the files the investigation named"
+        depends_on: [A]
+        expected_outcome: diff
+      # `verifier` is the role code holds: this compiles to a VERIFY task and ORACLE's
+      # own baseline comparison judges it, with no model involved (docs/PLANNER.md §4,
+      # "where code can judge, no model is asked"). It said `reviewer` until 2026-08-26,
+      # because the validator rejected the accurate spelling - see PLANNER.md §8.
+      - id: C
+        role: verifier
+        objective: "Verify B against the baseline: no new test failures, nothing written outside its scope."
+        depends_on: [B]
+        expected_outcome: verdict
+      - id: D
+        role: summarizer
+        objective: "Report what was done and what ORACLE measured, for: {objective}"
+        depends_on: [C]
+        expected_outcome: report
+
+  # For an objective that is a question rather than a change. Nothing writes.
+  research_and_report:
+    when: [answer, research, explain]
+    summary: >-
+      A deterministic template plan: research, then report. Read-only - no task in this
+      shape can produce a diff.
+    tasks:
+      - id: A
+        role: researcher
+        objective: "Research and gather what is needed to answer: {objective}"
+        expected_outcome: report
+      - id: B
+        role: summarizer
+        objective: "Write the answer from what A found: {objective}"
+        depends_on: [A]
+        expected_outcome: report

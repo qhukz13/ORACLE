@@ -155,17 +155,27 @@ class KnowledgeStore:
     # ---------------------------------------------------------------- meta
 
     def bind(self, model: str, dim: int) -> None:
-        """Record which model built this index, or refuse if it was a different one.
+        """Record which model and which chunker built this index, or refuse if it was a
+        different one.
 
         The vector dimension is fixed at build time, so an index built by one model and
         queried by another does not fail — it returns confident nonsense. This is the
         only place that can notice, so it raises rather than warns.
+
+        `chunker_version` is here for the same reason and was added after the same kind of
+        near-miss (2026-08-26): incremental indexing does not rebuild rows it already has,
+        so moving a chunk boundary leaves half an index cut one way and half the other.
+        A model change and a boundary change are both "the vectors mean something else
+        now", and both should cost a reindex rather than a slow decline nobody can see.
         """
+        from oracle.rag.chunking import CHUNKER_VERSION
+
         stored = {r["key"]: r["value"] for r in self.db.execute("SELECT key, value FROM meta")}
         expected = {
             "schema_version": str(_SCHEMA_VERSION),
             "embedding_model": model,
             "embedding_dim": str(dim),
+            "chunker_version": str(CHUNKER_VERSION),
         }
         mismatched = {
             key: (stored[key], want)

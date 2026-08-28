@@ -1,0 +1,30 @@
+[34mcorpus[0m
+[33m  root missing: C:\Users\qhukz\Documents\MLAI NOTES\ML\AI[0m
+[2m  skipped: {'type': 427, 'deny': 2, 'exclude': 5, 'untracked': 14, 'unreadable': 1}[0m
+  1506 docs {'projects': 1322, 'notes': 184} {'markdown': 550, 'config': 105, 'code': 839, 'text': 12}
+  16915 chunks (15521 semantic, 1394 lexical-only) in 3.8s
+  chars/chunk: mean 920 p50 1027 p95 1197 max 1346
+[32m  all 38 fixture sources present in the corpus[0m
+
+[34mlexical index[0m
+  BM25 over 16915 chunks, 67869 terms, 6.3s
+  recall@5 29%   misses: ['ru-token-refresh', 'ru-jwt-secret-storage', 'ru-own-yaml-parser', 'ru-two-users-one-agent', 'ru-feature-entitlement', 'ru-relay-encryption', 'ru-vector-search', 'ru-finetuning', 'en-access-token-lifetime', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-event-retention', 'ru-shutdown-order', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-migrations', 'ru-command-approval', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-bias-variance', 'ru-cross-validation', 'ru-learning-rate', 'ru-nonlinearity', 'ru-model-degrades']
+
+[34mbge-m3[0m (1024d, cls pooling)
+  embedded 15521 chunks in 7522.6s → [32m2.1 chunks/s[0m (load 2.6s, model 2268 MB)
+  dense   r@1 34%  r@5 66%  r@10 76%   misses: ['en-relay-dockerfile', 'en-access-token-lifetime', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  rrf     r@1 37%  r@5 63%  r@10 79%   misses: ['ru-feature-entitlement', 'en-relay-dockerfile', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-bias-variance', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  rrf_w2  r@1 39%  r@5 71%  r@10 79%   misses: ['en-relay-dockerfile', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  gated   r@1 37%  r@5 63%  r@10 79%   misses: ['ru-feature-entitlement', 'en-relay-dockerfile', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-bias-variance', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  dense_xlr@1 39%  [32mr@5 74%[0m  r@10 76%   misses: ['en-relay-dockerfile', 'en-access-token-lifetime', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-cross-validation', 'ru-model-degrades']
+  rrf_xl  r@1 37%  r@5 66%  r@10 82%   misses: ['en-relay-dockerfile', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-bias-variance', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  RU-only rrf    r@5 48%  r@10 68%   misses: ['ru-feature-entitlement', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-bias-variance', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  RU-only rrf_xl r@5 52%  r@10 72%   misses: ['ru-pairing-bruteforce', 'ru-air-gap', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-bias-variance', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  query 63 ms p50 / 97 ms p95, index 64 MB
+
+[34msummary[0m  (dense-only → hybrid with BM25+RRF; gate is recall@5 ≥ 80%)
+  model           dim  dense@5   hyb@5   RU@5  lex@5  chunks/s  idx MB
+  --------------------------------------------------------------------
+  bge-m3         1024[31m    66%    63%     71%    63%[0m    48%       2.1      64
+
+[2m  wrote logs/measurements/oq18-after.json[0m

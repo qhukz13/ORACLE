@@ -13,11 +13,11 @@ doc, delete the marker.
 | # | Question | Marker | Blocks | Status |
 |---|---|---|---|---|
 | [OQ-01](#oq-01) | Which router model actually fits and performs? | ~~`EXPERIMENT NEEDED`~~ | Phase 1 | **RESOLVED 2026-08-21 — 0.8b, 93.3% accuracy** |
-| [OQ-02](#oq-02) | Which embedding model for mixed RU/EN? | `EXPERIMENT NEEDED` | Phase 5 | **REOPENED 2026-08-22 — 25 Russian fixtures put e5-base at 36%, not 62%; `bge-m3` run pending** |
+| [OQ-02](#oq-02) | Which embedding model for mixed RU/EN? | ~~`EXPERIMENT NEEDED`~~ | Phase 5 | **RESOLVED 2026-08-24 — `bge-m3`, shipped; it only wins with the fusion gate fixed** |
 | [OQ-03](#oq-03) | How long will Pascal keep GPU acceleration? | `UNKNOWN` | risk, not a phase | monitoring |
 | [OQ-04](#oq-04) | Does `realpath` resolve Windows junctions? | ~~`TO VERIFY`~~ | Phase 2 | **RESOLVED 2026-08-21 — yes; but `is_symlink()` lies** |
 | [OQ-05](#oq-05) | Does `agy -p` emit stdout when piped? | ~~`EXPERIMENT NEEDED`~~ | Phase 6 (Antigravity only) | **RESOLVED 2026-08-21 — yes, with `--output-format`** |
-| [OQ-06](#oq-06) | Can a PWA install over a self-signed cert? | `TO VERIFY` | Phase 8 (push only) | open |
+| [OQ-06](#oq-06) | Can a PWA install over a self-signed cert? | `TO VERIFY` | Phase 14 (push only) | open |
 | [OQ-07](#oq-07) | Is the memory subsystem dual- or quad-channel? | `UNKNOWN` | CPU-fallback planning | open |
 | [OQ-08](#oq-08) | Does FTS5 `unicode61` handle Russian acceptably? | ~~`TO VERIFY`~~ | Phase 5 | **RESOLVED 2026-08-22 — yes; no stemmer, no camelCase split** |
 | [OQ-09](#oq-09) | `pywinpty` on Python 3.12 + ConPTY behaviour | ~~`TO VERIFY`~~ | Phase 3 | **RESOLVED 2026-08-21 — works; readiness must be measured, not slept** |
@@ -25,10 +25,18 @@ doc, delete the marker.
 | [OQ-11](#oq-11) | Does the Tauri sidecar die with the shell? | ~~`TO VERIFY`~~ | Phase 0 | **RESOLVED 2026-08-21 — yes, via Job Object** |
 | [OQ-12](#oq-12) | Is taint escalation tolerable in daily use? | `ASSUMPTION` | Phase 5+ tuning | open |
 | [OQ-13](#oq-13) | What approval rate causes prompt fatigue? | `ASSUMPTION` | Phase 3+ tuning | open |
-| [OQ-14](#oq-14) | Does the orbital view earn its place? | `UNKNOWN` | Phase 9 go/no-go | open |
+| [OQ-14](#oq-14) | Does the orbital view earn its place? | `UNKNOWN` | Phase 11 go/no-go | open |
 | [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | `EXPERIMENT NEEDED` | UX quality, not a phase | open |
 | [OQ-16](#oq-16) | Does `connect_read_pipe` work anywhere on Windows? | `UNKNOWN` | none — worked around | monitoring |
 | [OQ-17](#oq-17) | Is a ~43 min **cold** reindex acceptable? | `ASSUMPTION` | Phase 5 tuning | narrowed 2026-08-22 — warm rebuilds are 37 s |
+| [OQ-18](#oq-18) | Can Russian questions reach an English corpus at all? | measured 2026-08-26 | Phase 5 gate | **both levers measured — 78.9% against an 80% gate, one fixture short; gate NOT moved** |
+| [OQ-19](#oq-19) | Should the Claude integration move to the Claude Agent SDK? | `TO VERIFY` (on trigger) | none — trigger-based | open |
+| [OQ-20](#oq-20) | Can `agy --json-schema` reliably return a valid ExecutionPlan? | measured 2026-08-24 | P6-T5 / Phase 8 | **answered NO — 75% vs a 90% gate; the ladder promoted Claude** |
+| [OQ-21](#oq-21) | When does ORACLE's MCP server need the 2026-07-28 spec? | `UNKNOWN` | none — watch item | monitoring |
+| [OQ-22](#oq-22) | Does the knowledge graph hold its budgets at corpus scale? | measured 2026-08-26 | Phase 11 (graph view only) | **3 of 4 answered — build it, narrower; canvas-vs-SVG still needs a real window** |
+| [OQ-23](#oq-23) | Does a failure-carrying prompt produce a *different* plan? | `EXPERIMENT NEEDED` | nothing — replanning ships bounded | opened 2026-08-25 |
+| [OQ-24](#oq-24) | Does observing every project fit the glance budget? | **RESOLVED 2026-08-28** — no: 1.7–2.7 s warm for 8 rows; the sidebar observes lazily, per selected row | — | measured by `scripts/measure_observation.py` |
+| [OQ-25](#oq-25) | Did adding the `continue` label move intent accuracy? | **RESOLVED 2026-08-28** — 97.1% at eleven labels (was 93.3% at ten); the slot fails only for the name `ORACLE`, which the deterministic fallback carries | — | eval re-run with 4 `continue` cases |
 
 ---
 
@@ -84,7 +92,50 @@ runtime rather than of the model.
 
 ### OQ-02
 **Which embedding model for a mixed Russian/English corpus of prose and code?**
-**REOPENED 2026-08-22, the same day it was resolved.**
+**RESOLVED 2026-08-24 — `bge-m3` at 1024d, conditional on the fusion-gate fix that landed
+with it. Not switched by default; see below.**
+
+Full write-up: [`logs/development/2026-08-24-oq02-bge-m3.md`](../logs/development/2026-08-24-oq02-bge-m3.md).
+
+The decisive run finally happened: both candidates built over the same full corpus on the
+same day and measured by the same code, 38 fixtures of which 25 are Russian.
+
+| embedding | fusion gate | recall@5 | crosslang | p95 |
+|---|---|---:|---:|---:|
+| `e5-base` | as shipped | 55% | 36% | 271 ms |
+| `e5-base` | fixed | 55% | 36% | 260 ms |
+| `bge-m3` | as shipped | 53% | 32% | 401 ms (fails) |
+| **`bge-m3`** | **fixed** | **61%** | **44%** | 332 ms |
+
+**Measured against the retrieval code as it shipped, `bge-m3` loses.** The fusion gate was
+admitting BM25's thirty results on 38 questions out of 38 — including all 25 Russian ones,
+for which BM25 returned the corpus's one Russian-documented project whatever the question
+was about. Fusion can only displace a correct dense hit that exists, so the damage scaled
+with how good the dense half was: it cost `bge-m3` twelve points of cross-language recall
+and `e5-base` nothing. **The comparison was measuring the gate, not the model** — and the
+2026-08-22 conclusion that "the Russian failures are the embedding" was drawn through the
+same instrument.
+
+The gate now drops terms in a script the corpus is not written in, and requires the
+survivors to cover 40% of the question. No configuration regresses; `bge-m3` gains eight
+points on the column this question exists to decide.
+
+**`DEFAULT` is `bge-m3` as of 2026-08-24.** The owner took the switch: one line
+(`DEFAULT = BGE_M3`), one full rebuild, and resident memory goes from ~1.5 GB to ~3 GB.
+`e5-base` keeps its `ModelSpec` and is one line back — `KnowledgeStore.bind` refuses an
+index built by the other model, so a switch either way is a rebuild, never silent
+nonsense.
+
+**What this question no longer answers.** At 61% the system is nineteen points under its
+own 80% recall gate, and 7 of 25 Russian cases never enter the candidate set at all. That
+is not an embedding choice; the untried levers are query translation and the ~20% of
+chunks silently truncated at 512 tokens (`TO VERIFY` in `rag/chunking.py`). See
+[OQ-18](#oq-18).
+
+---
+
+**REOPENED 2026-08-22, the same day it was resolved** — retained below, because the
+reasoning it records is what the 2026-08-24 run corrected.
 
 The answer below — `multilingual-e5-base` at 768d — was chosen on a Russian sample of **eight**
 questions. Expanding that set to 25 (P5-T2 requirement 6, ground truth read from the files rather
@@ -191,9 +242,9 @@ a developer cost, not a user one — but "warm rebuild = 37 s" was the best case
 model change, is tolerable. Everything else is now fast enough not to be a design concern.
 
 It also removes indexing cost as an argument against `bge-m3` — its ~2.5 h is paid once,
-after which its rebuilds are as cheap as e5-base's. The recall question in
-[OQ-02](#oq-02) has since been reopened: the expanded Russian fixtures put `e5-base` far lower
-than the eight-question sample did.
+after which its rebuilds are as cheap as e5-base's. That argument has since been settled:
+[OQ-02](#oq-02) resolved on 2026-08-24 in `bge-m3`'s favour, and the cost this entry
+measures is the price of the switch.
 
 **Resolve by using it.** If a cold rebuild ever becomes frequent, the remaining levers are
 to embed only changed collections, or to accept `e5-small` for a first pass and upgrade in
@@ -274,7 +325,7 @@ tokens** to answer "say hello" (large injected system prompt), so it is a poor c
 ---
 
 ### OQ-06
-**Can a PWA install and receive push over a self-signed certificate?** `TO VERIFY` · bounds **Phase 8**
+**Can a PWA install and receive push over a self-signed certificate?** `TO VERIFY` · bounds **Phase 14**
 
 Browsers require a secure context for service workers. A self-signed cert is untrusted by default,
 which likely blocks PWA installation and Web Push.
@@ -282,7 +333,7 @@ which likely blocks PWA installation and Web Push.
 **Check.** Serve the PWA over the self-signed cert; attempt install and service-worker registration on
 the actual phone. Then repeat with a locally-installed CA.
 
-**Does not block Phase 8** — v1 ships in-app WS notifications only, and says so plainly
+**Does not block Phase 14** — v1 ships in-app WS notifications only, and says so plainly
 ([MOBILE.md §5](MOBILE.md#the-open-problem--oq-06)). It only decides whether background push is
 achievable later.
 
@@ -421,13 +472,13 @@ should move to "auto + undo" instead.
 ---
 
 ### OQ-14
-**Does the orbital view earn its place?** `UNKNOWN` · Phase 9 go/no-go
+**Does the orbital view earn its place?** `UNKNOWN` · Phase 11 go/no-go
 
 The design commits to a test rather than to the feature: cover every label and it must still be
 possible to say what ORACLE is doing
-([UI.md §3](UI.md#3-the-core-orbital-view--phase-9), [ROADMAP P9](ROADMAP.md#phase-9--advanced-ui--post-mvp)).
+([UI.md §3](UI.md#3-the-core-orbital-view--phase-11), [ROADMAP P11](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc)).
 
-**Resolve at Phase 9.** If it fails, delete it and record an ADR saying so. Deleting a centrepiece
+**Resolve at Phase 11.** If it fails, delete it and record an ADR saying so. Deleting a centrepiece
 that does not work is a success, not a failure — and deciding this *after* months of real event data
 is exactly why it is scheduled late.
 
@@ -475,6 +526,301 @@ adapter streaming stdout.
 **Rule for this codebase:** on Windows, read pipes on a thread. Do not reach for
 `connect_read_pipe`.
 
+### OQ-18
+**Can a Russian question reach an English codebase well enough to meet the 80% gate?**
+`EXPERIMENT NEEDED` · Phase 5 gate · **opened 2026-08-24 by [OQ-02](#oq-02)'s resolution**
+
+OQ-02 asked which embedding model, got a decisive answer, and the answer is not enough.
+The best configuration this system has produced — `bge-m3` with the fixed fusion gate —
+scores **61% recall@5 against a gate of 80%**, and **44% on the 25 Russian fixtures**
+([log](../logs/development/2026-08-24-oq02-bge-m3.md)).
+
+The shape of the remaining failure says it is not a ranking problem. Seven of the 25
+Russian cases never enter the thirty candidates at all, so no reranker, no wider top-k and
+no further fusion work can reach them. Their English neighbours in the same collections do
+land, so nothing is unindexed.
+
+Two levers, neither measured:
+
+1. **Query translation.** Embed an English translation of the Russian question as a second
+   dense probe and fuse the two candidate lists. The router model is already resident and
+   already sees every query, so the marginal cost is one short generation — but it puts a
+   model call on the retrieval path, which [RAG.md §5](RAG.md#5-hybrid-retrieval) has so
+   far avoided, and the latency budget has ~70 ms of headroom at `bge-m3`'s p95.
+2. **The 512-token truncation.** ~20% of chunks exceed the model limit and are silently
+   truncated (`TO VERIFY` in `rag/chunking.py`, open since 2026-08-22). If the answer
+   sentence is routinely past the cut, this is a chunking bug being read as a retrieval
+   one, and it is much cheaper to fix.
+
+**Measure the second first** — it is a property of the corpus that can be counted without
+building anything, and it would change what the first experiment means.
+
+**Until this resolves, the Phase 5 recall criterion is not met**, and saying so is more
+useful than moving the gate to where the numbers already are.
+
+#### Lever 2, measured  `2026-08-25, P9-T1`
+
+`scripts/measure_truncation.py`, [dev log](../logs/development/2026-08-25-oq18-truncation.md).
+Tokenized the declared corpus with `bge-m3`'s own tokenizer — no inference, so the whole
+measurement costs about a minute.
+
+**Truncation is real and much worse than the estimate:** 2,545 of 12,648 chunks (**20.1%**) exceed
+the 512-token window, taking **10.1% of all corpus tokens** with them. It is not uniform —
+**88% of `config` chunks** overflow, against 13% of code. And the character cap that was supposed
+to prevent this is **not enforced**: 17% of chunks are longer than `MAX_CHARS`, the longest by more
+than double.
+
+**And it is not the cause of this question's gap.** The seven Russian cases that never enter the
+candidate list all point at notes-collection markdown whose chunks fit the window with room to
+spare — **0% of their tokens are lost**. Across all 25 Russian fixtures only five expected files
+contain any truncated chunk at all, and the worst loses 11% of one two-chunk file.
+
+**So lever 2 is ruled out and lever 1 is what remains.** Query translation now has to be run on its
+own merits, and — this is what the ordering bought — its result will be interpretable, because the
+index it is measured against does not have a hole where the answers are. The chunking defects are
+worth fixing on their own terms; they belong to a task that touches retrieval, because they change
+chunk boundaries and therefore invalidate every recall number measured before them.
+
+#### The baseline was measured with the wrong chunker  `2026-08-26, P9-T2`
+
+[dev log](../logs/development/2026-08-26-oq18-chunking.md). `scripts/eval_embeddings.py` carried its
+own copy of the chunker — correct for OQ-02, where five candidates had to see byte-identical chunks,
+and wrong from the moment the model was fixed. On the same corpus the copy produced **12,770**
+chunks and the shipped chunker **11,727**. **Every recall number this question records was computed
+over chunks ORACLE does not produce.**
+
+The harness calls the shipped chunker now. Re-measured against it, before any repair:
+
+| | recorded here | measured 2026-08-26 |
+|---|---|---|
+| best overall recall@5 | 61% (gated) | **68%** (`rrf_w2`); gated is 58% |
+| RU (crosslang) recall@5 | 44% | **40%** |
+
+Neither is a regression — they are the first numbers that describe the shipped code. The gate is
+unchanged at 80% and unmet.
+
+The truncation figures in the section above were measured the same way and are corrected in the same
+log: **27.1%** of *embedded* chunks over the window (not 20.1%), and **6.42%** of embedded tokens
+(not 10.1%, which counted config chunks that are never embedded at all). The conclusion is
+unaffected: the seven Russian cases that never reach the candidate list lose **0%** of their tokens.
+
+`MAX_CHARS` is recalibrated (1800 → 1200) and now enforced against the rendered chunk, taking
+truncation to 0.7% of embedded chunks.
+
+#### Both levers measured  `2026-08-26, P9-T2`
+
+Two full runs over the real corpus, ~4.3 hours of CPU, same fixtures, same model, the only
+difference between them the chunker: `logs/measurements/oq18-{before,after}.json`,
+[dev log](../logs/development/2026-08-26-oq18-chunking.md).
+
+**First, a correction that changes what this question has been recording.** `retrieve()`'s
+`discriminating_terms` drops minority-script terms at any frequency, so a Russian query returns no
+lexical terms and ORACLE takes the **dense-only** path — it never fuses BM25. The eval harness's
+`gated` strategy uses a different rule with no script test, so **the 44% recorded above was
+measuring a code path ORACLE does not run.**
+
+Composed per-case from the miss lists, for the path that actually ships:
+
+| | overall recall@5 | RU recall@5 |
+|---|---|---|
+| before this task | 68.4% | 56.0% |
+| **after the chunker repair** | **71.1%** | **60.0%** |
+| **+ an English probe (human translation)** | **78.9%** | **72.0%** |
+| the gate | 80% — 31 of 38 fixtures | |
+
+**78.9% is 30 of 38. The gate needs 31.** One fixture.
+
+| lever | effect on the shipped path |
+|---|---|
+| 2 · truncation, fixed | +2.7 overall, +4.0 RU |
+| 1 · query translation, at its ceiling | +7.8 overall, +12.0 RU |
+| 3 · not fusing BM25 on a crosslingual query | already correct in `retrieval.py`; worth **12–20 RU points**, and the harness had it wrong |
+
+**The gate stays at 80% and is unmet.** 6.3 points on 38 fixtures is 2.4 cases; a gate re-argued to
+sit just below where the numbers landed would measure nothing. What changed is that "unmet" now has
+a number, a decomposition, and a named next step.
+
+**Two things block closing it, and neither is a matter of typing:**
+
+1. **The translator is unmeasured.** +12.0 RU is what a *human* translation buys — the ceiling of
+   the idea, deliberately, so that a negative result would have killed it outright. Whether the
+   resident 0.8B model's Russian reaches that ceiling is the next measurement, and it is cheap:
+   translate 25 fixture questions, re-score the query half. Ollama was not running on this machine,
+   so it could not be done here.
+2. **The latency does not fit the interactive path.** A second dense probe costs one more query
+   embedding — 63 ms p50 / 97 ms p95, measured — against the ~70 ms of headroom recorded above, and
+   that is *before* the generation call. Where it fits is the Handoff Packet, where a delegation
+   takes minutes and retrieval already runs.
+
+**One of the eight remaining misses is structural rather than a ranking problem.**
+`en-relay-dockerfile` expects `Asterim/Dockerfile.relay`, a **config** file — indexed lexically and
+never embedded. No dense probe of any quality can retrieve it; the lexical half is what should, and
+the script rule turns that half off for the queries around it. A fixture set that includes it is
+measuring fusion and dense retrieval with one number.
+
+---
+
+### OQ-19
+**Should the Claude integration move from the pinned CLI contract to the Claude Agent SDK?**
+`TO VERIFY` · trigger-based, blocks nothing
+
+The Python Claude Agent SDK (0.x as of 2026-08) wraps the same `claude` subprocess with typed
+streaming events, lifecycle hooks (PreToolUse can *block* a tool — which could enforce the policy
+gate in-process rather than via `--allowedTools` + MCP), in-process MCP servers, and session
+management. That is genuinely better than parsing stream-json by hand. It is also a moving 0.x
+API replacing a contract that is **working, recorded into fixtures, and tested** — and it would
+shift the pinned surface in INTEGRATIONS.md §3 from CLI flags to an SDK version.
+
+**Decision recorded in [ADR-0022](DECISIONS.md#adr-0022--external-agent-frameworks-evaluated-not-adopted):**
+keep the hand-rolled contract. **Trigger to re-open:** the next breaking drift of the CLI stream
+contract (quarterly re-verification will catch it) — at that point the migration cost is paid
+either way, and the SDK should win. Check then: SDK maturity (out of 0.x?), whether hooks can
+express the gate's decisions, dependency weight, and whether `--setting-sources`/scrub isolation
+survives the SDK path.
+
+---
+
+### OQ-20
+**Can `agy --json-schema` reliably return a valid `ExecutionPlan`, at what cost and latency?**
+**Answered `NO` at the stated gate — 2026-08-24, P6-T5.** The ladder has promoted; Phase 8's
+default planner is **Claude**, not Antigravity.
+
+Measured over 16 supervised calls (4 real objectives × `--effort low|high` × 2 repeats), driving
+the real adapter against a schema generated from PLANNER.md §2. Full analysis and every call:
+[`logs/development/2026-08-24-p6t5-antigravity-planning.md`](../logs/development/2026-08-24-p6t5-antigravity-planning.md).
+
+| | result | gate |
+|---|---|---|
+| valid on first attempt | **12/16 = 75%** | ≥ 90% — **missed** |
+| …at `--effort low` alone | 7/8 = 87.5% | still short, on 8 samples |
+| median latency | 27.1 s (low) · 42.9 s (high) | — |
+| median cost | ~55k tokens per plan (955k across the run) | — |
+
+**The failure shapes matter more than the rate.** None of them was the truncation or
+prose-wrapping the question anticipated:
+
+* **3 × the planner went browsing.** All at `--effort high`. Given an empty temp workspace, it
+  tried to `read_file("C:\Users\qhukz")` — the owner's home directory — and once a named personal
+  file. The vendor's permission gate denied it, which ended the run. That gate exists here only
+  because ORACLE refuses `--dangerously-skip-permissions`; under that flag those calls would have
+  read the owner's home directory and sent what they found to the vendor. **The strongest result
+  of the spike is a security one, and it is not about planning.**
+* **1 × `structured_output` returned `tasks: []`** while the raw `response` beside it held a
+  complete six-task plan. The vendor's schema filter drops non-conforming items **silently**.
+  A schema-shaped answer is not a validated answer.
+* **Valid ≠ schedulable.** Only 7 of 12 valid plans declared *any* dependency; five were DAGs with
+  no edges — tasks a scheduler would fire simultaneously that must plainly be sequential.
+  `project`, `context_hints` and `agent_hint` were filled on 45 of 72 tasks.
+
+**Sample size, stated plainly:** 16 calls, not the ≥ 20 the task specified. The pilot measured
+55.6k tokens per plan — 4× the pre-run estimate — and the owner trimmed the grid. OQ-20 is
+therefore **narrowed with numbers rather than closed at the stated power**, and re-opening it
+costs another ~1M tokens.
+
+**What follows** (PLANNER.md §5–§6): Claude authors plans against the same schema and the same
+validation; Antigravity keeps `reviewer` and `researcher`. If it is ever reconsidered for
+`planner`: pin `--effort low`, add the repair round trip, add a tolerant parse of the raw
+`response` as a second source, and demand dependencies explicitly in the prompt.
+
+---
+
+### OQ-21
+**When does ORACLE's hand-rolled MCP server need the 2026-07-28 spec revision?**
+`UNKNOWN` · watch item, blocks nothing
+
+ORACLE speaks protocol `2025-06-18` — four JSON-RPC methods, pinned by tests, zero dependencies
+(INTEGRATIONS.md §4). The 2026-07-28 revision makes the core stateless, replaces server-initiated
+requests with MRTR, and adds a Tasks extension for long-running operations — the last being
+genuinely relevant to exposing delegations over MCP someday.
+
+**The standing rule already covers this:** take the SDK (now v2) the day a client rejects the
+hand-rolled surface. **Watch:** Claude CLI release notes for a minimum-protocol-version bump;
+re-check quarterly with the vendor-contract re-verification. Do not migrate pre-emptively — the
+current surface works and the SDK costs 24 packages in the trusted base (measured, P6-T3).
+
+---
+
+### OQ-22
+**Does the knowledge-graph view hold its layout, rendering and quality budgets at corpus scale?**
+`EXPERIMENT NEEDED` · blocks the Phase 11 graph view (nothing else); design in
+[UI.md §11b](UI.md#11b-the-knowledge-graph--phase-11), decision in
+[ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered)
+
+The design commits to numbers nobody has measured on this corpus (~1,330 documents, ceiling 10k)
+and this machine. Four measurements, run at the start of Phase 11 before the view is built:
+
+1. **Offline layout cost.** A force layout of the full document graph in the indexing worker —
+   wall-clock and peak memory, cold and incremental. Gate: fits inside the incremental-index
+   budget for the add-one-document case; a full re-layout may cost minutes because it is explicit.
+2. **Rendering.** Canvas pan/zoom over the full corpus at 60 fps on this GPU/WebView2, idle
+   < 5% CPU, first paint < 1 s from cached positions. Compare an SVG control run to keep ADR-0023
+   honest — if SVG survives at this node count, the canvas complexity is unjustified.
+3. **Semantic-edge quality.** Embedding-kNN thresholds/caps that produce readable clusters rather
+   than a hairball, judged against the four questions the view exists to answer (shape, neglect,
+   reach, use) on the real corpus. If no threshold reads well, semantic edges ship off and stay a
+   toggle-nothing — the explicit link graph alone may be the honest product.
+4. **Incremental placement.** New documents placed at neighbour centroids: does the map stay
+   recognisable after a week of real edits, without a re-layout?
+
+Failure of 1 or 2 changes the mechanism (coarser graph: one node per note/section, or
+level-of-detail culling), not the goal. Record results in `logs/development/` and fold the
+numbers into TESTING.md's performance table when the view lands.
+
+#### Measured  `2026-08-26, P11-T1`
+
+`scripts/measure_graph.py`, [dev log](../logs/development/2026-08-26-oq22-knowledge-graph.md),
+data in `logs/measurements/oq22-graph.{json,txt}`. Corpus fingerprint `e342f8a55a6ce17d`.
+
+**Measurement 3 ran first**, against the ordering above, because the edge model decides the node
+count and the node count is what the rendering question is asked at.
+
+| | result |
+|---|---|
+| **3 · semantic edges** | **Required, not optional.** Explicit wikilinks touch **11% of the corpus** (157 of 1,420 documents; 156 of them `notes`, 1 `projects`). Explicit-only leaves **1,168 of 1,325 embeddable documents orphaned**. Semantic edges take that to 44. Recommended default **k=4, thr=0.85**: 3,103 edges, 189 orphans, 35% giant component, 2-hop median 0.9%. The useful band is **0.80–0.90**; 0.95 is indistinguishable from no semantic edges. |
+| **3b · bridges** | **The one question the view cannot answer.** Across every k and every threshold the graph holds **one** edge joining `notes` to `projects`. Not a tuning failure — the notes are ML prose and the projects are code. UI.md §11b's four questions become three. |
+| **1 · layout** | Cold 1,420 nodes / 3,103 edges: **27.8 s**, peak RSS **121 MB**. Incremental placement p95 **0.032 ms**. All three gates pass by wide margins. |
+| **1b · the real cost** | Reading 13,771 vectors out of `vec0` is **51.8 s**; pooling and the full kNN together are **0.2 s**. The arithmetic is 0.2% of the work. **`document_vectors` is a required table**, written by `store.put()` — otherwise incremental indexing spends 52 s against a `< 5 s` budget and it gets misdiagnosed as slow layout. |
+| **1c · the ceiling** | Clean O(N²): 500/1k/2k/4k → 3.4/13.8/55.4/200.7 s projected. Extrapolated to ADR-0023's 10k ceiling: ~21 min, ~800 MB — inside the time gate, **outside the 500 MB one**. The current corpus does not need Barnes-Hut; a 7x larger one would. |
+| **4 · stability** | **Reframed as a holdout**, because "after a week of real edits" is unanswerable inside a phase. Jaccard@10 against a full re-layout: **0.477 / 0.410 / 0.336** at 5 / 10 / 20% holdout, against a self-imposed 0.70 gate — **missed**. Positions remain *stable* (nothing moves on its own, per ADR-0023); what degrades is *fidelity*. So re-layout must be prompted after a few percent growth, not buried — and at 28 s it is cheap. |
+| **2 · canvas vs SVG** | **Not answered.** It needs rAF deltas from a compositing window on this GPU inside WebView2, and the spike ran without one. Frozen positions are in `oq22-graph.positions.npz` so the harness has its input. At 1,420 nodes / 3,103 edges the scene is unremarkable for SVG, and OQ-22 asks for that control precisely to keep ADR-0023 honest — so **[ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered) is UNCONFIRMED** until somebody runs it. |
+
+**And one finding that was not one of the four.** The first stability run returned 0.249 at *every*
+holdout fraction — a metric not responding to its own variable. The cause was in the layout:
+initial positions were seeded by **array index**, so the same document started somewhere different
+depending on how many documents existed and in what order. Seeding from a hash of the node's own id
+fixed it, and the numbers immediately became monotone. This matters beyond the measurement:
+**ADR-0013's argument is that a person learns where things are**, and array-order seeding breaks
+that at the source — reindex after adding one file and every position shifts. It would have shipped
+as "the layout is unstable, add more iterations".
+
+---
+
+### OQ-23
+**Given a failure, does a real planner produce a materially different plan — or a rephrased one?**
+`EXPERIMENT NEEDED` · blocks nothing; replanning shipped in P8-T2 with the budget that makes a bad
+answer cheap. Design in
+[ORCHESTRATION.md §4](ORCHESTRATION.md#as-built--replanning--p8-t2-2026-08-25).
+
+The replan prompt states what failed, ORACLE's measurements of it, what never ran, and that the
+failed approach must not be repeated. Every one of those sentences is a *design decision*: nobody
+has checked that a vendor given them changes its mind rather than restating its first plan with
+new wording. The P6-T5 spike measured plan validity, not plan *difference*, and the two are not
+the same property.
+
+**The measurement**, when a real objective has failed at least twice in normal use (a synthetic
+failure would answer a synthetic question):
+
+1. Capture the first plan, the failure, and the replan for ≥ 10 real replans.
+2. Score each pair: same tasks reworded · same decomposition with different targets · genuinely
+   different approach. A useful replanner should mostly land in the third bucket; mostly landing
+   in the first means the prompt is decoration and the budget is spending money for nothing.
+3. Separately: does naming the skipped work cause the replan to re-author it, or to forget it?
+   That sentence exists to prevent silent loss of scope and has never been checked.
+
+Failure of (2) changes the prompt, not the mechanism — the append-only lineage, the budget and the
+approvals are correct regardless of whether the planner has a second idea worth having. Failure of
+(3) is a scope bug and is worth fixing immediately.
+
 ## Standing assumptions
 
 Not questions, but things the design takes as true and would need revisiting if they change:
@@ -487,3 +833,155 @@ Not questions, but things the design takes as true and would need revisiting if 
 | Claude Code stays available and affordable | Delegation degrades to the Handoff Packet fallback (already built) |
 | Projects mostly live under `C:\Projects` | Scope configuration grows, but nothing structural changes |
 | D:/E: keep ~190 GB free | Models and index need a new home; C: cannot host them |
+
+---
+
+### OQ-24
+**Does observing every project fit the 3–5 second glance budget?** **RESOLVED 2026-08-28 — no.**
+Opened 2026-08-26 · measured by `scripts/measure_observation.py` · answer applied the way this
+question said it would be: **lazily, per selected row, never cached.**
+
+**The measurement** (8 registered rows — the 7 candidates plus ORACLE — against the daemon's
+exact stack: registry → policy gate → toolhost, on this machine, while the OQ-18 ONNX eval held
+all cores at below-normal priority, so every number is an upper bound under deliberate load):
+
+| | cold | warm (median) |
+|---|---:|---:|
+| full 8-row fan-out | 1,982–2,490 ms | **1,654–2,673 ms** |
+| worst single repo (Asterim/ORACLE class) | ~460–540 ms | ~430–600 ms |
+| toolhost spawn (paid once at boot) | 2,846–3,115 ms | — |
+
+Per-call decomposition on the worst repo: `detect_project` 14–16 ms in-process, `git.status`
+213–242 ms, `git.log --limit 1` 186–192 ms — **the two IPC round trips dominate; git itself is
+single-digit ms.** Under load a toolhost invocation costs ~176–310 ms against the documented
+idle p50 of 27.9 ms, and pass-to-pass variance was ±40%.
+
+**Verdict.** The fan-out misses the 1 s budget 2–3× and would eat most of the 3–5 s glance
+budget on its own. Two structural findings sharpen the "no":
+
+- **the toolhost serialises invocations**, so an eager fan-out does not just cost wall time — it
+  queues behind (and ahead of) real work;
+- the projected `~13 projects ≈ 1 s` arithmetic failed the same way ADR-0004's did, which is why
+  it was measured instead of trusted.
+
+**Applied 2026-08-28 (P11-T5 arc):** the sidebar observes **the selected row only** —
+`GET /api/v1/projects/{id}` on selection and on task events, rendered as `⎇ branch ↑n ↓n ~n`,
+held in no cache (a re-selection re-reads). The list endpoint still runs no git, and the test
+pinning that is unchanged. One caveat recorded honestly: the `Source2DemViewer`-sized-repo
+scenario this question asked for does not exist — that directory has 3,893 files in `target/`
+and **no `.git`**, so the heaviest real rows are ordinary repos at ~300–600 ms each.
+
+[VISION.md §2](VISION.md#2-the-day--the-acceptance-test) allocates 3–5 seconds to understanding
+the screen. Observed state is deliberately never cached
+([PROJECT_STATE.md §2](PROJECT_STATE.md#2-the-distinction-that-makes-this-design-work)), so
+showing branch and dirty count for N projects costs **N × (`git.status` + `git.log`)**, each a
+toolhost round trip plus a `git` process. Warm IPC is p50 **27.9 ms** and a `git status` on a warm
+repo is single-digit milliseconds, so the arithmetic suggests ~13 projects ≈ 1 s — but the
+arithmetic is exactly what ADR-0004 got wrong about `qwen3.5:2b`, so it is not an answer.
+
+**What P12-T1 shipped instead of guessing:** `GET /api/v1/projects` runs **no git at all** and
+omits branch and dirty count; only `GET /api/v1/projects/{id}` observes, one project at a time.
+A test asserts the list endpoint exposes no observed state, so the cheap path cannot quietly
+acquire a fan-out later.
+
+**The experiment**, when the sidebar wants those columns: time the fan-out at the real project
+count against a cold and a warm toolhost, on this machine, with a repository the size of
+`Source2DemViewer` (3,915 files in `target/`) in the set.
+
+**The answer is not a cache.** If the fan-out misses, observe **lazily per row** — the row that
+is on screen, when it is on screen. Caching would make the sidebar wrong the moment someone
+switches branches in their editor, which is the failure this whole design is shaped to avoid.
+
+---
+
+### OQ-25
+**Did adding the `continue` label move intent accuracy?** **RESOLVED 2026-08-28 — no; it went
+up.** Opened 2026-08-26 · deliberately deferred by the owner, then measured once `make eval`
+existed and the fixture set carried `continue` cases.
+
+P12-T2 added an eleventh `IntentLabel`. Accuracy was measured at **93.3%** and single-tool
+selection at **100%** on a 30-case fixture set with ten labels
+([OQ-01](#oq-01)); neither number has been re-measured since.
+
+**The named risk is `continue` vs `run` and `modify`.** To a 0.8B classifier *"run the Asterim
+tests"* and *"continue Asterim"* differ by one word, and both name a project. `run` is the
+expensive confusion: it would send a `continue` to tool selection, which picks one existing
+command instead of reading the project's state.
+
+**What was done instead of measuring**, so the deferral is not a blank cheque:
+
+- the system prompt states the boundary explicitly rather than leaving it inferable —
+  *"continue: resume unfinished work on a project. No specific task is named"*, plus a paired
+  example contrasting it with `run`;
+- four few-shots, one of them Russian, matching what every other label carries;
+- a test asserts the prompt teaches the boundary and that the Russian example exists, so a
+  future edit cannot quietly delete the mitigation.
+
+None of that is a number. **A wrong route here is recoverable** — the user sees the intent on
+the turn and can rephrase — which is why this blocks nothing.
+
+**To resolve:** run `scripts/eval_intent.py` against the fixture set, add `continue` cases to it
+first, and record the result the way OQ-01 was recorded. Note that `make eval` is documented in
+[TESTING.md §8](TESTING.md) and **defined nowhere** — that has to be fixed or the doc corrected
+before this can be run the documented way.
+
+### First real evidence  `2026-08-28, P12-T5`
+
+Two live `continue ORACLE` runs against the real router
+([dev log](../logs/development/2026-08-28-p12t5-first-run.md)):
+
+| | |
+|---|---|
+| `intent` | **`continue`** both times, confidence `medium` — the label routes |
+| `project` | **`null` both times** — on an input whose second word is a registered project |
+
+So the feared failure did not happen: `continue` was not confused with `run` or `modify`. A
+different one did. **The project slot is unreliable**, and the turn only worked because
+`_named_project` scans the raw text against the registry — a fallback written for `delegate`.
+
+That fallback cannot cover the cases that matter later: a project named in a *previous* turn, or
+referred to obliquely. Fixtures should pin the slot, not just the label, before anything trusts
+it. This does not change the marker — the eval is still un-rerun — but it narrows what to look
+for when it is.
+
+### Resolution  `2026-08-28`
+
+Four `continue` cases added to `tests/fixtures/intent/cases.yaml` — pinning the **slot** as
+deliberately as the label, per the live evidence above — and the eval re-run
+(`uv run python scripts/eval_intent.py`, now also `make eval`):
+
+```
+intent accuracy     97.1%   (33/34)   gate: 85%   PASS      (was 93.3% at ten labels)
+project accuracy    88.2%   (30/34)                          (was 90.0% at 30 cases)
+clarify behaviour  100.0%   (34/34)
+continue cases      4/4 label AND slot: Asterim, GameRecs, Asterim, and an honest null
+confusions          run -> continue ×1  ("собери GameRecs" — the feared boundary, in reverse)
+structured output   0 repairs, 0 failures
+route latency       p50 2611 ms — POLLUTED: the OQ-18 corpus run held all 24 cores during the
+                    eval. Not comparable to the 1542 ms idle baseline; draw nothing from it.
+route prompt        1447 tokens estimated avg (budget 1200) — the continue few-shots grew it;
+                    real prompt 1071 tok. Worth trimming if the budget is ever enforced.
+```
+
+**The four project-slot misses decompose cleanly, and none is a `continue` case:**
+
+- **2 are pre-routed by construction** (`en-delegate-explicit`, `en-pipeline-named`): the
+  deterministic path answers before the model runs, and the eval scores their slot as missed.
+  An artefact of the scoring, carried since OQ-01's 90.0%.
+- **2 are few-shot proximity beating slot extraction** (`en-delegate-refactor`,
+  `en-question-doc`): each text is nearly identical to a few-shot that carries
+  `project: null` — *"refactor the entire auth module"*, *"what does the relay Dockerfile
+  do"* — and the model reproduces the example's null over the `Asterim` present in the actual
+  sentence. At 0.8B, a matching example outweighs the instruction to read the sentence.
+
+**The live-run slot failure is explained, and it is not general.** A 9-call probe with `ORACLE`
+in the registry: `continue ORACLE` → project `null` **9/9, deterministic**, while
+`continue Asterim` resolves 3/3 in the same session. The 0.8B model will not emit `ORACLE` as a
+project value — the word is saturated as a common noun/company name — and **a prompt instruction
+did not move it** (one boundary line under `project:` was tried, measured 6/6 still-null, and
+reverted; the fixture suite is the stop condition for prompt polishing). The turn still works
+because `_named_project` — deterministic code — carries exactly this case, which is the
+architecture's own rule: the most common correct action is not to call the LLM at all. If a
+second self-colliding name ever appears, the options recorded here are (a) a deterministic
+`continue <registered-name>` pre-route, which also removes ~2.6 s of model latency, or (b)
+renaming the row — not more prompt work.

@@ -7,7 +7,11 @@
   --bg-3: #1e2432;
   --fg-0: #d8dee9;
   --fg-1: #9aa5b8;
-  --fg-2: #5c6779;
+  /* Raised from #5c6779 on 2026-08-26: it measured 2.98:1 on --bg-2 and 2.71:1 on --bg-3,
+     under UI.md §14's 3:1 floor for non-text. It is muted decoration, not body text, so 3:1
+     is the bar that applies — but it was under even that on the two raised surfaces, which
+     are exactly where cards and inputs put it. Now 3.38:1 at worst. */
+  --fg-2: #6b7688;
   --line: #232a38;
 
   --st-idle: #64748b;
@@ -16,7 +20,17 @@
   --st-wait: #f59e0b;
   --st-ok: #22c55e;
   --st-err: #ef4444;
-  --st-halt: #b91c1c;
+  /* Raised from #b91c1c (red 700) on 2026-08-26. It measured 2.99 / 2.82 / 2.63 / 2.40:1
+     across the four surfaces — under §14's 3:1 status floor on ALL of them, and it is the
+     token that means HALTED. The least visible status in the app was the one that says
+     everything has stopped.
+
+     Raising it narrows the luminance gap to --st-err, and that is acceptable because §14's
+     own table never asked hue to carry the distinction: halt is `fully static,
+     cross-hatched` where error is not, and §17 gives the halted state a red-tinted border
+     over the whole UI with every control disabled. Colour is the least of the four signals.
+     Now 3.21:1 at worst. */
+  --st-halt: #dc2626;
   --st-ext: #a78bfa;
 
   --m-instant: 80ms;
@@ -77,12 +91,28 @@ button.ghost { background: transparent; }
   margin-left: 3px; vertical-align: text-bottom; animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 
-.events { width: 100%; border-collapse: collapse; font-size: 12px; }
-.events th { text-align: left; color: var(--fg-2); font-weight: 500;
-  border-bottom: 1px solid var(--line); padding: 5px 8px; position: sticky; top: 0; background: var(--bg-0); }
-.events td { padding: 3px 8px; border-bottom: 1px solid var(--bg-1); }
-.events .num { color: var(--fg-2); text-align: right; }
-.events .type { color: var(--st-think); }
+/* The activity timeline (UI.md §7) — replaced the flat .events table 2026-08-28. */
+.timeline { font-size: 12px; }
+.tl-filter { width: 100%; font: inherit; padding: 7px 11px; margin-bottom: 8px;
+  background: var(--bg-2); color: var(--fg-0); border: 1px solid var(--line); border-radius: 4px; }
+.tl-group { border-bottom: 1px solid var(--bg-1); }
+.tl-head { display: flex; align-items: baseline; gap: 8px; }
+/* The disclosure is a real button (aria-expanded) — a button nested in <summary> is a
+   nested-interactive violation, which is why this is not a <details>. */
+.tl-disclose { flex: 1; display: flex; align-items: baseline; gap: 10px; min-width: 0;
+  background: transparent; border: none; padding: 6px 4px; text-align: left;
+  font: inherit; color: inherit; cursor: pointer; }
+.tl-disclose:hover:not(:disabled) { border: none; }
+.tl-caret { width: 1em; color: var(--fg-2); }
+.tl-disclose .tl-label { color: var(--fg-0); flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-rows { list-style: none; margin: 0 0 6px; padding: 0 0 0 18px; }
+.tl-row { display: flex; align-items: baseline; gap: 8px; padding: 2px 0; }
+.tl-time { color: var(--fg-2); white-space: nowrap; }
+.tl-mark { width: 1em; text-align: center; }
+.tl-type { color: var(--st-think); white-space: nowrap; }
+.tl-summary { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-seq { font-size: 10px; }
 
 .composer { display: flex; gap: 8px; padding: 12px 14px; flex: none;
   background: var(--bg-1); border-top: 1px solid var(--line); }
@@ -238,7 +268,7 @@ kbd {
 }
 .palette-list li.sel { background: var(--bg-3); }
 .palette-list li.sel .pi-label { color: var(--st-think); }
-.palette-empty { cursor: default; }
+.palette-empty { cursor: default; margin: 0; padding: 11px 15px; }
 .pi-label { flex: 1; color: var(--fg-0); }
 .pi-hint { color: var(--fg-2); font-size: 11px; }
 
@@ -335,3 +365,260 @@ kbd {
 .kh-failures { margin-top: 6px; color: var(--fg-1); font-size: 12px; }
 .kh-failures code { color: var(--fg-0); }
 .kh-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+/* ── Egress preview ────────────────────────────────────────────────────────
+   docs/INTEGRATIONS.md#6. The one card where the UI is part of the security
+   model: what is rendered here is what leaves the machine, byte for byte. */
+.egress { margin: 8px 0; padding: 10px 12px; background: var(--bg-2);
+  border: 1px solid var(--st-ext); border-radius: 3px; font-size: 12px; }
+.egress-dest { margin: 0 0 4px; color: var(--st-ext); font-weight: 700; }
+.egress-size { margin: 0 0 6px; color: var(--fg-1); }
+.egress-files { margin: 0 0 6px; padding-left: 18px; max-height: 120px; overflow-y: auto; }
+.egress-files code { color: var(--fg-0); }
+.egress-redactions { margin: 0; color: var(--fg-1); }
+.egress-redactions-list { margin: 2px 0 6px; padding-left: 18px; color: var(--st-wait); }
+.egress-dropped { margin: 0 0 4px; color: var(--st-wait); }
+.egress-taint { margin: 4px 0; color: var(--st-wait); }
+.egress-note { margin: 6px 0 0; font-size: 11px; }
+.egress-note code { color: var(--fg-1); }
+
+/* ── Delegations ───────────────────────────────────────────────────────────
+   docs/INTEGRATIONS.md#7: diff + test results + summary + cost. The verdict is
+   ORACLE's evidence (gate-run tests), never the delegate's own claim. */
+.delegations { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.dg { background: var(--bg-1); border: 1px solid var(--line); border-radius: 3px;
+  padding: 8px 12px; font-size: 12px; }
+.dg-head { display: flex; align-items: baseline; gap: 10px; }
+.dg-adapter { color: var(--st-ext); font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; font-size: 11px; }
+.dg-task { color: var(--fg-0); }
+.dg-state { color: var(--fg-1); font-size: 11px; letter-spacing: .06em; }
+.dg-success .dg-state { color: var(--st-ok); }
+.dg-failed .dg-state, .dg-halted .dg-state { color: var(--st-err); }
+.dg-awaiting_egress .dg-state, .dg-refused .dg-state, .dg-expired .dg-state,
+.dg-fallback .dg-state { color: var(--st-wait); }
+.dg-feed { margin: 6px 0 0; padding-left: 14px; color: var(--fg-1); list-style: none; }
+.dg-feed .sub { padding-left: 14px; color: var(--fg-2); }
+.dg-fallback { margin: 6px 0 0; color: var(--st-wait); }
+.dg-result { display: flex; align-items: center; gap: 14px; margin-top: 8px;
+  padding-top: 6px; border-top: 1px solid var(--line); color: var(--fg-1); flex-wrap: wrap; }
+.dg-tests.ok { color: var(--st-ok); }
+.dg-tests.bad { color: var(--st-err); }
+.dg-tests.warn { color: var(--st-wait); }
+.dg-ws { color: var(--fg-2); font-size: 11px; }
+
+/* ── Pipeline approval card ────────────────────────────────────────────────
+   docs/PIPELINES.md#3. The only card in ORACLE that authorises several actions
+   at once, so the styling carries two decisions rather than decorating one:
+   a step that needs the approval is marked and the ones that do not are dimmed,
+   and a pipeline that came from a repository is warned about in the same colour
+   the egress card uses for taint. */
+.pipeline-card { margin: 8px 0; padding: 10px 12px; background: var(--bg-2);
+  border: 1px solid var(--line); border-radius: 3px; font-size: 12px; }
+.pc-name { margin: 0 0 4px; color: var(--fg-0); }
+.pc-project { color: var(--fg-1); }
+.pc-source { margin: 0 0 6px; font-size: 11px; }
+.pc-source-project { color: var(--st-wait); }
+.pc-params { margin: 0 0 6px; display: flex; gap: 10px; flex-wrap: wrap; color: var(--fg-1); }
+.pc-param { font-family: ui-monospace, monospace; }
+.pc-count { margin: 0 0 6px; color: var(--fg-1); }
+.pc-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.pc-step { padding: 4px 0; }
+/* Dimmed, not hidden: a person needs to see everything that will run, and to be able
+   to tell at a glance which parts this decision is actually about. */
+.pc-auto { opacity: .62; }
+.pc-asks { border-left: 2px solid var(--st-wait); padding-left: 8px; margin-left: -10px; }
+.pc-step-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.pc-id { color: var(--fg-0); font-weight: 700; }
+.pc-tool { color: var(--st-ext); font-family: ui-monospace, monospace; }
+.pc-tier { color: var(--fg-1); font-size: 11px; letter-spacing: .06em; }
+.pc-tier-T2 { color: var(--st-wait); }
+.pc-badge { color: var(--st-wait); font-size: 10px; letter-spacing: .08em; font-weight: 700; }
+/* Verbatim and monospaced: the grant that gets minted binds to a digest of exactly
+   these arguments, so this line is part of the security model, not a caption. */
+.pc-args { margin-top: 2px; color: var(--fg-0); font-family: ui-monospace, monospace;
+  word-break: break-all; }
+.pc-rule { margin-top: 2px; font-size: 11px; }
+.pc-omitted { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
+.pc-omitted-label { color: var(--fg-2); font-size: 10px; letter-spacing: .08em; }
+.pc-omitted ul { margin: 4px 0 0; padding-left: 18px; color: var(--fg-1); }
+.pc-note { margin: 8px 0 0; font-size: 11px; }
+
+/* ── Execution tree ────────────────────────────────────────────────────────
+   docs/UI.md#6b. Every `tt-*` class was unstyled until 2026-08-26 — the component
+   shipped at P7-T3 and the stylesheet never learned about it, so a running graph
+   rendered as an unformatted list. The styling carries three distinctions that are
+   part of the design rather than decoration:
+
+     · evidence and the worker's claim look different, because they ARE different;
+     · `skipped` does not read like `cancelled`, and `timeout` does not read like
+       `failed` — §14's status colours, not one grey for "not ok";
+     · a superseded attempt is visibly subordinate to its replacement, because the
+       lineage is the explanation of what the graph cost. */
+.task-trees { display: flex; flex-direction: column; gap: 10px; margin: 8px 0; }
+.tt { background: var(--bg-1); border: 1px solid var(--line); border-radius: 3px;
+  padding: 8px 12px; font-size: 12px; }
+.tt-graph-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.tt-root { color: var(--fg-0); font-weight: 700; font-family: ui-monospace, monospace; }
+.tt-count, .tt-elapsed { color: var(--fg-1); }
+.tt-cost { color: var(--st-ext); }
+
+.tt-tasks { margin: 6px 0 0; padding-left: 0; list-style: none;
+  display: flex; flex-direction: column; gap: 6px; }
+.tt-task { padding: 4px 0 4px 8px; border-left: 2px solid var(--line); }
+.tt-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+/* The longest-path column. A number, because "stage 3" is a fact about what must finish
+   first and a bar chart would imply a duration nobody measured. */
+.tt-stage { color: var(--fg-2); font-variant-numeric: tabular-nums;
+  min-width: 1.4em; text-align: right; }
+.tt-id { color: var(--fg-0); font-weight: 700; font-family: ui-monospace, monospace; }
+.tt-kind, .tt-role { color: var(--fg-1); font-size: 11px; letter-spacing: .06em; }
+.tt-agent { color: var(--st-ext); }
+.tt-status { color: var(--fg-1); }
+.tt-attempt { color: var(--st-wait); font-size: 11px; }
+
+/* §14's vocabulary, applied. A status that renders as "not ok" grey has thrown away the
+   distinction ORCHESTRATION §2 spent a whole enum on. */
+.tt-running { border-left-color: var(--st-run); }
+.tt-running .tt-status { color: var(--st-run); }
+.tt-succeeded { border-left-color: var(--st-ok); }
+.tt-succeeded .tt-status { color: var(--st-ok); }
+.tt-failed { border-left-color: var(--st-err); }
+.tt-failed .tt-status { color: var(--st-err); }
+.tt-timeout { border-left-color: var(--st-err); }
+.tt-timeout .tt-status { color: var(--st-err); }
+.tt-waiting { border-left-color: var(--st-wait); }
+.tt-waiting .tt-status { color: var(--st-wait); font-weight: 700; }
+.tt-cancelled .tt-status, .tt-skipped .tt-status { color: var(--fg-2); }
+
+.tt-objective { margin-top: 2px; color: var(--fg-0); }
+.tt-deps { margin-top: 2px; color: var(--fg-2); font-size: 11px; }
+.tt-summary { margin-top: 2px; color: var(--fg-1); }
+/* The two that must never look alike. Evidence is what ORACLE measured and is safe to act
+   on; the claim is what the worker said about its own work and gates nothing. */
+.tt-evidence { margin-top: 2px; color: var(--st-ok); font-family: ui-monospace, monospace; }
+.tt-claim { margin-top: 2px; color: var(--fg-2); font-style: italic; }
+
+.tt-superseded { margin-top: 4px; }
+.tt-superseded > summary { color: var(--st-wait); font-size: 11px; cursor: pointer; }
+.tt-superseded .tt-task { opacity: .7; }
+
+/* ───────────────────────────────────────────── Projects in the sidebar (UI.md#4)
+   Status is icon + label + colour, never colour alone (UI.md#14): `.pj-status` carries
+   the word for EVERY row, not only the alarming ones — a label that appears only on
+   failure is one nobody learns to read.
+
+   Branch and dirty count are deliberately absent. They would cost a `git` subprocess per
+   project per render, and that fan-out is unmeasured (OQ-24). */
+.pj { gap: 6px; }
+.pj .dot { font-style: normal; width: 12px; text-align: center; }
+.pj-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pj-status {
+  color: var(--fg-2); font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+}
+.pj-count {
+  color: var(--fg-1); font-size: 10px; background: var(--bg-3);
+  border-radius: 8px; padding: 0 5px;
+}
+.pj-count.attn { color: #1a1205; background: var(--st-err); font-weight: 700; }
+.pj-active .dot { color: var(--st-run); }
+.pj-active .pj-name { color: var(--fg-0); }
+.pj-idle .dot { color: var(--st-idle); }
+.pj-archived { opacity: .6; }
+.pj-missing .dot, .pj-missing .pj-status { color: var(--st-err); }
+.tree-item.selected { background: var(--bg-3); color: var(--fg-0); }
+
+/* Candidates are directories nobody registered. Collapsed on purpose: the real projects
+   root holds `New folder` and `docs.zip` next to the real ones, and registration is an
+   explicit human act (ADR-0024). */
+.pj-candidates { margin-top: 6px; }
+.pj-candidates > summary {
+  color: var(--fg-2); font-size: 11px; cursor: pointer; padding: 2px 6px;
+}
+.pj-candidates .ghost-item { color: var(--fg-2); }
+.pj-candidates .ghost-item:hover { color: var(--fg-0); }
+
+/* ─────────────────────────────────────────────────── The briefing (UI.md#7b)
+   The glance surface: what changed since the reader last acknowledged. Everything here
+   is sized to be read in three to five seconds — if it stops being, it has failed however
+   much information it gained. */
+.briefing { padding: 14px 16px; max-width: 900px; }
+.bf-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.bf-title {
+  margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--fg-1);
+}
+.bf-empty { color: var(--fg-2); }
+.bf-empty > span { margin-right: 6px; }
+
+.bf-project {
+  border: 1px solid var(--line); border-left-width: 3px; border-radius: 5px;
+  background: var(--bg-1); padding: 8px 10px; margin-bottom: 8px;
+}
+/* The only loud element, matching the sidebar and the core: one attention channel, one
+   meaning (UI.md#4, UI.md#3). */
+.bf-project.attn { border-left-color: var(--st-wait); }
+.bf-project-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.bf-project-head button.link {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--fg-0); font-weight: 600; font-size: 13px;
+}
+.bf-project-head button.link:hover { text-decoration: underline; }
+.bf-system-title { color: var(--fg-1); font-weight: 600; font-size: 13px; }
+.bf-counts { color: var(--fg-1); font-size: 11px; }
+
+.bf-lines { list-style: none; margin: 6px 0 0; padding: 0; }
+.bf-line {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 3px 0; font-size: 12px; color: var(--fg-1);
+}
+.bf-mark { font-style: normal; width: 12px; text-align: center; }
+.bf-status {
+  font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--fg-2); min-width: 66px;
+}
+.bf-objective { flex: 1; color: var(--fg-0); }
+.bf-error { color: var(--st-err); font-family: ui-monospace, monospace; font-size: 11px; }
+.bf-more { color: var(--fg-2); font-size: 11px; padding-top: 4px; }
+button.ghost.small { font-size: 10px; padding: 1px 6px; }
+
+.bf-line.st-waiting .bf-mark, .bf-line.st-waiting .bf-status {
+  color: var(--st-wait); font-weight: 700;
+}
+.bf-line.st-failed .bf-mark, .bf-line.st-failed .bf-status,
+.bf-line.st-timeout .bf-mark, .bf-line.st-timeout .bf-status { color: var(--st-err); }
+.bf-line.st-succeeded .bf-mark, .bf-line.st-succeeded .bf-status { color: var(--st-ok); }
+.bf-line.st-running .bf-mark, .bf-line.st-running .bf-status,
+.bf-line.st-ready .bf-mark, .bf-line.st-pending .bf-mark { color: var(--st-run); }
+.bf-line.st-cancelled .bf-status, .bf-line.st-skipped .bf-status { color: var(--fg-2); }
+
+/* ─────────────────────────────────────────────────────── Phase 11 T5: centre stage
+   The switcher (ViewTabs) and the inspector's task branch. Tabs live in the command
+   bar; the selected one is filled, the rest are quiet — same density rule as the rest
+   of the bar. */
+
+.tabs { display: inline-flex; gap: 2px; background: var(--bg-2); border: 1px solid var(--line);
+  border-radius: 5px; padding: 2px; }
+.tab { position: relative; background: transparent; border: none; border-radius: 3px;
+  padding: 4px 10px; color: var(--fg-2); }
+.tab:hover:not(:disabled) { color: var(--fg-0); border: none; }
+.tab[aria-selected="true"] { background: var(--bg-3); color: var(--fg-0); }
+/* The one tab allowed to demand attention (the briefing, until acknowledged) — the same
+   colour the sidebar's WAITING ON ME uses, because it is the same kind of demand. */
+.tab.attn { color: var(--st-wait); }
+.tab-dot { position: absolute; top: 3px; right: 3px; width: 5px; height: 5px;
+  border-radius: 50%; background: var(--st-wait); }
+
+/* The task id doubles as the inspect affordance when the tree can select. A button,
+   restyled to the id's face — underline on hover is the interactivity signal. */
+button.tt-id { background: transparent; border: none; padding: 0; cursor: pointer; }
+button.tt-id:hover { text-decoration: underline; border: none; }
+
+/* The inspector's task branch. */
+.ins-pair { display: contents; } /* keep dt/dd in the .ins-facts grid through the wrapper */
+.ins-claim { margin: 0; padding: 6px 10px; border-left: 2px solid var(--fg-2);
+  color: var(--fg-1); font-style: italic; word-break: break-word; }
+
+/* The selected row's observed half — read fresh, held nowhere (OQ-24). */
+.pj-git { color: var(--fg-2); font-size: 11px; margin-left: auto; white-space: nowrap; }

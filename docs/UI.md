@@ -1,6 +1,13 @@
 # ORACLE — Interface Specification
 
 > A serious developer tool that happens to look good. Not a film prop.
+>
+> **What the interface is *for* is [VISION.md](VISION.md)**; this document is how it is built. The
+> spec was re-audited against the owner's restated vision on 2026-08-26 and found to already
+> describe it — §1–§21 were kept, one surface was added (§7b, the briefing), and no design language
+> was revised. `TO VERIFY` — the vision's visual references were **not attached to that session and
+> are not in the repository**, so §1, §14 and §15 stand as previously written rather than as
+> confirmed against them.
 
 ## 1. Visual philosophy
 
@@ -13,7 +20,7 @@ Jarvis influence is in the *language* — a luminous core, orbiting contexts, st
 | **Every pixel reports state** | If an element doesn't answer a question I actually have, it's deleted. |
 | **Calm by default** | Idle = still and dim. Motion means something happened. An interface that is always animating can't signal anything. |
 | **Density over spaciousness** | This is a tool for someone reading logs and diffs, not a landing page. Tight leading, small type, real information per screen. |
-| **The centre earns its place** | The orbital view ships in P9 with an explicit test: cover every label and you must still be able to say what ORACLE is doing. If it fails, it gets cut. |
+| **The centre earns its place** | The orbital view ships in P11 with an explicit test: cover every label and you must still be able to say what ORACLE is doing. If it fails, it gets cut. |
 | **Never colour alone** | Every status carries icon + label + colour. Required for accessibility and for glanceability. |
 | **The terminal is first-class** | Not a hidden debug panel. It's where trust is built: I can see the actual commands. |
 
@@ -64,14 +71,23 @@ telemetry · a spinning globe · progress bars that don't map to real progress.
 | Inspector | 300–420 px, resizable | `Ctrl+I` | context-sensitive; auto-opens on selection |
 | Dock | 4 states | `Ctrl+\`` | terminal / logs / problems |
 
-**Center stage is switchable, not fixed.** `Ctrl+1..4` → Orbit · Chat · Timeline · Tasks. When a
+**Center stage is switchable, not fixed.** `Ctrl+1..4` → Orbit · Chat · Timeline · Tasks; from
+Phase 11, `Ctrl+5` → Knowledge graph (§11b). When a
 conversation starts, ORACLE **auto-switches to Chat** and the orbit demotes to a 40 px core indicator
 in the command bar. This is the resolution of "beautiful centrepiece vs. useful interface": the orbit
 is the ambient/idle view, chat is the working view, and the transition is automatic.
 
+> **As built — P11-T5, 2026-08-28.** The switcher exists (`ViewTabs`, a real tablist with
+> arrow-key roving) over the stages that exist: **Chat · Tasks · Timeline · Memory · Briefing ·
+> Knowledge**, with `Ctrl+1..4` on the first four (§16 has the corrected table and the reason).
+> The auto-switch to Chat on a new conversation is implemented and is the one stage change the
+> app makes for you (§21 rule 6); the briefing's once-only first-paint takeover (§7b) is the
+> documented exception. Orbit still owns a slot when it lands (P11-T2, gated on
+> [OQ-14](OPEN_QUESTIONS.md#oq-14)).
+
 ---
 
-## 3. The core (orbital view) — **Phase 9**
+## 3. The core (orbital view) — **Phase 11**
 
 ### What it must communicate
 
@@ -160,6 +176,22 @@ WORKSPACE                         ⌃B
   ROADMAP.md
 ```
 
+**Where these numbers come from.** [PROJECT_STATE.md](PROJECT_STATE.md), and the distinction
+that governs this row is that document's §2: `2 tasks` is **stored**, `branch main +3` is **read
+fresh** from git and never cached.
+
+**As built `P12-T4`:** task counts, status and registration are live from
+`GET /api/v1/projects`. Directories nobody registered appear collapsed under *"N not tracked"*:
+the real projects root holds ten, including `New folder` and `docs.zip`.
+
+**As built `P11-T5 arc, 2026-08-28` — the branch line, lazily.**
+[OQ-24](OPEN_QUESTIONS.md#oq-24) was measured: the full fan-out costs 1.7–2.7 s warm for 8 rows
+(2–3× over the 1 s budget) and the toolhost serialises invocations, so eager observation would
+also queue behind real work. Per that question's own fallback, the **selected row** — the one
+being looked at — is observed via `GET /api/v1/projects/{id}` on selection and on task events,
+rendered as `⎇ main ↑3 ↓1 ~2`, cached nowhere; every other row still shows stored fields only,
+and the test asserting the list endpoint exposes no observed state is unchanged.
+
 Rules: sections collapse and persist · counts are live · **"Waiting on me" is the only sidebar item
 allowed to demand attention** (amber, and it sorts to the top when non-empty) · the agent section
 shows the real model and real VRAM, because on 4 GB that number is genuinely operational · clicking a
@@ -237,7 +269,89 @@ Rules: every row is a link to evidence · costs are shown because delegation is 
 always present and always works · a failed step shows the typed error plus a retry affordance where
 retrying is safe.
 
----
+> **As built — P11-T5, 2026-08-28: the task branch exists.** The inspector now renders a TASK
+> section above the turn when the selection is a task — objective verbatim, status in
+> ORCHESTRATION.md §2's words, kind/role/agent, attempt *n of m*, wall time, cost only where
+> something measured it, `after` (dependencies) and `replaces` (lineage), then **ORACLE
+> MEASURED** (the evidence dict, verbatim) apart from **THE WORKER SAID** (the claim, styled as
+> a quote). Selection is one model app-wide (§21 rule 1): a turn click, a task-row click in the
+> Tasks stage, and the briefing's inspect button all drive the same selector — the P12-T4
+> stopgap that pushed a task id into a turn-only selector is gone. A task id that outlived the
+> store's five held graphs says so instead of silently showing a turn. The mock's PROGRESS /
+> FILES / worktree affordances stay future: they need per-task tool streams the wire does not
+> group yet.
+
+The supervisor architecture's primary new surface: one root task, its plan, its tasks, their
+attempts, and the evidence for each — as a tree, because that is what it is
+([ORCHESTRATION.md §6](ORCHESTRATION.md#6-observability)). The tree **is a query** over the
+`tasks` table and the event log; it maintains no state of its own.
+
+```
+▾ ⚙ continue development on Asterim              running · 12m · $0.14
+  ✓ plan        antigravity · planner            4 tasks · [view plan] [egress #1]
+  ✓ A implement retry logic   claude · coder     diff +214/−36 · tests 41/41 · [worktree]
+  ▾ ✗ B cover the 401 case    claude · tester    tests 40/41 — FAILED       [evidence]
+      ✗ attempt 1                                the failing case · [diff] [logs]
+      ◆ B′ (replan 1/2)       claude · tester    running 2m
+  ○ C review                  antigravity        waiting on B′
+  ○ D digest                  local              waiting on C
+```
+
+Rules, inherited and extended:
+
+- **Every row links to evidence** — ORACLE's measurements (diff stat, test counts, scope check),
+  with the worker's own claim shown separately and labelled as a claim. Same rule as the Task
+  Inspector: dead-end numbers are a bug.
+- **Superseded tasks stay visible**, collapsed under their replacement — the lineage is the
+  explanation of what the graph cost. Nothing is erased, because the event log doesn't erase.
+- Status vocabulary matches [ORCHESTRATION.md §2](ORCHESTRATION.md#2-task-model) exactly —
+  `skipped` renders differently from `cancelled`, `timeout` differently from `failed`, and each
+  says why in one word.
+- Layout uses a topological rank with **longest-path** column assignment (ported from Asterim's
+  `dagColumns` — drawing a node next to the root would claim a parallelism the graph does not
+  have), plain SVG/DOM, keyboard-navigable, no graph library — the ADR-0013 philosophy applied
+  to a tree.
+- Per-row cancel for anything running; the graph card's approve/deny state mirrors into the
+  Confirmation Center like every approval.
+
+In the **orbital view**, a root task is one node on the tasks ring; its workers appear as child
+glyphs while running (`ORACLE → Asterim → Claude·coder / Claude·tester / AGY·review`, the
+replan brief's picture). Selecting any of them opens this tree in the inspector. The orbit still
+answers "what is ORACLE doing"; the tree answers "how, and with what evidence".
+
+### What was built  `P7-T3, 2026-08-25` — the list, not the tree
+
+`TaskTree.tsx` is the *plain* version of the above: a list per graph, with dependencies, status,
+and a cancel button per stoppable row. The orbital view, the longest-path layout and the
+superseded-attempt lineage stay Phase 11; this exists because until it did, a running graph was
+visible only by reading the `tasks` table by hand.
+
+Three of the rules above are already load-bearing and are enforced by tests, not by intention:
+
+- **Evidence and claim render apart.** `ORACLE measured: 583 passed, 29 failed` and
+  `the worker said: "everything passes"` are different elements with different labels. A vitest
+  asserts they are not the same node — the backend keeps the two apart through the runner, the
+  store and the API, and the last place it could be thrown away is the screen.
+- **`skipped` does not read like `cancelled`.** It renders as *"skipped — an earlier task did not
+  succeed"*, because "skipped" alone reads as a choice somebody made, and it was not. Another
+  test asserts the two labels differ.
+- **Nothing optimistic.** The cancel button sends `graph.cancel` and changes no row; the status is
+  whatever the server last said, exactly as the delegation card's discard button behaves.
+
+The store folds `task.*` events stamped `source: "graph"` into a `graphs` slice, separate from
+`delegations`. Both are folded from the same event types: a delegation is one worker's lifecycle,
+a graph is the shape of the work, and a `DELEGATION` task appears in both under one `task_id` —
+which is what will let a reader click from one to the other when Phase 11 draws it properly.
+
+### What P11-T5 moved  `2026-08-28`
+
+Two of the deferred pieces above have since landed: the **longest-path column assignment** ships
+(`graph/rank.ts`; every row shows its stage number) and the **superseded-attempt lineage** renders
+collapsed under its replacement. And the tree moved **into its own Tasks stage** (`Ctrl+2`) with a
+stated empty state, instead of sitting above every view — which had been invisible in practice
+only because `tasks` has been 0 rows. Task rows now also participate in the app-wide selection:
+clicking a task id opens it in the inspector's task branch (§6). The orbital drawing and OQ-14's
+go/no-go remain where they were — waiting on the first real graph.
 
 ## 7. Activity timeline
 
@@ -259,6 +373,83 @@ project/task/tool/level.
 `[inspect]` opens the exact context or result that was used. **This is the debugging surface for the
 agent itself** — when ORACLE does something strange, this is where I find out why. Retention matches
 the event log; older entries are summarised per turn.
+
+> **As built — 2026-08-28 evening (`components/Timeline.tsx`).** The grouped, filterable stream
+> replaced the flat event table on the `Ctrl+3` stage, and the tab finally says Timeline because
+> it finally is one. Groups fold **contiguous** events of one turn (or one task, for turn-less
+> graph events) — contiguity, never a re-sort: the log's order is the truth being displayed. The
+> newest group opens itself; the filter is one substring over type, ids and payload and forces
+> its matches open (a filter that hides matches inside closed groups is useless); `[inspect]` is
+> per **group**, driving the app-wide selection (§21 rule 1) into the inspector's turn or task
+> branch. Two shapes the audit chose, not taste: the disclosure is a `button[aria-expanded]`
+> rather than `<details>` because the header carries a second control and a button nested in
+> `<summary>` is a serious axe violation; and collapsed rows stay mounted under `hidden` so
+> `aria-controls` never dangles. Still future, honestly: `[inspect]` down to the exact
+> per-event context (the inspector has no event branch), per-turn summarisation of old
+> entries, and faceted filters — the substring earns an upgrade when somebody outgrows it.
+
+---
+
+## 7b. The briefing  `BUILT P12-T3/T4, 2026-08-26`
+
+> *"What happened while I wasn't looking?"* — the timeline answers this exhaustively, which is the
+> wrong shape for the question. Added 2026-08-26 from [VISION.md §2](VISION.md#2-the-day--the-acceptance-test);
+> design in [PROJECT_STATE.md §6](PROJECT_STATE.md#6-the-briefing--what-happened-while-i-was-away).
+>
+> Backend and view both built — `GET /api/v1/briefing`, `POST /api/v1/briefing/ack`
+> ([T3](PROJECT_STATE.md#as-built--p12-t3-2026-08-26)) and `components/Briefing.tsx`
+> ([T4](PROJECT_STATE.md#as-built--p12-t4-2026-08-26)). Verified against a live daemon, whose
+> first real briefing was a genuine crash report.
+
+The timeline (§7) is the debugging surface: every event, in order, filterable. The briefing is the
+**glance** surface: the delta since I last acknowledged, grouped by project, bounded in size, and
+readable in the 3–5 seconds the vision allocates to it.
+
+It occupies the centre stage on first paint after a period away, and demotes to a command-bar badge
+once acknowledged.
+
+```
+SINCE YESTERDAY 18:04                                        [ dismiss all ]
+
+  Asterim                                              4 tasks · 38m · $0.42
+  ● 1 running        implement the retry ladder
+  ✓ 3 completed      fix pipeline timeout · regression tests · update docs
+  ✗ 1 failed         verify: 3 tests still failing            [inspect] [retry]
+
+  ORACLE                                                          1 task · 6m
+  ⏸ waiting on you   git.push → origin/phase6-integration      [review] ← amber
+
+  System
+  ⚠ restarted 04:12  Ollama unreachable for 21m, recovered      [logs]
+```
+
+### Rules
+
+| Rule | Why |
+|---|---|
+| **Advances on acknowledgement, never on render** | A briefing that clears itself on sight is a notification, and notifications are how people miss things. Glancing and walking away must not consume it. |
+| **Grouped by project, always** | "What happened" is only meaningful scoped to a thing. Ungrouped, it is the timeline with worse ordering. |
+| **Bounded** | Away for a week, this is not 40,000 events. Counts, outcomes, cost — and a link into the timeline for the rest. |
+| **`waiting on you` sorts to the top and is the only loud element** | Same rule as the sidebar (§4) and the core (§3). One attention channel, one meaning. |
+| **Every line is actionable or it is deleted** | `[inspect]`, `[retry]`, `[review]`, `[logs]` open something real. A line with no affordance is a log entry in a costume. |
+| **A dead daemon briefs itself** | If ORACLE crashed overnight, that is the first line. A background service that fails silently is the main risk of [ADR-0025](DECISIONS.md#adr-0025--oracle-is-a-resident-service-the-window-is-a-client), and this is the mitigation. **Built**: `system.boot` carries whether the previous run ended cleanly, because a silent gap in the log is otherwise indistinguishable from an idle night. |
+| **Running counts, not just outcomes** | *"What is running now"* is one of the six things [VISION.md §2](VISION.md#2-the-day--the-acceptance-test) gives the screen 3–5 seconds to answer. A briefing of outcomes alone goes blank mid-run, which is when a person most wants to see something. |
+| **Empty is a real state** | Nothing happened → "Nothing ran since 18:04." Not a placeholder, not a skeleton, not a fabricated summary. |
+
+### Where the text comes from
+
+The counts, outcomes, timings and cost are **arithmetic over the task rows** — no model, no
+latency, no possibility of a hallucinated summary of my own work. Prose summarisation is a later
+enhancement belonging to the local mid-tier ([VISION.md §3](VISION.md#3-who-does-what)), and the
+deterministic template stays as the fallback permanently, because it is the version that is always
+correct.
+
+### Accessibility
+
+Briefing entries are a list of headed groups, each with real buttons — not a canvas and not a
+graphic. It is the surface most likely to be read by someone who has just sat down and is not yet
+looking carefully, so it carries the same icon + label + colour rule as everything else (§14) and
+must survive the axe audit like the rest.
 
 ---
 
@@ -328,6 +519,21 @@ arrives looking new and sits at the head of the queue where nothing can answer i
 Expiry is counted from the server's timestamp, and an already-expired approval never
 joins the queue.
 
+#### The graph card  `P8-T3, 2026-08-25`
+
+An `ai.graph` approval carries a whole plan, and until this task the UI rendered a one-line
+summary of it: the card fell through to the generic EFFECT block while the payload held every
+task, its role, its agent and whether it would egress. "Approving what you did not read is the
+attack" is P8-T1's own sentence about this exact card, so `GraphCard` renders all of it —
+**objectives verbatim**, never summarised, because an instruction hidden inside a plan is only
+defended against if it is visible here.
+
+It also states **who wrote the plan** (`authored_by`, the ladder's rung, and every descent with
+its reason). A plan a model decomposed and a deterministic template ORACLE fell back to are
+different objects, and a person needs to know which is in front of them *before* they read the
+tasks ([PLANNER.md §6](PLANNER.md#6-fallbacks)). A replan's card says its tasks are being **added**
+to a graph already running, which failure they replace, and that the failed task stays failed.
+
 Rules:
 
 - The command block is the **actual resolved argv**, monospaced, selectable, never re-worded by a model.
@@ -382,6 +588,139 @@ Backed by hybrid retrieval (P5) for notes/files and direct queries for the rest.
 
 ---
 
+## 11b. The knowledge graph — **Phase 11**
+
+> Added 2026-08-24 from the owner's design references: film-HUD radial consoles (layered
+> translucent rings, a luminous focused core, everything else receding into depth) and
+> Obsidian-style cluster graphs (collection-coloured constellations, hub-and-spoke stars, orphans
+> drifting at the rim). The brief: *see everything ORACLE knows — Obsidian vaults, project docs,
+> PDFs — as one interactive map.* The data layer mostly exists: `knowledge.db` already holds
+> every document, its collection, its embeddings, and a `links` table of extracted `[[wikilinks]]`
+> ([RAG.md §3](RAG.md#3-chunking), `rag/store.py`). This section is the view over it.
+>
+> Layout and rendering decisions are recorded as
+> [ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered);
+> the open measurements are [OQ-22](OPEN_QUESTIONS.md#oq-22).
+
+### What it must answer
+
+The graph earns its place the same way the orbit does — by answering questions the list view
+cannot. The four it exists for:
+
+1. **Shape** — how is my knowledge actually organised? Where are the hubs and the clusters?
+2. **Neglect** — what is orphaned, stale, or was never indexed?
+3. **Reach** — starting from this note, what is connected, one and two hops out?
+4. **Use** — what did ORACLE just retrieve to answer me, and from where?
+
+If, after real use, it answers none of these better than search does, it gets cut and an ADR
+records that — the same honesty gate as the orbit ([OQ-14](OPEN_QUESTIONS.md#oq-14) applies to
+both, per view).
+
+**Struck from question 1: "the bridges between a vault and a project".**  `MEASURED 2026-08-26`
+Across every edge configuration measured for [OQ-22](OPEN_QUESTIONS.md#oq-22) — every `k`, every
+similarity threshold — this corpus contains **one** edge joining `notes` to `projects`. The explicit
+wikilink graph has two.
+
+That is not a threshold that wants tuning. The notes are prose about machine learning and the
+projects are TypeScript, Rust and Python; `bge-m3` is right that they are not about the same things,
+and no parameter will invent a relationship that is not there. A view that reliably finds one bridge
+is a sentence, not a feature, so the promise is withdrawn rather than left to disappoint. That the
+answer is "there are none" remains worth *showing* — it is a true and slightly uncomfortable fact
+about this corpus — but it is not something the view goes looking for.
+
+**And semantic edges are not optional, which this section had backwards.** Explicit wikilinks touch
+**11% of the corpus** (157 of 1,420 documents, 156 of them in one vault), leaving 1,168 of 1,325
+embeddable documents orphaned across 1,264 components. Semantic edges take orphans to 44. The "off
+by default, a toggle" framing below describes an enhancement; on this corpus they are the difference
+between a graph and a scatter of dots.
+
+### Nodes and edges
+
+| Element | Source | Encoding |
+|---|---|---|
+| **Node = document** | `knowledge.db` documents (~1,330 today; design ceiling 10k) | colour = **collection** (each vault/project/doc-set gets a stable token-derived hue) · size = link degree · opacity = staleness (same semantics as the orbit) |
+| **Explicit edge** | the `links` table (`[[wikilinks]]`, already extracted at index time) | solid, dim by default |
+| **Semantic edge** | k-nearest-neighbour over document embeddings, thresholded, capped per node — computed offline with the index, never live | fainter, dashed; **off by default**, a toggle — inferred similarity is a suggestion, and drawing it like a fact would lie |
+| **Retrieval edge** | episodic: documents co-cited in one answer (event log) | appears only in trace mode, below |
+| **Collection hull** | derived | a barely-visible tinted region behind each cluster, so colour is not the only carrier (accessibility rule) |
+
+**Orphans are shown honestly**: documents with no edges sit on an outer arc at the rim — the
+reference images' peripheral ring, kept because it *is* the honest rendering of disconnection.
+Finding them is question 2; hiding them would delete the answer. Documents that **failed to
+index** appear hollow with an error affordance; collections that are registered but unindexed
+appear as a single ghosted hull with a "index this" action. No decorative nodes, ever.
+
+### Layout — simulated, then frozen
+
+The stability principle from [ADR-0013](DECISIONS.md#adr-0013--deterministic-svg-orbit-no-force-simulation)
+holds — a map you cannot memorise is decoration — but its mechanism (hash-angle polar layout)
+cannot scale to a thousand nodes where *cluster adjacency is the information*. The resolution
+(ADR-0023):
+
+- A force-directed layout runs **offline** — in the indexing worker, alongside a reindex — and
+  the resulting positions are **persisted in `knowledge.db`** next to the documents they place.
+- The live view **never simulates**. It renders frozen positions; the vault sits where it sat
+  last month. No jitter, no per-frame physics cost, idle CPU stays under the 5% budget.
+- New documents are placed incrementally at the centroid of their neighbours (or the collection
+  hull's edge when unlinked) without moving anything else.
+- **Re-layout is an explicit action** on the index health view, like reindexing — with a
+  before/after preview, because it destroys spatial memory and should be chosen, not suffered.
+
+### Visual language
+
+The reference material's *language*, filtered through this document's anti-goals (no gratuitous
+glow, no fake telemetry, nothing animates without meaning):
+
+- **Idle**: a dim constellation on `--bg-0`. Labels appear only above a zoom threshold and for
+  hubs; the map reads as shape first, names second.
+- **Focus mode** (click a node, or arrive from search): the selected node and its 1–2-hop
+  neighbourhood come to full luminance; everything else recedes to near-black rather than
+  disappearing — depth, not deletion. This is the gold-hologram reference as an interaction
+  state, not a permanent style. `Esc` releases it.
+- A focused node gets a **radial metadata ring** — the HUD language — showing collection, age,
+  degree, and tags as labelled arcs. Every arc is real data with a real click-through; the moment
+  one is decorative it is removed.
+- **Motion means something happened**: a node being reindexed pulses once; a retrieval trace
+  animates once, then stays lit until dismissed. Nothing loops. `prefers-reduced-motion` replaces
+  all of it with instant state changes, fully usable.
+
+### Interaction
+
+| Gesture | Effect |
+|---|---|
+| pan / zoom | free navigation; labels density scales with zoom |
+| hover | tooltip: title · collection · modified · links in/out |
+| click | Inspector: metadata, outlinks/backlinks (each a jump), chunk list, **Open** (via `app.launch` alias — Obsidian for notes, editor for code), **Ask ORACLE about this** (pre-fills chat with the doc pinned as context) |
+| double-click | focus mode on that node's neighbourhood |
+| `Ctrl+F` in view | search-to-locate: matches glow, view flies to the best hit; wired to the same hybrid search as everything else |
+| filter chips | collection · project · type (note/doc/pdf/code) · touched-within time slider · edge-type toggles |
+| lasso / shift-click | **select-as-context**: the selection becomes a context package — pin it to the next turn, or hand it to the packet builder. Local, T0; if it later feeds a delegation, the ordinary egress preview prices it like any other context |
+| from a chat citation | **"show on graph"**: trace mode — the answer's cited documents light up with their retrieval edges, and the graph becomes the explanation surface for *why those sources*. The timeline's `[inspect]` and this view are two renderings of the same events |
+
+### Rendering and budgets
+
+SVG struggles past a few hundred nodes (ADR-0013 said so itself, back when it was irrelevant), so
+this view renders on **canvas**, with a DOM overlay for the focused node, its ring, labels and
+the inspector — keeping text selectable and focusable where it matters.
+Measured, not hoped ([OQ-22](OPEN_QUESTIONS.md#oq-22)): pan/zoom at 60 fps on the full corpus ·
+idle < 5% CPU and full pause when the view is hidden or the window unfocused · offline layout of
+the full corpus within the incremental-index budget · first paint < 1 s from cached positions.
+
+### Accessibility
+
+The orbit's rule, unchanged: **a full list-view equivalent**, not alt text — a searchable,
+sortable table (document · collection · in/out links · modified · staleness) with the same
+filters and the same actions, toggled by a control and default for screen readers. Focus mode's
+neighbourhood is enumerable from the inspector as a list. Colour never carries meaning alone:
+collections get hulls and labels, staleness gets a badge.
+
+### Explicitly not
+
+No live physics in the viewport · no 3D · no edge bundling until a measured hairball demands it ·
+no automatic "AI insights" overlaid on the map (the graph shows what *is*; analysis happens in
+chat where it can cite) · no second data pipeline — every node, edge and failure state comes from
+`knowledge.db` and the event log, or it does not appear.
+
 ## 12. Notifications
 
 Toasts, bottom-right, max 3 stacked, then a "+N" collapse.
@@ -432,6 +771,30 @@ Base surfaces: `--bg-0` (app) → `--bg-1` (panel) → `--bg-2` (raised) → `--
 the risky one and must be verified, not assumed. A light theme is Post-MVP but the token structure
 makes it a values change, not a refactor.
 
+### Verified  `2026-08-26`
+
+It had not been. `a11y.test.tsx` disables axe's `color-contrast` rule — correctly, because happy-dom
+lays nothing out — so the one rule this section singles out as risky was the one rule the audit
+could not check, and nothing else checked it. `contrast.test.ts` now does, as a pure function over
+the token values parsed **out of `styles.css` itself**, so it cannot drift from the stylesheet.
+
+**Amber was fine, and this section guessed wrong about which token was risky.** `--st-wait` measures
+7.22–8.99:1 — comfortably over both bars on every surface. Two others failed:
+
+| token | was | measured | now |
+|---|---|---|---|
+| `--st-halt` | `#b91c1c` | **2.99 / 2.82 / 2.63 / 2.40** — under 3:1 on *every* surface | `#dc2626`, 3.21 worst |
+| `--fg-2` | `#5c6779` | 3.38 / 3.19 / **2.98 / 2.71** — under 3:1 on the two raised surfaces | `#6b7688`, 3.38 worst |
+
+`--st-halt` is the serious one: **the least visible status in the application was the one that means
+everything has stopped.** Raising it narrows the luminance gap to `--st-err`, which is acceptable
+because the table above never asked hue to carry that distinction — halt is *"fully static,
+cross-hatched"* where error is not, and §17 gives the halted state a red-tinted border across the
+whole UI with every control disabled. Colour is the least of four signals.
+
+`--fg-2` is muted decoration rather than body text, so 3:1 is the bar that applies to it — but it was
+under even that on `--bg-2` and `--bg-3`, which are exactly the surfaces cards and inputs use.
+
 ---
 
 ## 15. Motion
@@ -457,7 +820,7 @@ tests, not assumed.
 |---|---|
 | `Ctrl+K` | Command palette |
 | `Ctrl+Shift+F` | Global search |
-| `Ctrl+1..4` | Orbit / Chat / Timeline / Tasks |
+| `Ctrl+1..4` | Chat / Tasks / Timeline / Memory — see note below |
 | `Ctrl+B` / `Ctrl+I` | Toggle sidebar / inspector |
 | `Ctrl+\`` / `Ctrl+Shift+\`` | Cycle dock / expand dock |
 | `Ctrl+Enter` | Send message |
@@ -471,6 +834,19 @@ tests, not assumed.
 
 HALT is deliberately awkward: four keys, so it cannot be hit by accident, but it is a **global**
 hotkey so it works when the window isn't focused — which is exactly when I'd need it.
+
+> **`Ctrl+1..4`, corrected 2026-08-28 (P11-T5).** This table originally read
+> `Orbit / Chat / Timeline / Tasks`, written before Memory and the Briefing existed as views.
+> Orbit still cannot be bound — it is P11-T2, gated on [OQ-14](OPEN_QUESTIONS.md#oq-14) — so
+> the keys bind to the four primary stages that exist:
+> **1 Chat · 2 Tasks · 3 Timeline · 4 Memory**. (For a few hours that third tab said
+> **Events**, because the timeline slot held only a flat event table and labelling it Timeline
+> would have claimed a view that was not there; §7's grouped timeline was built the same
+> evening and the label caught up.) Briefing and Knowledge are tabs without digits — the
+> briefing has its own arrival affordance (§7b) and index health is a maintenance view. When
+> Orbit lands it takes a digit and this table changes again, with the date attached.
+> The AltGr guard matters: `Ctrl+Alt+digit` types characters on some layouts, so the binding
+> requires Alt **up**.
 
 **Everything in the MVP is reachable without a mouse.** That is a P4 acceptance criterion.
 
@@ -536,7 +912,10 @@ AppShell
 │   └── TreeSection ×4 (Projects · Tasks · Agents · Knowledge) → TreeNode
 ├── CenterStage
 │   ├── ViewTabs
-│   ├── OrbitView      → CoreVisual · OrbitRing ×4 → OrbitNode · FlowEdge   [P9]
+│   ├── OrbitView      → CoreVisual · OrbitRing ×4 → OrbitNode · FlowEdge   [P11]
+│   ├── ExecutionTree  → TaskNode (tree) · AttemptRow · EvidenceLink        [P11]
+│   ├── KnowledgeGraph → GraphCanvas · FocusRing · CollectionHull           [P11]
+│   │                    · GraphListView (a11y equivalent) · TraceOverlay
 │   ├── ChatView       → MessageList → MessageBubble · ToolCallCard · PlanCard
 │   │                                 · CitationChip · StreamingIndicator
 │   ├── TimelineView   → TimelineGroup → TimelineEvent
@@ -548,6 +927,16 @@ AppShell
 └── Overlays
     ├── CommandPalette  ├── GlobalSearch  ├── ConfirmationModal(T3)
     ├── ToastStack      └── OnboardingFlow
+
+> **As built — P11-T5, 2026-08-28.** `ViewTabs` ships as drawn; the stages behind it are the
+> ones that exist (Chat · Tasks · Timeline · Memory · Briefing · Knowledge — two of which are
+> views this chart predates), and `CenterStage` as a component is folded into the app shell
+> until Orbit gives it a second consumer. `TimelineView` shipped the same evening
+> (`components/Timeline.tsx`, §7). `TasksView` is `TaskTree` in its own stage;
+> `KnowledgeHealth` (index health, not the §11b graph) is mounted as the Knowledge stage; the
+> inspector's task branch is the first slice of `TaskInspector`. Approvals and delegations stay
+> above the switched panel on every stage — the safety surface is not a tab, because approvals
+> expire in 180 s and a card behind a tab is a card that expires unseen.
 ```
 
 Shared primitives: `StatusDot`, `RiskBadge`, `Duration`, `TokenCount`, `PathChip`, `ProjectChip`,

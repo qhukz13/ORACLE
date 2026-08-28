@@ -1,0 +1,75 @@
+{
+  "corpus": {
+    "docs": 1506,
+    "chunks": 11729,
+    "semantic": 10810
+  },
+  "lexical_only": {
+    "recall@1": 0.07894736842105263,
+    "recall@5": 0.2894736842105263,
+    "recall@10": 0.34210526315789475,
+    "r@5/crosslang": 0.0,
+    "r@5/semantic": 0.8,
+    "r@5/lexical": 1.0
+  },
+  "results": [
+    {
+      "name": "bge-m3",
+      "dim": 1024,
+      "dense": {
+        "recall@1": 0.39473684210526316,
+        "recall@5": 0.631578947368421,
+        "recall@10": 0.7631578947368421,
+        "r@5/crosslang": 0.56,
+        "r@5/semantic": 0.7,
+        "r@5/lexical": 1.0
+      },
+      "hybrid": {
+        "recall@1": 0.39473684210526316,
+        "recall@5": 0.5789473684210527,
+        "recall@10": 0.7105263157894737,
+        "r@5/crosslang": 0.4,
+        "r@5/semantic": 0.9,
+        "r@5/lexical": 1.0
+      },
+      "lexical": {
+        "recall@1": 0.07894736842105263,
+        "recall@5": 0.2894736842105263,
+        "recall@10": 0.34210526315789475,
+        "r@5/crosslang": 0.0,
+        "r@5/semantic": 0.8,
+        "r@5/lexical": 1.0
+      },
+      "chunks_per_s": 1.3458659105637434,
+      "query_ms_p50": 71.05924999996205,
+      "query_ms_p95": 115.79820000042665,
+      "load_s": 2.7483613999938825,
+      "model_mb": 2267.545531,
+      "index_mb": 44.27776,
+      "misses": [
+        "ru-feature-entitlement",
+        "en-relay-dockerfile",
+        "ru-pairing-bruteforce",
+        "ru-air-gap",
+        "ru-kill-process-tree",
+        "ru-local-discovery",
+        "ru-migrations",
+        "ru-command-approval",
+        "ru-terminal-reattach",
+        "ru-workspace-permissions",
+        "ru-audit-trail",
+        "ru-symbol-extraction",
+        "ru-bias-variance",
+        "ru-cross-validation",
+        "ru-nonlinearity",
+        "ru-model-degrades"
+      ],
+      "fusion": {
+        "dense": 0.631578947368421,
+        "rrf": 0.5789473684210527,
+        "rrf_w2": 0.6842105263157895,
+        "gated": 0.5789473684210527
+      }
+    }
+  ]
+}

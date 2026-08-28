@@ -169,8 +169,27 @@ class ToolExecutor:
         confirmation card needs `side_effects` and `dry_run`)."""
         return self._registry
 
+    @property
+    def policy(self) -> PolicyEngine:
+        """Read-only access to the gate, for callers that must re-ask a question it has
+        already answered — the pipeline scope guard narrows `projects` to one project and
+        needs `resolve_path` to do it. It grants nothing: everything reachable here is a
+        decision, never an execution."""
+        return self._engine
+
     def grant(self, approval: Approval) -> None:
         self._approvals[approval.approval_id] = approval
+
+    def revoke(self, approval_id: str) -> None:
+        """Hand a grant back before it expires. Absent is not an error.
+
+        Issued for pipelines (PIPELINES.md §3), whose one up-front card mints a grant per
+        elevated step and whose run may take twenty minutes — so the expiry that suits a
+        card a person is looking at does not suit it. A grant that outlives its run is a
+        grant nobody is watching, so the run revokes them in a `finally`. Idempotent
+        because that `finally` also runs on the paths where some were never minted.
+        """
+        self._approvals.pop(approval_id, None)
 
     # ------------------------------------------------------------------ programs
 

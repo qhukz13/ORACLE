@@ -12,10 +12,12 @@ Two invariants hold everywhere here:
   own; prefixed with `Fine-Tuning > Intuition` it is not. The same prefix is what makes a
   citation legible, so it is one mechanism serving two purposes.
 * **Boundaries are computed in characters, not tokens.** That keeps chunking independent
-  of the tokenizer, which is what let the OQ-02 benchmark compare five embedding
-  candidates against byte-identical chunks. It has a known cost, recorded rather than
-  hidden: character budgets under-control token length on dense code, and roughly 20% of
-  chunks exceed the 512-token model limit and are truncated. See `MAX_CHARS`.
+  of the tokenizer, so a test, the indexer and the eval harness cannot produce different
+  chunks from the same file. The cost is that the cap has to be *calibrated* against the
+  model rather than derived from it — and until 2026-08-26 it was calibrated against an
+  English-prose average that this corpus does not have, so 27% of embedded chunks
+  overflowed the 512-token window and were silently truncated. Recalibrated and enforced;
+  the rate is now 0.7%. See `MAX_CHARS`.
 """
 
 from __future__ import annotations
@@ -30,13 +32,27 @@ from oracle.rag.collections import ContentKind, Document
 from oracle.rag.pdf import PAGE_BREAK
 from oracle.rag.treesitter import blocks_for
 
-#: ~500 tokens of English prose. Deliberately below the 512-token limit of the E5
-#: family, though not reliably so: identifier-dense code tokenizes at closer to one
-#: token per three characters, so a minority of code chunks still truncate. A
-#: token-aware splitter would fix that and would also make chunking depend on the
-#: tokenizer — which is a trade worth making only once the model is fixed, and it now is.
-#: `TO VERIFY` — measure what truncation costs recall before spending that complexity.
-MAX_CHARS = 1800
+#: The ceiling on a chunk's **rendered** length — header, anchors and body together.
+#:
+#: MEASURED 2026-08-26 (`scripts/measure_truncation.py` and the density pass in
+#: `logs/development/2026-08-26-oq18-chunking.md`). The old value was 1800, justified as
+#: "~500 tokens of English prose". Two things were wrong with it and both are fixed here:
+#:
+#:   * **3.6 chars/token is not this corpus.** `bge-m3` tokenizes it at a median of 3.05
+#:     (code) and 3.33 (markdown) chars per token, and at the 1st percentile 2.34 and
+#:     2.42 — so the densest chunks reached 512 tokens at ~1200 characters, not 1800.
+#:     27.1% of embedded chunks overflowed the model window and were silently truncated.
+#:   * **the cap was applied to the body, not to the chunk.** `_pack` counted block
+#:     bodies while emitting `header + anchor + body` per block, and `_window` counted
+#:     lines while emitting `prefix + lines`. The longest "1800-character" chunk in the
+#:     corpus was 4,055 characters.
+#:
+#: 1200 puts ~99% of code and markdown chunks inside the window at the 1st percentile of
+#: density. It stays a **character** cap rather than a token cap on purpose: chunking
+#: then needs no tokenizer, so a test, the indexer and the eval harness cannot produce
+#: different chunks from the same file — which is the drift that made the previous
+#: measurements describe the harness instead of the index.
+MAX_CHARS = 1200
 
 #: Below this, a block is not a chunk. Forty tokens of `export const X = 1` carries no
 #: context to match a question against; it inflates the index and dilutes the neighbours
@@ -48,6 +64,21 @@ PACK_TARGET = 700
 
 #: Overlap between windows of an oversized block, as a fraction of its lines.
 OVERLAP = 0.15
+
+#: Bumped whenever a change here moves chunk boundaries.
+#:
+#: An index is disposable (ADR-0006) and reindexing must reproduce equivalent results —
+#: but *incremental* indexing does not rebuild what is already there, so a boundary change
+#: leaves a database whose old rows and new rows were cut by different rules. Nothing
+#: fails; retrieval just gets quietly worse in a way no health check notices.
+#:
+#: `KnowledgeStore.bind` already refuses an index built by a different embedding model,
+#: for exactly the same reason ("it returns confident nonsense"). This is that guard
+#: extended to the other half of what makes a vector: what was in it.
+#:
+#:   1  the original character-budget chunker
+#:   2  2026-08-26: MAX_CHARS 1800 -> 1200, and enforced against the *rendered* chunk
+CHUNKER_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -122,7 +153,7 @@ def _symbol_at(line: str) -> str | None:
     return match.group(1) if code.endswith(_OPENS_BLOCK) else None
 
 
-def _split_long_lines(text: str) -> list[str]:
+def _split_long_lines(text: str, room: int = MAX_CHARS) -> list[str]:
     """Lines, with anything longer than the whole budget cut mid-line.
 
     Generated and minified files are meant to be excluded before they reach here, but a
@@ -133,20 +164,25 @@ def _split_long_lines(text: str) -> list[str]:
     out: list[str] = []
     for raw in text.split("\n"):
         rest = raw
-        while len(rest) > MAX_CHARS:
-            out.append(rest[:MAX_CHARS])
-            rest = rest[MAX_CHARS:]
+        while len(rest) > room:
+            out.append(rest[:room])
+            rest = rest[room:]
         out.append(rest)
     return out
 
 
 def _window(body: str, prefix: str, doc: Document, start: int, anchor: str) -> list[Chunk]:
-    """Split one oversized block on line boundaries, with `OVERLAP` carried forward."""
+    """Split one oversized block on line boundaries, with `OVERLAP` carried forward.
+
+    Every chunk this emits carries `prefix`, so `prefix` spends part of every chunk's
+    budget. Counting only the body — which is what this did until 2026-08-26 — is how a
+    1800-character cap produced 4,055-character chunks."""
     out: list[Chunk] = []
     buf: list[str] = []
+    room = max(MIN_CHARS, MAX_CHARS - len(prefix))
     size = 0
-    for line in _split_long_lines(body):
-        if size + len(line) > MAX_CHARS and buf:
+    for line in _split_long_lines(body, room):
+        if size + len(line) > room and buf:
             out.append(Chunk(doc, start + len(out), anchor, prefix + "\n".join(buf)))
             # Overlap is capped in characters as well as in lines. A buffer of one very
             # long line has `int(1 * 0.15) == 0` lines to keep, and `max(1, ...)` would
@@ -155,8 +191,11 @@ def _window(body: str, prefix: str, doc: Document, start: int, anchor: str) -> l
             # line splitter was added.
             keep = max(1, int(len(buf) * OVERLAP))
             buf = buf[-keep:]
-            size = sum(len(x) for x in buf)
-            while buf and size > MAX_CHARS * OVERLAP:
+            # `+ 1` per line, the same accounting the append below uses. Summing the
+            # lengths alone under-counts the newlines the join will add, which is how a
+            # config chunk came out nine characters over a 1200-character cap.
+            size = sum(len(x) + 1 for x in buf)
+            while buf and size > room * OVERLAP:
                 size -= len(buf.pop(0)) + 1
         buf.append(line)
         size += len(line) + 1
@@ -185,6 +224,10 @@ def _pack(blocks: list[tuple[str, str]], doc: Document, header: str) -> list[Chu
     """
     out: list[Chunk] = []
     group: list[tuple[str, str]] = []
+    # The header goes on every chunk and each block carries its own anchor line, so the
+    # budget is what is *emitted*, not the sum of the bodies. `size` below tracks the
+    # rendered length exactly.
+    room = max(MIN_CHARS, MAX_CHARS - len(header))
     size = 0
 
     def flush() -> None:
@@ -204,14 +247,17 @@ def _pack(blocks: list[tuple[str, str]], doc: Document, header: str) -> list[Chu
         body = raw.strip()
         if not body:
             continue
-        if len(body) > MAX_CHARS:
+        rendered = _render(anchor, body)
+        if len(rendered) > room:
             flush()
             out.extend(_window(body, f"{header}{anchor}\n", doc, len(out), anchor))
             continue
-        if size + len(body) > MAX_CHARS:
+        if size + len(rendered) > room:
             flush()
         group.append((anchor, body))
-        size += len(body) + 2
+        # `+ 2` for the "\n\n" that `flush()` joins blocks with. Over-counting by two at
+        # the end of a group is the safe direction to be wrong in.
+        size += len(rendered) + 2
         if size >= PACK_TARGET:
             flush()
     flush()

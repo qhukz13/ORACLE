@@ -326,3 +326,257 @@ describe("knowledge.state", () => {
     expect(useStore.getState().indexing?.state).toBe("stale");
   });
 });
+
+describe("store.apply — delegations", () => {
+  beforeEach(() => {
+    useStore.getState().reset();
+  });
+
+  function devent(
+    seq: number,
+    type: string,
+    payload: Record<string, unknown> = {},
+    taskId = "dlg_1",
+  ): OracleEvent {
+    return { ...ev(seq, type, payload, "t_1"), task_id: taskId };
+  }
+
+  it("folds a full delegation from created through finished", () => {
+    const { apply } = useStore.getState();
+    apply(devent(1, "task.created", { tool: "ai.delegate", task: "fix auth", adapter: "claude-code" }));
+    apply(devent(2, "task.updated", { state: "awaiting_egress" }));
+    apply(devent(3, "task.updated", { state: "running" }));
+    apply(devent(4, "delegate.event", { kind: "tool_use", tool: "Read", text: "" }));
+    apply(devent(5, "task.finished", { outcome: "success", diff_lines: 3 }));
+
+    const d = useStore.getState().delegations[0];
+    expect(d?.task).toBe("fix auth");
+    expect(d?.state).toBe("finished");
+    expect(d?.outcome).toBe("success");
+    expect(d?.feed).toHaveLength(1);
+    expect(d?.result?.["diff_lines"]).toBe(3);
+  });
+
+  it("ignores task events that are not delegations", () => {
+    useStore.getState().apply(devent(1, "task.created", { tool: "pipe.run", task: "x" }));
+    expect(useStore.getState().delegations).toHaveLength(0);
+  });
+
+  it("bounds the feed to the tail — decisions live on task.*, not here", () => {
+    const { apply } = useStore.getState();
+    apply(devent(1, "task.created", { tool: "ai.delegate", task: "t", adapter: "a" }));
+    for (let i = 0; i < 150; i++) {
+      apply(devent(2 + i, "delegate.event", { kind: "thinking", text: `line ${i}` }));
+    }
+    const feed = useStore.getState().delegations[0]?.feed ?? [];
+    expect(feed).toHaveLength(100);
+    expect(feed.at(-1)?.text).toBe("line 149");
+  });
+
+  it("replaying the same task.created twice does not duplicate the card", () => {
+    const { apply } = useStore.getState();
+    const created = devent(1, "task.created", { tool: "ai.delegate", task: "t", adapter: "a" });
+    apply(created);
+    apply({ ...created, seq: 2 });
+    expect(useStore.getState().delegations).toHaveLength(1);
+  });
+});
+
+describe("store.apply — task graphs", () => {
+  beforeEach(() => {
+    useStore.getState().reset();
+  });
+
+  function gevent(
+    seq: number,
+    type: string,
+    payload: Record<string, unknown> = {},
+    taskId = "look",
+  ): OracleEvent {
+    return {
+      ...ev(seq, type, { source: "graph", root_id: "tk_root", ...payload }, "t_1"),
+      task_id: taskId,
+    };
+  }
+
+  it("folds a graph from created through finished", () => {
+    const { apply } = useStore.getState();
+    apply(gevent(1, "task.created", { kind: "tool" }));
+    apply(gevent(2, "task.created", { kind: "delegation" }, "fix"));
+    apply(gevent(3, "task.updated", { status: "running" }));
+    apply(
+      gevent(4, "task.finished", {
+        status: "succeeded",
+        summary: "fs.read ok",
+        evidence: { rule: "fs.read" },
+        claim: "I read it",
+      }),
+    );
+
+    const graph = useStore.getState().graphs[0];
+    expect(graph?.rootId).toBe("tk_root");
+    expect(graph?.tasks).toHaveLength(2);
+    const look = graph?.tasks.find((t) => t.taskId === "look");
+    expect(look?.status).toBe("succeeded");
+    expect(look?.evidence).toEqual({ rule: "fs.read" });
+    // Kept apart at the last possible moment, as everywhere else.
+    expect(look?.claim).toBe("I read it");
+  });
+
+  it("keeps a replacement's lineage from the event that created it", () => {
+    // The scheduler stamps `supersedes` on the first event about a replanned row, so a
+    // client never has to re-query the tree and diff it to find out what replaced what.
+    const { apply } = useStore.getState();
+    apply(gevent(1, "task.created", { kind: "delegation" }, "fix"));
+    apply(gevent(2, "task.finished", { status: "failed", summary: "wrong file" }, "fix"));
+    apply(
+      gevent(3, "task.created", { kind: "delegation", supersedes: "fix" }, "fix-r1"),
+    );
+
+    const graph = useStore.getState().graphs[0];
+    expect(graph?.tasks.map((t) => t.taskId)).toEqual(["fix", "fix-r1"]);
+    // The failed row is still there, still failed. Nothing is rewritten.
+    expect(graph?.tasks.find((t) => t.taskId === "fix")?.status).toBe("failed");
+    expect(graph?.tasks.find((t) => t.taskId === "fix-r1")?.supersedes).toBe("fix");
+    expect(graph?.tasks.find((t) => t.taskId === "fix")?.supersedes).toBeUndefined();
+  });
+
+  it("does not fold a delegation's own lifecycle into a graph", () => {
+    // The same event types, the same task id, a different meaning: `source` is the only
+    // honest discriminator, and guessing from payload keys is what it exists to prevent.
+    const { apply } = useStore.getState();
+    apply({
+      ...ev(1, "task.created", { tool: "ai.delegate", task: "t", adapter: "a" }, "t_1"),
+      task_id: "dlg_1",
+    });
+    expect(useStore.getState().graphs).toHaveLength(0);
+    expect(useStore.getState().delegations).toHaveLength(1);
+  });
+
+  it("ignores an update for a task it never saw created", () => {
+    // A half-known graph rendered as if it were whole is worse than a visible gap.
+    useStore.getState().apply(gevent(1, "task.updated", { status: "running" }, "ghost"));
+    expect(useStore.getState().graphs).toHaveLength(0);
+  });
+
+  it("replaying task.created does not duplicate a task", () => {
+    const { apply } = useStore.getState();
+    const created = gevent(1, "task.created", { kind: "tool" });
+    apply(created);
+    apply({ ...created, seq: 2 });
+    expect(useStore.getState().graphs[0]?.tasks).toHaveLength(1);
+  });
+});
+
+/** Apply a list of raw wire events and hand back the resulting state. */
+function play(events: Array<Record<string, unknown>>) {
+  useStore.getState().reset();
+  const { apply } = useStore.getState();
+  for (const e of events) {
+    apply({ v: 1, session_id: "s_1", turn_id: null, trace_id: "tr_1", ...e } as OracleEvent);
+  }
+  return useStore.getState();
+}
+
+describe("the graph slice folds what the scheduler actually sends", () => {
+  /**
+   * These payloads are the ones `orchestration/scheduler.py::_emit` builds, field for field.
+   *
+   * The reason this suite exists is a specific failure: `TaskTree.test.tsx` asserted that a task's
+   * dependencies render, using a fixture that hand-populated `dependsOn` — while the scheduler
+   * never sent `depends_on` and `store.ts` set it to `[]` unconditionally. A green test over a
+   * shape the app could not produce. Fixtures for wire-folding belong close to the wire.
+   */
+  const created = (over: Record<string, unknown> = {}) => ({
+    seq: 1,
+    type: "task.created",
+    ts: "2026-08-26T12:00:00Z",
+    task_id: "tk_root-b",
+    payload: {
+      root_id: "tk_root",
+      source: "graph",
+      kind: "tool",
+      root: "tk_root",
+      depends_on: ["tk_root-a"],
+      objective: "dev.run_tests (oracle-selfcheck/tests)",
+      role: "operator",
+      agent: null,
+      project: "ORACLE",
+      attempt: 1,
+      max_attempts: 2,
+      supersedes: null,
+      ...over,
+    },
+  });
+
+  it("keeps the dependencies, so the client has a graph and not a list", () => {
+    const s = play([created()]);
+    expect(s.graphs[0]?.tasks[0]?.dependsOn).toEqual(["tk_root-a"]);
+  });
+
+  it("carries the objective verbatim rather than a summary of it", () => {
+    const s = play([created()]);
+    expect(s.graphs[0]?.tasks[0]?.objective).toBe("dev.run_tests (oracle-selfcheck/tests)");
+  });
+
+  it("leaves agent undefined when there is none, rather than inventing a dash", () => {
+    // A TOOL task genuinely has no agent. `""` would render as an empty label; undefined
+    // lets the view decide, and the view's decision is to draw nothing.
+    const s = play([created()]);
+    expect(s.graphs[0]?.tasks[0]?.agent).toBeUndefined();
+    expect(s.graphs[0]?.tasks[0]?.role).toBe("operator");
+  });
+
+  it("records cost from task.finished, and undefined is not zero", () => {
+    const withCost = {
+      seq: 2,
+      type: "task.finished",
+      ts: "2026-08-26T12:01:00Z",
+      task_id: "tk_root-b",
+      payload: {
+        root_id: "tk_root",
+        source: "graph",
+        status: "succeeded",
+        ok: true,
+        summary: "ok",
+        evidence: { tool: "dev.run_tests" },
+        claim: null,
+        cost: { tokens: 1200, usd: 0.04 },
+        attempt: 1,
+        started_at: "2026-08-26T12:00:01Z",
+        finished_at: "2026-08-26T12:00:59Z",
+      },
+    };
+    const s = play([created(), withCost]);
+    const task = s.graphs[0]?.tasks[0];
+    expect(task?.cost?.tokens).toBe(1200);
+    expect(task?.startedAt).toBe("2026-08-26T12:00:01Z");
+
+    const free = play([created(), { ...withCost, payload: { ...withCost.payload, cost: null } }]);
+    expect(free.graphs[0]?.tasks[0]?.cost).toBeUndefined();
+  });
+
+  it("still keeps evidence and the worker's claim apart", () => {
+    const s = play([
+      created(),
+      {
+        seq: 2,
+        type: "task.finished",
+        ts: "2026-08-26T12:01:00Z",
+        task_id: "tk_root-b",
+        payload: {
+          root_id: "tk_root",
+          source: "graph",
+          status: "failed",
+          ok: false,
+          summary: "tests 40/41",
+          evidence: { passed: 40, failed: 1 },
+          claim: "everything passes",
+        },
+      },
+    ]);
+    const task = s.graphs[0]?.tasks[0];
+    expect(task?.evidence).toEqual({ passed: 40, failed: 1 });
+    expect(task?.claim).toBe("everything passes");
+  });
+});

@@ -12,9 +12,8 @@ Measured on 2026-08-21, not estimated:
 | Asterim (git-tracked) | **798 files** — 267 `.ts`, 190 `.md`, 91 `.tsx`, 62 `.js`, 30 `.json` |
 | Source2DemViewer | Rust; `target/` holds 3,915 files that must never be indexed |
 | GameRecs, GrowAMonster, asterim-pipeline, AsterimDesign | a few hundred each |
-| `Documents/AI/ML Learning` (Obsidian) | **157 Markdown notes** |
+| `Documents/AI/ML Learning` (Obsidian) | **182 Markdown notes**, plus a shelf of PDF textbooks |
 | `Documents/ObsidianNotes` | 3 notes |
-| `Documents/MLAI NOTES/ML/AI` | 1 note + 1 PDF (32 MB) |
 
 **Total: a few thousand documents → roughly 30k–80k chunks.**
 
@@ -68,9 +67,8 @@ collections:
   - id: notes
     kind: markdown
     roots:
-      - "C:/Users/qhukz/Documents/AI/ML Learning"       # 157 notes
+      - "C:/Users/qhukz/Documents/AI/ML Learning"       # 182 notes + the PDF shelf
       - "C:/Users/qhukz/Documents/ObsidianNotes"        # see `deny` — this root has a Passwords/ folder
-      - "C:/Users/qhukz/Documents/MLAI NOTES/ML/AI"
     obsidian: true
 
   # NOT indexed, deliberately: Documents/ at large, Downloads, AppData,
@@ -158,14 +156,66 @@ per-file, byte for byte, in `tests/test_rag_treesitter.py`.
 **Obsidian specifics:** front-matter becomes metadata (tags, aliases); `[[wikilinks]]` are extracted
 into a link table so retrieval can expand one hop to directly linked notes; `#tags` become filters.
 
+The link table gained a second consumer in the 2026-08-24 replan: it is the explicit-edge source
+for the Phase 11 **knowledge graph view** ([UI.md §11b](UI.md#11b-the-knowledge-graph--phase-11)),
+which also derives optional semantic edges from the document embeddings (computed offline with
+the index, [OQ-22](OPEN_QUESTIONS.md#oq-22)) and will persist layout positions in `knowledge.db`
+([ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered)).
+Nothing about indexing or retrieval changes; the graph is a read-only projection of what this
+document already specifies.
+
+### The budget, enforced and recalibrated  `MEASURED 2026-08-26`
+
+The target sizes in the table above are in **tokens**; the chunker's budget is in **characters**,
+because a character budget keeps chunking independent of the tokenizer — which is what let OQ-02
+compare five embedding candidates against byte-identical chunks. That trade has a maintenance cost
+that went unpaid for two months, and both halves of it are now measured
+([log](../logs/development/2026-08-26-oq18-chunking.md)).
+
+**The cap was never enforced.** `MAX_CHARS` was documented as the ceiling on a chunk and applied to
+the *body*: `_pack` counted block bodies while emitting `header + anchor + body` per block, and
+`_window` counted lines while emitting `prefix + lines`. The longest "1,800-character" chunk in the
+real corpus was **4,055 characters**. The unit test that should have caught it asserted
+`<= MAX_CHARS * 2`; a budget with a factor-of-two tolerance is not a budget, and that slack is gone.
+
+**And it was calibrated against the wrong corpus.** "~500 tokens of English prose" assumed ~3.6
+characters per token. `bge-m3` tokenizes this corpus at a median of 3.05 (code) and 3.33
+(markdown), and at the 1st percentile 2.34 and 2.42 — so **27.1% of embedded chunks exceeded the
+512-token window and were silently truncated**, taking 6.4% of embedded tokens with them.
+
+`MAX_CHARS` is **1200** now, and enforced against the rendered chunk. Truncation is 0.7% of
+embedded chunks and 0.10% of embedded tokens. It costs 43% more chunks.
+
+It stays a character cap rather than becoming a token cap, deliberately: a token cap would make
+chunking depend on the tokenizer, and the coupling that produces is precisely what let
+`eval_embeddings.py`'s copy of the chunker drift 8% away from the shipped one — which meant every
+recall number this project has published, including OQ-18's baseline, described the harness rather
+than the index. The harness calls the shipped chunker now.
+
+**`CHUNKER_VERSION` is recorded in the index**, beside the embedding model and checked the same
+way. `bind()` has always refused an index built by a different model because "it returns confident
+nonsense"; a boundary change is the same class of problem, and incremental indexing does not
+rebuild rows it already has — so without the guard an index ends up half cut one way and half the
+other, with nothing failing and retrieval quietly getting worse.
+
+**What the repair bought**, measured over the full corpus on the path that ships: **+2.7 points of
+recall@5 overall and +4.0 on the Russian subset**, with every fusion strategy improving and none
+regressing. It costs 43% more chunks and 20 MB of index, and it made indexing *faster* in
+wall-clock — 7,523 s against 8,032 s — because attention cost is superlinear in sequence length and
+these sequences are shorter. Numbers and method in
+[the log](../logs/development/2026-08-26-oq18-chunking.md); the gate itself is
+[OQ-18](OPEN_QUESTIONS.md#oq-18).
+
 ---
 
 ## 4. Embeddings
 
-**Default: `multilingual-e5-base` (768d), ONNX Runtime, CPU.** Rationale in
+**Default: `bge-m3` (1024d), ONNX Runtime, CPU** — since 2026-08-24; `multilingual-e5-base` (768d)
+before that, and still one line away. Rationale in
 [TECH_STACK.md §4](TECH_STACK.md#4-knowledge) — Russian and English in one model, and CPU execution so
-the 4 GB of VRAM stays dedicated to the router model. E5 requires `query:` / `passage:` prefixes; the
-indexer and the retriever must agree on this, and a test asserts it (getting it wrong silently halves
+the 4 GB of VRAM stays dedicated to the router model. E5 requires `query:` / `passage:` prefixes and
+bge-m3 requires none; the indexer and the retriever must agree on whichever is in force, and a test
+asserts it (getting it wrong silently halves
 quality and is a classic bug).
 
 **Confirmed by measurement, [OQ-02](OPEN_QUESTIONS.md#oq-02), 2026-08-22**
@@ -186,20 +236,41 @@ overstated the winner's margin:
 
 **On the full corpus, `e5-base` scores 81% — one point over the gate — and 62% on the
 Russian questions.** The sample overstated it by 9 points overall and 13 on the
-cross-language column. `bge-m3` is the likely fix at 3.4x the indexing cost, and the
-comparison that would settle it has not been run.
+cross-language column. `bge-m3` is the likely fix at 3.4x the indexing cost — the
+comparison that settles it was run on 2026-08-24 and is below.
 
-**Corrected again, 2026-08-22, and this one matters more.** Every Russian figure on this
-page comes from a set of **eight** questions. Expanding it to 25 puts `e5-base` at
-**36% on Russian and 55% overall** — the small set overstated it by 26 points, on top of
-the 13 the sample had already overstated. The English and lexical columns are unaffected.
+**Corrected again, 2026-08-22.** Every Russian figure in the table above comes from a set
+of **eight** questions. Expanding it to 25 put `e5-base` at **36% on Russian and 55%
+overall** — the small set overstated it by 26 points, on top of the 13 the sample had
+already overstated. The English and lexical columns are unaffected.
 
-Two explanations were eliminated before blaming the model: the fusion gate had a genuine
-denominator bug (Russian stopwords read as discriminating because they are rare in a mostly
-English corpus) which is fixed and **moved recall not at all**, and the failures are not
-near-misses — of 25 Russian cases, 9 land in the top 5, **zero in ranks 6-10**, and 12 never
-enter the candidate set. See [OQ-02](OPEN_QUESTIONS.md#oq-02), now reopened, and the
-[log](../logs/development/2026-08-22-fusion-denominator.md).
+### Settled 2026-08-24: `bge-m3`, and the gate was scoring it wrong
+
+Both candidates built over the same full corpus on the same day, measured by the same code
+over all 38 fixtures ([log](../logs/development/2026-08-24-oq02-bge-m3.md)):
+
+| embedding | fusion gate | recall@5 | crosslang | p95 | full rebuild |
+|---|---|---:|---:|---:|---:|
+| `e5-base` | as shipped | 55% | 36% | 271 ms | 42.8 min cold |
+| `e5-base` | fixed | 55% | 36% | 260 ms | 42.8 min cold |
+| `bge-m3` | as shipped | 53% | 32% | 401 ms ✗ | ~2.5 h cold |
+| **`bge-m3`** | **fixed** | **61%** | **44%** | 332 ms | ~2.5 h cold |
+
+**Against the retrieval code as it shipped, `bge-m3` loses.** The lexical gate below was
+admitting BM25 on 38 questions out of 38, and fusion can only displace a correct dense hit
+that exists — so an unfiltered lexical list cost `bge-m3` twelve points of cross-language
+recall and `e5-base` nothing. The 2026-08-22 conclusion that the Russian failures *are* the
+embedding was read through that same instrument.
+
+**`DEFAULT` is `bge-m3` from 2026-08-24.** The switch was taken with the gate fix, because
+neither is worth much without the other: `bge-m3` through the old gate scored 53%, below
+the model it replaced. It costs ~3 GB resident instead of ~1.5 GB and a full rebuild.
+`e5-base` keeps its `ModelSpec`, and `KnowledgeStore.bind` refuses an index built by the
+other model — so going back is a rebuild, not a silent regression.
+
+**None of this reaches the gate.** 61% against 80%, with 7 of 25 Russian cases never
+entering the candidate set at all — a shape no reranker can fix. That is now
+[OQ-18](OPEN_QUESTIONS.md#oq-18).
 
 * **Do not truncate.** Matryoshka truncation costs 9 points here, not "minimal": `multilingual-e5-base`
   is *not* Matryoshka-trained, so its first 384 dimensions are half an embedding rather than a
@@ -247,27 +318,68 @@ tuned weights — it is robust by construction. Metadata pre-filtering (project,
 path prefix) happens **before** the KNN scan, which is what keeps brute force cheap — in sqlite-vec
 that means vec0 partition keys, so the predicate is pushed into the scan rather than applied after it.
 
-### Fusion is conditional  `MEASURED 2026-08-22`
+### The script rule, re-measured  `2026-08-26`
+
+`discriminating_terms` drops minority-script terms at any frequency, so a Russian question against
+this Latin-majority corpus produces no lexical terms and `retrieve()` takes the **dense-only** path.
+The 2026-08-24 measurement put that at 12 points of cross-language recall@5. Re-measured over the
+full corpus on the repaired index, it is worth **12 points** without a translated probe and **20**
+with one — BM25 scores **0.0%** on all 25 Russian fixtures in both runs, and unweighted RRF admits
+those fifty results as a second opinion of equal standing, displacing correct dense hits out of the
+top 5.
+
+**The eval harness did not implement this rule**, and that mattered more than the rule itself:
+`eval_embeddings.py`'s `gated` strategy tests only document frequency, with no script test, so
+every crosslingual recall number this project has recorded — including
+[OQ-18](OPEN_QUESTIONS.md#oq-18)'s 44% — described a fusion ORACLE does not perform. What ships
+scores 60.0% on those fixtures, not 44%
+([log](../logs/development/2026-08-26-oq18-chunking.md)).
+
+### Fusion is conditional  `MEASURED 2026-08-24`
 
 Robust by construction is not the same as harmless. Measured on the fixture set during
 [OQ-02](OPEN_QUESTIONS.md#oq-02):
 
 | dense model | dense only | + BM25 via RRF |
 |---|---:|---:|
-| `e5-base` | 81% | **90%** (+9) |
 | `e5-small` | 76% | **71%** (−5) |
+| `e5-base` | 81% | **90%** (+9) |
+| `bge-m3` (full corpus, crosslang) | 44% | **32%** (−12) |
 
 A Russian question against an English codebase shares no meaningful term with any document, so BM25
 has nothing to say — **and says it in thirty ranked results anyway**. Unweighted RRF treats that as a
 second opinion of equal standing, and it displaces correct dense hits out of the top 5. Fusion is not
 free when one retriever is systematically blind to a query class.
 
-The fix keeps RRF unweighted and gates its *input* instead: the lexical list is admitted only when
-the query has some lexical purchase on the corpus — at least one term appearing in fewer than 10% of
-chunks (with a floor, so a small index does not gate everything out). Tuning RRF's weights would have
-forfeited the property the algorithm was chosen for; dropping a list that is provably noise does not.
+**The cost scales with how good the dense half is**, which is the rule the three rows above spell
+out and which took two attempts to read. Fusion can only displace a correct dense hit that exists;
+`e5-small` had few, `e5-base` more, `bge-m3` many. So the fusion policy cannot be measured
+independently of the embedding, and a model comparison run through a leaky gate measures the gate.
 
-Implemented as `rag.retrieval.has_lexical_purchase`.
+So the fix keeps RRF unweighted and gates its *input* instead. Three conditions, each measured, all
+in `rag.retrieval.discriminating_terms` (`has_lexical_purchase` is the boolean form):
+
+1. **The term appears in fewer than 10% of chunks** (with a `MIN_DF_CEILING` floor, so a small index
+   does not gate everything out). A term in every document discriminates nothing, and OR-ing `the`,
+   `we` and `is` is what made the lexical half cost 150 ms p50 — twice the brute-force vector scan.
+2. **The term is in the script the corpus is written in.**  `MEASURED 2026-08-24`  Document frequency
+   measures rarity in the corpus, not uninformativeness in the language: in a corpus that is 6%
+   Cyrillic, `если` sits at 4% of the Russian and survives, and the genuinely rare Russian words
+   match whichever unrelated project happens to be documented in Russian. Either way BM25 answers
+   from the wrong neighbourhood. The rule is *minority*, not Cyrillic — a Russian-majority corpus
+   gates out Latin. This supersedes the per-script denominator of 2026-08-22, which dropped the
+   stopwords and moved recall not at all.
+3. **The survivors cover at least 40% of the question's answerable terms.**  `MEASURED 2026-08-24`
+   One Latin word inside a Russian sentence passed rule 2 alone and opened the gate, costing that
+   fixture its top-5 slot under both embeddings — a one-term OR query ranked by BM25 is close to a
+   document-frequency ordering. It is a *share*, not a count, so a bare `PairingService` lookup is
+   100% of its question and still fuses. Terms absent from the corpus are excluded from the
+   denominator: a word BM25 cannot answer is not a word BM25 declined to answer.
+
+Tuning RRF's weights would have forfeited the property the algorithm was chosen for; dropping a list
+that is provably noise does not. Rules 2 and 3 together are worth **+8 points of recall@5 and +12 on
+the cross-language column** to `bge-m3`, cost `e5-base` nothing, and take the gate from opening on
+38 queries out of 38 to 11 — which is also 69 ms off `bge-m3`'s p95.
 
 **No reranker in v1.** Post-MVP, if the fixture set shows a gap: ONNX `bge-reranker-base` on CPU,
 top-30 → top-8.
@@ -364,6 +476,29 @@ Two rules the set has had to learn about itself:
   made it indexable — and a document containing all 38 questions verbatim promptly took a top-5 slot
   in 12 of them. `measure()` discards it before ranking. It stays a legitimate corpus document; it
   just cannot answer itself.
+
+### The rule above was true in one script and false in the other  `2026-08-26`
+
+`measure()` in `scripts/index_knowledge.py` has discarded the fixture file since 2026-08-22.
+`scripts/eval_embeddings.py` — the script that produced **every number
+[OQ-18](OPEN_QUESTIONS.md#oq-18) records** — never got the same guard. Re-measured on the real
+corpus: answer-key documents sat in the lexical candidates of **37 of the 38 queries**, and
+`tests/fixtures/retrieval/cases.yaml` was the single strongest lexical match for nearly all of them.
+
+Both scripts now share one constant (`ANSWER_KEY`, imported, not restated), and it is slightly
+broader than the old rule: the *intent* fixtures leak the same way.
+
+**Two copies of an idea and a fix reaching one of them** is the shape of four of the five instrument
+defects found between 2026-08-22 and 2026-08-26 — the chunker copy, the fusion denominator, the
+config denominator, and this. Recorded here because the lesson is not about fixtures: it is that a
+second implementation of a rule is a place for the rule to be wrong quietly.
+
+**What is deliberately *not* excluded** is ORACLE's own prose. `docs/RAG.md` quoting a fixture
+question is a real document that a real query could really want, and scoring against a corpus that
+omits it would measure a corpus nobody has. Only the file whose purpose is to list the answers comes
+out. The residual — ORACLE writing about its own fixtures, which every task like this one increases —
+is real and unquantified on the dense side. `TO VERIFY`: how many top-5 *dense* slots ORACLE's
+documentation takes on its own fixture set.
 
 ---
 

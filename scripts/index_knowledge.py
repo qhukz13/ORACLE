@@ -28,12 +28,14 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+# The sibling measurement script, for the one constant they must not disagree on.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from oracle.config import Settings
 from oracle.logsink import configure
 from oracle.rag.cache import EmbeddingCache, cache_path, warm_from_index
 from oracle.rag.collections import load_registry
-from oracle.rag.embedding import BGE_M3, E5_BASE, E5_SMALL, Embedder, ModelSpec
+from oracle.rag.embedding import BGE_M3, DEFAULT, E5_BASE, E5_SMALL, Embedder, ModelSpec
 from oracle.rag.indexer import index
 from oracle.rag.retrieval import retrieve
 from oracle.rag.store import KnowledgeStore
@@ -55,7 +57,16 @@ G, R, Y, B, D, X = "\033[32m", "\033[31m", "\033[33m", "\033[34m", "\033[2m", "\
 #: real answers out. That is a leak in the *measurement*, not a fault in retrieval: a file
 #: of questions is a legitimate corpus document, it just cannot be allowed to answer itself.
 #: Discarded before ranking rather than after, so the case still gets `limit` real chances.
-LEAKED = "tests/fixtures/retrieval/cases.yaml"
+#:
+#: **Imported rather than restated.**  `2026-08-26, P9-T3`  This constant was written here
+#: on 2026-08-22 (commit `b660172`) and the sibling measurement script,
+#: `eval_embeddings.py`, never got it — so the guard held for the shipped-path gate while
+#: **every number OQ-18 recorded** was measured with the answer key still eligible, at
+#: 37 of 38 queries. Two copies of one idea and a fix reaching one of them is the shape of
+#: four of the five instrument defects this project has found in five days, so there is now
+#: one copy. It is also broader than what this file used to hold: the *intent* fixtures leak
+#: the same way.
+from eval_embeddings import ANSWER_KEY  # noqa: E402
 
 
 def measure(store: KnowledgeStore, embedder: Embedder, limit: int = 5) -> int:
@@ -75,8 +86,8 @@ def measure(store: KnowledgeStore, embedder: Embedder, limit: int = 5) -> int:
         latencies.append((time.perf_counter() - started) * 1000)
 
         ranked = [h.rel_path for h in retrieve(case["q"], store, embedder, limit=limit + 3).hits]
-        leaked += sum(1 for p in ranked[:limit] if p.endswith(LEAKED))
-        paths = [p for p in ranked if not p.endswith(LEAKED)][:limit]
+        leaked += sum(1 for p in ranked[:limit] if p.startswith(ANSWER_KEY))
+        paths = [p for p in ranked if not p.startswith(ANSWER_KEY)][:limit]
         ok = any(any(e in p or p.endswith(e) for e in case["expect_any"]) for p in paths)
         by_kind.setdefault(case["kind"], []).append(ok)
         if ok:
@@ -120,7 +131,7 @@ def main() -> int:
     ap.add_argument("--db", default=None)
     ap.add_argument(
         "--model",
-        default=E5_BASE.name,
+        default=DEFAULT.name,
         choices=sorted(MODELS),
         help="which embedding model to build with. A different model needs its own --db "
         "and gets its own cache file; mixing them in one index is refused by bind().",

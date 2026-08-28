@@ -3,100 +3,100 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** P5-T2 — Finish project knowledge: tree-sitter, the watcher, and a budget that is true
-**Status:** `IN PROGRESS` — five of six requirements done, the gate green. The sixth needs a decision
-from you, and it is a bigger decision than the task file thought.
-**Date:** 2026-08-22
+**Task:** the agent-doable queue while P12-T5 waits on its human click — **P11-T5** (the
+switchable centre stage), **OQ-24** and **OQ-25** (both measured and resolved), and the
+**OQ-18 corpus run** found dead, hardened, and re-fired.
+**Status:** all four strands done; gate green (run as its seven exact steps — see the trap below);
+the corpus run is computing with live progress and checkpoints, ETA ~19:30.
+**Date:** 2026-08-28 (afternoon session)
+**Dev log:** [2026-08-28-p11t5-and-measurements.md](../logs/development/2026-08-28-p11t5-and-measurements.md)
 
 ---
 
-## The headline
+## The OQ-18 run was dead, and both mysteries are closed
 
-**The Russian half of retrieval is much worse than we believed, and we believed it because the
-fixture set was too small to know better.**
+The morning hand-off left it "RUNNING, needs a decision". By 15:42 it was dead —
+`STATUS_CONTROL_C_EXIT` again, log still 63 bytes, nothing checkpointed. The "unexplained"
+13 hours: **the machine slept from 01:44 to 13:37** (Kernel-Power 42 / Power-Troubleshooter 1);
+the kill itself was a console control event in 14:05–15:42, unattributable because the
+TaskScheduler operational log is disabled.
 
-`e5-base` was chosen in [OQ-02](OPEN_QUESTIONS.md#oq-02) partly on **62% recall over eight Russian
-questions**. Expanding that set to 25 — ground truth read from the source files, not retrieved — puts
-it at **36%**. The eight had overstated it by 26 points, on top of the 13 the 3,000-chunk sample had
-already overstated before that.
+Re-fired at 16:07 after hardening the script against all three failure modes: **live progress**
+(`-u` + line buffering + a rate/ETA line per checkpoint), **256-chunk atomic checkpoints with
+resume** (a kill now costs ≤ ~4 minutes, and the smoke test killed and resumed a real pass to
+prove it), and **`ES_SYSTEM_REQUIRED`** so the machine cannot sleep mid-measurement. On
+collection (~19:30): compose `dense_mt` vs `dense_xl`, decide `translate_queries` and
+`en-relay-dockerfile`, resolve OQ-18, then `Unregister-ScheduledTask ORACLE-OQ18-eval`. **Check
+the answer-key line first** — this corpus printed `0/38 queries` where 2026-08-26 measured
+37/38; verify the fixture file is still in the corpus before trusting recall.
 
-Nothing regressed. The number was always this; the instrument was too coarse to show it. OQ-02 is
-**reopened**.
+## OQ-24: the fan-out misses, so the sidebar observes lazily — built
 
-## What landed
+Measured by the new `scripts/measure_observation.py` under deliberate load: the 8-row fan-out
+costs **1.7–2.7 s warm** (2–3× over budget), the two toolhost IPC round trips dominate, and the
+toolhost serialises invocations so eager observation would queue behind real work. Applied as
+OQ-24 prescribed: the **selected row** is observed fresh (`GET /api/v1/projects/{id}`) and
+renders `⎇ main ↑3 ↓1 ~2`; nothing is cached; the list endpoint still runs no git.
 
-| | |
-|---|---|
-| **Embedding cache** (req 1) | Full rebuild 42.8 min → **37 s**, zero forward passes, recall unchanged. |
-| **tree-sitter chunking** (req 2) | Built, tested, and **switched off**. See below. |
-| **Re-measured after re-chunking** (req 3) | Done, and it found a benchmark leak worth more than the chunker result. |
-| **Watcher under the daemon** (req 4) | Running, HALT-aware, publishing `knowledge.state`. Measuring it found a 3.1× filter defect. |
-| **PDF** (req 5) | Text layer, no OCR, page anchors, `local_foreign`. Costs **nothing** in recall. |
-| **Russian fixtures 8 → 25** (req 6, half) | Done. It is what produced the headline. |
+## OQ-25: eleven labels measure better than ten, and the slot failure has a name
 
-## The three findings worth your time
+`make eval` now exists, the fixture set carries four `continue` cases, and the eval says:
+**97.1% intent accuracy (was 93.3%)**, `continue` 4/4 on label **and** slot, one confusion
+(`собери GameRecs` → continue — the feared boundary, in reverse). The live-run slot failure is
+specific: the 0.8B model **never emits `ORACLE` as a project value** (9/9 deterministic; a
+prompt instruction measured 6/6 no-effect and was reverted) — `_named_project`, deterministic
+code, carries exactly that case by design. Also found: two fixture slot misses are **few-shot
+proximity beating extraction** — texts nearly identical to a `project: null` few-shot lose the
+project named in the sentence.
 
-**1. The benchmark was in the corpus.** `config/collections.yaml` roots a collection at
-`C:/Projects`, which contains ORACLE, and the walk skips untracked files — so *committing* the
-phase-5 work made `tests/fixtures/retrieval/cases.yaml` indexable. A file containing every fixture
-question verbatim took a top-5 slot in 12 of 21 cases, and it silently moved the baseline between two
-runs I was about to compare. `measure()` now discards it before ranking. This will recur: the corpus
-is the developer's own machine, so every dev log and report about retrieval joins it.
+## P11-T5: built, tested, and verified against the live daemon
 
-**2. tree-sitter names symbols far better and retrieves worse.** No control-flow keyword and no call
-expression appears as an anchor anywhere in the corpus, against `equal` (548 occurrences) and
-`useEffect` (219) for the line matcher — both *calls*. And on the same corpus with the same fixtures
-it loses recall@5 by two cases, across four builds. The line matcher wins by accident: it packs
-neighbouring text, so a file's header prose lands beside the code it describes and a conceptual
-question matches the paragraph. `chunking.SYNTAX_AWARE = False`, and the decision is yours — see
-"What needs you".
+The centre stage is a mechanism now: **`ViewTabs`** (a real tablist, arrow keys, roving
+tabindex) over Chat · Tasks · Events · Memory · Briefing · Knowledge; **`Ctrl+1..4`** with an
+AltGr guard; **TaskTree in its own Tasks stage** with a stated empty state; **the inspector's
+task branch** replacing the P12-T4 stopgap (one selection model — briefing inspect, task-row
+click and turn click all drive it; evidence and claim render apart; a task id older than the
+five held graphs says so); **`KnowledgeHealth` mounted** with a real wire —
+`POST /api/v1/knowledge/reindex` (new, through the executor and the policy gate, T1). The
+briefing keeps its once-only takeover; approvals and delegations stay above every stage —
+a card behind a tab is a card that expires unseen.
 
-Three real defects turned up while chasing that, each fixed, each verified by reading the bytes, and
-**none of which moved the number**: a doc comment being severed from what it documents, a file-level
-comment being glued to the first constant below it, and a class field's trailing `;` becoming its own
-anchored block. The gap between "visibly better" and "measurably better" is the reason the criterion
-is a number.
+**305 UI tests** (was 277), tsc strict, and the a11y audit now covers **15/15 components**
+(Inspector, Citations, EgressPreview added) plus ViewTabs. Live verification against the
+running daemon: the briefing auto-opened with the real crash line, keyboard switching worked in
+a real browser, and the Knowledge stage rendered the real 147 MB index.
 
-**3. Wiring the watcher up found a defect that inspection had missed for a whole task.** The filter
-ran at 0.27 ms per event *on the event loop* — 1.3 s for an `npm install` — because `fnmatch`
-normcases both arguments and on Windows `normcase` is a `LCMapStringEx` syscall. 160,000 trips
-through the OS locale mapper for 5,000 events. Compiling the patterns once: **3.1×**, and the corpus
-walker shares the function. The module docstring had claimed "everything cheap happens first" since
-P5-T1; it was true about *what* the filter did and false about what it cost.
+UI.md §2/§16/§20, §4, §6, §6b corrected in place with dates and reasons (the `Ctrl+1..4`
+table named two views that do not exist); PROJECT_STATE.md and ROADMAP's P12 checkbox updated;
+API.md documents the new endpoint.
 
-## Why the Russian result is the model, and not something cheaper
+## Debts paid alongside
 
-Two alternatives were eliminated by measurement before blaming the embedding:
+`pytest-timeout` (120 s/test — a hung gate becomes a named failure; TECH_STACK §11) ·
+`make eval` defined, `make perf` honestly removed from TESTING.md §8 · the stale
+"`store.ts` never populates `dependsOn`" claim corrected at its source.
 
-* **A real bug in the fusion gate** — document frequency measures rarity *in the corpus*, which only
-  means "uninformative" when corpus and query share a language. `как` was in 0.8% of this corpus and
-  read as highly discriminating, so every Russian question retrieved GrowAMonster's Russian docs,
-  matching on `как`, `внутри`, `она`. Fixed by counting against the Cyrillic sub-corpus. Ranks
-  improved, retrieval got **faster** — and recall did not move at all.
-* **It is not a ranking problem.** Of 25 Russian cases: 9 in the top 5, **0 in ranks 6–10**, 4 in
-  11–30, and **12 never enter the candidate set**. Turning the lexical half off entirely would put
-  the same nine in the top 5. The empty 6–10 bucket is the shape of the answer — a nearly-right model
-  misses by a little; this one either finds the document or does not come close.
+## The trap that shaped the mechanics, and two notes for the next session
 
-## What needs you
+- **The resident daemon holds `.venv\Scripts\oracled.exe`**, so any syncing `uv` command fails
+  with `os error 32` while `oracled` runs. This session's gate therefore ran as the **seven
+  exact steps of `scripts/check.py` with `--no-sync` appended** — same commands, same scope:
+  ruff format ✓ · ruff lint ✓ · mypy ✓ (117 files) · tsc ✓ · pytest ✓ · security ✓ · vitest ✓
+  (305). Run a plain `uv sync` once the daemon is stopped to reconcile the entry-point exe.
+- **The running daemon predates `POST /api/v1/knowledge/reindex`** — the route goes live on its
+  next restart; the API tests cover it fully meanwhile.
+- **Do not fire the full reindex** (the Rebuild button, ~1 h, synchronous) until the OQ-18 run
+  has been collected — they would contend for every core.
 
-1. **The `bge-m3` run, ~2.5 h of CPU.** No longer marginal: the embedding is the only remaining
-   lever, and `bge-m3` scored 100% on the same eight Russian questions where `e5-base` scored 75%.
-   Both numbers are inflated; the gap is not the kind a fusion tweak closes.
-2. **Does tree-sitter ship?** One constant. My recommendation is to leave it off and let the expanded
-   fixture set decide, because 21 cases at 4.8 points each cannot settle a two-case difference in
-   *either* direction — including the direction I would have preferred.
-3. **Confirm the indexing budget wording** in ROADMAP.md — and note I corrected my own number: "warm
-   rebuild = 37 s" was the best case quoted as the rule. A chunking change moves chunk *text*, which
-   is the cache key, so the first tree-sitter build hit 45% of the cache and took **19.9 min**.
+## What is still not done
 
-## State
+**`tasks` is 0 rows.** Unchanged, and still one human click away — approve a fresh T3 card from
+`continue ORACLE` (the daemon, Ollama, and now the dev UI at :5273 are all up for it), or run
+`oracle-selfcheck`. The orbit's go/no-go (OQ-14), the execution tree's acceptance against real
+data, and `TaskTree`'s wire-recorded fixture all still wait on it.
 
-Gate green — ruff, mypy, tsc, pytest, security, vitest. Branch `phase5-knowledge`.
-Fast-forward with `git checkout main && git merge --ff-only phase5-knowledge`.
+## Next
 
-Logs: [tree-sitter](../logs/development/2026-08-22-treesitter-chunking.md) ·
-[watcher](../logs/development/2026-08-22-watcher-daemon.md) ·
-[PDF](../logs/development/2026-08-22-pdf.md) ·
-[fusion denominator](../logs/development/2026-08-22-fusion-denominator.md) ·
-[embedding cache](../logs/development/2026-08-22-embedding-cache.md)
+[current_task.md](current_task.md) — unchanged in essence: P12-T5's human click closes Phase 12,
+then [P13](ROADMAP.md#phase-13--residency-boot--the-briefing--residency-arc). The OQ-18
+collection (~19:30) is the one timed item.
