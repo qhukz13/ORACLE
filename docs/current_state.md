@@ -48,10 +48,16 @@ and resumed it to prove the mechanism:
   `Start-ScheduledTask ORACLE-OQ18-eval` — it continues where it stopped.
 - `SetThreadExecutionState(ES_SYSTEM_REQUIRED)` holds the machine awake for the pass.
 
-Measured mid-run: ~1.35 chunks/s over 16,519 semantic chunks (the recalibrated 1200-char
-chunker makes the corpus ~50% bigger than the 11,727 recorded 2026-08-25) → **~3.4 h of
-compute; expect it done ~19:30**. Collection steps, and the answer-key anomaly to check first
-(`0/38` keyed vs 37/38 on 2026-08-26), are in [current_task.md](current_task.md).
+Measured mid-run: ~1.3–1.7 chunks/s over ~16.5k semantic chunks (the recalibrated 1200-char
+chunker makes the corpus ~50% bigger than the 11,727 recorded 2026-08-25) → **~3 h of
+compute per uninterrupted attempt**. A third kill (a literal `^C` at 46%, ~17:38) proved the
+checkpoint machinery **and** its limit in one evening: the resume was correctly *refused*,
+because this session's commits had changed the corpus under it — ORACLE indexes ORACLE, so
+a measurement that spans working sessions is measuring a moving target. The attempt running
+now started ~20:14 against the evening's corpus and holds it in memory, so later edits
+cannot corrupt it. Collection steps are in [current_task.md](current_task.md); the
+`0/38 answer-key` line in its output is a diagnostic that was born broken (fixed 2026-08-28
+evening — the truth is 38/38, probe-measured).
 
 ---
 

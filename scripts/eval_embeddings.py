@@ -1055,11 +1055,17 @@ def main() -> int:
     lex_scores, lex_misses = score_set(cases, chunks, lambda c: lex_rank[c["id"]])
     print(f"  recall@5 {lex_scores['recall@5']:.0%}   misses: {lex_misses}")
     # The lexical half is where the answer key does its damage, so its size is reported
-    # where it happens: how many of the 38 queries put a fixture file in their top 5.
+    # where it happens: how many queries put an answer-key chunk in their top-12 lexical
+    # candidates. The first version of this line compared the LENGTHS of two [:12] slices
+    # (filtered vs not), which can only differ when fewer than 12 non-keyed results exist
+    # in the whole top-50 — so it printed 0/38 from the day it was written (2026-08-26)
+    # while the key was in fact ranking 0-3. A probe on 2026-08-28 caught it because the
+    # number finally looked wrong enough to check. The scoring itself was never affected:
+    # `score_set` filters the full ranking, not a slice.
     keyed = sum(
         1
         for c in cases
-        if len(without_answer_key(chunks, lex_rank[c["id"]])[:12]) < len(lex_rank[c["id"]][:12])
+        if any(chunks[i].doc.path.startswith(ANSWER_KEY) for i in lex_rank[c["id"]][:12])
     )
     print(f"{D}  answer-key documents in the lexical candidates of {keyed}/{len(cases)} queries{X}")
 

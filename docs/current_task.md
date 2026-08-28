@@ -63,10 +63,14 @@ again, just `Start-ScheduledTask ORACLE-OQ18-eval`: it resumes from the last che
 
 On collection:
 
-1. **Check `all 38 fixture sources present` and the answer-key line first.** This corpus printed
-   *"answer-key documents in the lexical candidates of 0/38 queries"* where 2026-08-26 measured
-   37/38 — verify `tests/fixtures/retrieval/cases.yaml` is still in the corpus before trusting
-   recall numbers.
+1. **Check `all 38 fixture sources present`** (it printed green on tonight's run). Ignore the
+   *"answer-key documents in the lexical candidates of 0/38 queries"* line in tonight's output:
+   that diagnostic was born broken on 2026-08-26 (it compared the lengths of two `[:12]`
+   slices, which can essentially never differ) and printed 0 from day one. A 2026-08-28 probe
+   measured the truth — **38/38 queries carry an answer-key chunk in their top-12 lexical
+   candidates, ranking 0–3** — so the exclusion is load-bearing and the recall numbers
+   (computed by `score_set`, which filters the full ranking) were never affected. The fixed
+   diagnostic ships in `eval_embeddings.py` and prints honestly from the next run.
 2. Compose `dense_mt` against `dense_xl` (mechanism vs ceiling), confirm or flip
    `Settings.translate_queries`, decide `en-relay-dockerfile`.
 3. Resolve [OQ-18](OPEN_QUESTIONS.md#oq-18); state the answer-key correction wherever
