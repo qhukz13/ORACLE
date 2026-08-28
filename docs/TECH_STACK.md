@@ -434,7 +434,7 @@ same WS API**. It can be built, replaced, or abandoned without the agent core no
 | Package/venv | `uv` (fast, lockfile, manages the Python toolchain itself) |
 | Lint + format | `ruff` (replaces black + isort + flake8 + several plugins) |
 | Types | `mypy --strict` on `packages/core`, `packages/policy`, `packages/tools`; looser elsewhere |
-| Tests | `pytest`, `pytest-asyncio`, `hypothesis` (property tests for the path canonicaliser) |
+| Tests | `pytest`, `pytest-asyncio`, `pytest-timeout` (a hang becomes a named failure; added 2026-08-28 after a gate run hung under CPU starvation), `hypothesis` (property tests for the path canonicaliser) |
 | Frontend | `vitest`, `@testing-library/react`, `playwright` for E2E |
 | Git | already in use; ORACLE itself is not yet a repo — `git init` is task 1 of Phase 0 |
 | Docker | installed (29.5.3); used *as a tool ORACLE drives*, not to run ORACLE |

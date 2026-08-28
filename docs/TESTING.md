@@ -121,9 +121,8 @@ Regressions here are silent and cumulative, so they are asserted:
 Measured nightly on this hardware. These numbers are hardware-specific by design — a budget that
 passes on a different machine tells us nothing about the machine ORACLE runs on.
 
-**Two of these have no test to live in yet**, and saying so is better than implying otherwise:
-`make perf` and `make eval` are named in §8 below and defined in neither the `Makefile` nor
-`scripts/check.py`. Until they exist, the graph numbers above come from
+**These budgets still have no automated test to live in**: `make eval` exists as of 2026-08-28, but
+`make perf` still does not, and §8 no longer claims it does. The graph numbers above come from
 `scripts/measure_graph.py` run by hand ([OQ-22](OPEN_QUESTIONS.md#oq-22),
 [dev log](../logs/development/2026-08-26-oq22-knowledge-graph.md)), and the canvas row is honestly
 blank because it needs a compositing window on this GPU inside WebView2.
@@ -132,7 +131,9 @@ blank because it needs a compositing window on this GPU inside WebView2.
 implicit *wall-clock* assumptions — a watcher filtering 5,000 paths in under 2 s, a ConPTY burst
 arriving intact — and both failed while another process held all 24 threads, then passed idle. A
 budget asserted on a loaded machine measures the load. Worth deciding whether those become explicit
-perf tests (which may be skipped under load) or keep tighter deadlines.
+perf tests (which may be skipped under load) or keep tighter deadlines. Since 2026-08-28
+`pytest-timeout` bounds the worst case at 120 s per test — a hang becomes a named failure instead of
+a stuck gate.
 
 ## 7. What is not tested automatically
 
@@ -150,8 +151,13 @@ Stated so nobody assumes coverage that doesn't exist:
 ```bash
 make check      # ruff · mypy --strict (core, policy, tools) · pytest · vitest · security suite
 make eval       # model fixture suites — on prompt/model change
-make perf       # performance budgets — nightly
+                # (or `uv run python scripts/eval_intent.py` / `eval_selection.py` —
+                # make is not installed on this machine)
 ```
 
 `make check` must be green before any commit. The security suite is part of it from Phase 2, not a
 separate optional step — a gate that has to be remembered is not a gate.
+
+There is deliberately no `make perf`: performance numbers come from `scripts/measure_graph.py` (and
+now `scripts/measure_observation.py`) run by hand, and the target stays absent until there is a perf
+suite for it to run.

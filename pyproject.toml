@@ -42,6 +42,7 @@ dev = [
     "ruff>=0.7",
     "mypy>=1.13",
     "hypothesis>=6.100",
+    "pytest-timeout>=2.4.0",
 ]
 
 [project.scripts]
@@ -129,3 +130,9 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 filterwarnings = ["error"]
+# A hang under a CPU-starved gate run is expensive to bisect (one hung on 2026-08-26,
+# passed on retry). 120 s is far above any legitimate test — the slowest, the
+# terminal/recovery ones, finish well under 60 s — so this only converts hangs into
+# failures with a name. timeout_method stays unset: the plugin defaults to the thread
+# method on Windows, and the signal method does not exist here.
+timeout = 120

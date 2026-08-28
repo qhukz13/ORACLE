@@ -6,7 +6,7 @@
 
 UI := apps/desktop
 
-.PHONY: help setup check fmt lint types test test-py test-ui build run run-ui shell clean
+.PHONY: help setup check eval fmt lint types test test-py test-ui build run run-ui shell clean
 
 help:
 	@echo "setup   install python + node deps"
@@ -24,6 +24,12 @@ setup:
 # GNU make (which is not installed on this machine).
 check:
 	uv run python scripts/check.py
+
+# Needs Ollama up and costs real inference time, which is why it is not part of `check`.
+# Without make (not installed on this machine) the runnable form is the two `uv run` lines.
+eval:
+	uv run python scripts/eval_intent.py
+	uv run python scripts/eval_selection.py
 
 fmt:
 	uv run ruff format src tests
