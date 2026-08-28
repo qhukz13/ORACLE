@@ -570,11 +570,21 @@ describe("the safety surface is reachable from the keyboard", () => {
     expect(buttons.some((t) => t?.includes("Approve"))).toBe(true);
   });
 
-  it("the palette input is labelled and its list is a listbox", () => {
+  it("the palette input is a combobox whose active option is announced", () => {
+    // Closed 2026-08-28, the audit's last debt: role="option" rows existed only
+    // visually. Focus stays in the input, so the input must carry the combobox role
+    // and point aria-activedescendant at a row that really exists.
     const { container } = render(
       <CommandPalette open projects={["Asterim"]} onClose={() => {}} onSubmit={() => {}} />,
     );
-    expect(container.querySelector("input")?.getAttribute("aria-label")).toBeTruthy();
-    expect(container.querySelector('[role="listbox"]')).toBeTruthy();
+    const input = container.querySelector("input");
+    expect(input?.getAttribute("aria-label")).toBeTruthy();
+    expect(input?.getAttribute("role")).toBe("combobox");
+    expect(container.querySelector('[role="listbox"]')?.id).toBe(
+      input?.getAttribute("aria-controls"),
+    );
+    const active = input?.getAttribute("aria-activedescendant");
+    expect(active).toBeTruthy();
+    expect(container.querySelector(`#${active}`)?.getAttribute("role")).toBe("option");
   });
 });

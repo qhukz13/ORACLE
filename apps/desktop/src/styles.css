@@ -252,7 +252,7 @@ kbd {
 }
 .palette-list li.sel { background: var(--bg-3); }
 .palette-list li.sel .pi-label { color: var(--st-think); }
-.palette-empty { cursor: default; }
+.palette-empty { cursor: default; margin: 0; padding: 11px 15px; }
 .pi-label { flex: 1; color: var(--fg-0); }
 .pi-hint { color: var(--fg-2); font-size: 11px; }
 

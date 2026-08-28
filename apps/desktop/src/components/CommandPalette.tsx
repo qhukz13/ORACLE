@@ -193,11 +193,21 @@ export function CommandPalette({
         role="dialog"
         aria-label="Command palette"
       >
+        {/* The APG combobox pattern, because focus never leaves this input: the list is
+            navigated with the arrow keys while `aria-activedescendant` tells assistive
+            tech which option is active. Before 2026-08-28 the options existed only
+            visually — `role="option"` rows with an onClick that no screen reader could
+            reach from the input (the last item of the a11y audit's debt list). */}
         <input
           ref={inputRef}
           value={query}
           placeholder="run a command, name a project, or just ask…"
           aria-label="Command palette query"
+          role="combobox"
+          aria-expanded={items.length > 0}
+          aria-controls="palette-listbox"
+          aria-autocomplete="list"
+          aria-activedescendant={items.length > 0 ? `palette-option-${index}` : undefined}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
@@ -215,11 +225,14 @@ export function CommandPalette({
             }
           }}
         />
-        <ul className="palette-list" role="listbox" aria-label="Results">
-          {items.length === 0 && <li className="muted palette-empty">Type to search</li>}
+        <ul className="palette-list" id="palette-listbox" role="listbox" aria-label="Results">
           {items.map((item, i) => (
             <li
               key={item.id}
+              // Index-based rather than item-derived: pipeline and project names can hold
+              // characters an HTML id cannot, and `aria-activedescendant` above points at
+              // whichever row is active, not at a stable identity.
+              id={`palette-option-${i}`}
               role="option"
               aria-selected={i === index}
               className={i === index ? "sel" : ""}
@@ -231,6 +244,13 @@ export function CommandPalette({
             </li>
           ))}
         </ul>
+        {/* Outside the listbox: a listbox may contain only options, and this is a status
+            line, not a choice. */}
+        {items.length === 0 && (
+          <p className="muted palette-empty" role="status">
+            Type to search
+          </p>
+        )}
       </div>
     </div>
   );

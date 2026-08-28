@@ -95,6 +95,40 @@ describe("keyboard navigation", () => {
   });
 });
 
+describe("the combobox contract", () => {
+  // The last item of the a11y audit's debt list (2026-08-28): the options existed only
+  // visually — role="option" rows no screen reader could reach from the input. Focus
+  // never leaves the input, so the APG combobox pattern is the honest one:
+  // aria-activedescendant announces the active row from where focus actually lives.
+  it("wires the input to the listbox and tracks the active option", () => {
+    render(<CommandPalette open projects={PROJECTS} onClose={vi.fn()} onSubmit={vi.fn()} />);
+    const input = screen.getByLabelText("Command palette query");
+    expect(input.getAttribute("role")).toBe("combobox");
+    fireEvent.change(input, { target: { value: "e" } });
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+    expect(input.getAttribute("aria-controls")).toBe("palette-listbox");
+    expect(input.getAttribute("aria-activedescendant")).toBe("palette-option-0");
+
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input.getAttribute("aria-activedescendant")).toBe("palette-option-1");
+    // The reference must resolve to the row that is actually marked selected — a
+    // dangling activedescendant is worse than none.
+    const active = document.getElementById("palette-option-1");
+    expect(active?.getAttribute("role")).toBe("option");
+    expect(active?.getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("keeps mouse hover and the announced option in one selection model", () => {
+    render(<CommandPalette open projects={PROJECTS} onClose={vi.fn()} onSubmit={vi.fn()} />);
+    const input = screen.getByLabelText("Command palette query");
+    fireEvent.change(input, { target: { value: "e" } });
+    const second = document.getElementById("palette-option-1");
+    expect(second).toBeTruthy();
+    fireEvent.mouseEnter(second as HTMLElement);
+    expect(input.getAttribute("aria-activedescendant")).toBe("palette-option-1");
+  });
+});
+
 describe("buildItems — delegation", () => {
   it("offers a delegation once the query names a known project", () => {
     const items = buildItems("fix the auth tests in Asterim", ["Asterim", "GrowAMonster"]);
