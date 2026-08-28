@@ -194,7 +194,7 @@ gap between "visibly better" and "measurably better" is the whole reason the cri
 
 `tree-sitter-language-pack` is one abi3 wheel covering all 18 grammars this corpus needs, verified to
 load on this machine before code was written against it — the OQ-09 rule applied to a new dependency.
-Ledger entry in [TECH_STACK.md](../../docs/TECH_STACK.md#phase-5-dependency-ledger).
+Ledger entry in [TECH_STACK.md](../../docs/TECH_STACK.md#phase-5-dependency-ledger--2026-08-22).
 
 Parsing is not the cost that matters; embedding is. Re-chunking moved most boundaries, so most chunk
 texts were new and had to be embedded — a 31-minute rebuild at 45% cache hit. That is the case
