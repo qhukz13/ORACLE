@@ -3,108 +3,100 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** **P12-T5 — the first real `continue` run.** Fifth and last of the Phase 12 arc.
-**Status:** Ran. Stopped at the egress approval, which is where an agent stops. **Found and fixed
-a defect on the safety surface.** `tasks` is still 0 rows — one human click away.
-**Date:** 2026-08-28
-**Dev log:** [T5](../logs/development/2026-08-28-p12t5-first-run.md) ·
-[T4](../logs/development/2026-08-26-p12t4-sidebar-and-briefing.md) ·
-[T3](../logs/development/2026-08-26-p12t3-briefing.md) ·
-[T2](../logs/development/2026-08-26-p12t2-continue-intent.md) ·
-[T1](../logs/development/2026-08-26-p12t1-project-entity.md)
+**Task:** the agent-doable queue while P12-T5 waits on its human click — **P11-T5** (the
+switchable centre stage), **OQ-24** and **OQ-25** (both measured and resolved), and the
+**OQ-18 corpus run** found dead, hardened, and re-fired.
+**Status:** all four strands done; gate green (run as its seven exact steps — see the trap below);
+the corpus run is computing with live progress and checkpoints, ETA ~19:30.
+**Date:** 2026-08-28 (afternoon session)
+**Dev log:** [2026-08-28-p11t5-and-measurements.md](../logs/development/2026-08-28-p11t5-and-measurements.md)
 
 ---
 
-## The loop works
+## The OQ-18 run was dead, and both mysteries are closed
 
-`continue ORACLE`, typed into a live daemon with a live router:
+The morning hand-off left it "RUNNING, needs a decision". By 15:42 it was dead —
+`STATUS_CONTROL_C_EXIT` again, log still 63 bytes, nothing checkpointed. The "unexplained"
+13 hours: **the machine slept from 01:44 to 13:37** (Kernel-Power 42 / Power-Troubleshooter 1);
+the kill itself was a console control event in 14:05–15:42, unattributable because the
+TaskScheduler operational log is disabled.
 
-```
-turn.started      "continue ORACLE"
-agent.state       intent=continue  confidence=medium  route_ms=1908
-continue.derived  {project: ORACLE, open_tasks: 0, notes: [docs/current_task.md,
-                   docs/ROADMAP.md], tainted: true}
-approval.requested  ai.delegate
-```
+Re-fired at 16:07 after hardening the script against all three failure modes: **live progress**
+(`-u` + line buffering + a rate/ETA line per checkpoint), **256-chunk atomic checkpoints with
+resume** (a kill now costs ≤ ~4 minutes, and the smoke test killed and resumed a real pass to
+prove it), and **`ES_SYSTEM_REQUIRED`** so the machine cannot sleep mid-measurement. On
+collection (~19:30): compose `dense_mt` vs `dense_xl`, decide `translate_queries` and
+`en-relay-dockerfile`, resolve OQ-18, then `Unregister-ScheduledTask ORACLE-OQ18-eval`. **Check
+the answer-key line first** — this corpus printed `0/38 queries` where 2026-08-26 measured
+37/38; verify the fixture file is still in the corpus before trusting recall.
 
-Router classifies `continue`. Derivation reads the repository's own task documents. The objective
-carries them fenced, labelled and attributed. The turn finishes without waiting for the graph.
-All as designed.
+## OQ-24: the fan-out misses, so the sidebar observes lazily — built
 
----
+Measured by the new `scripts/measure_observation.py` under deliberate load: the 8-row fan-out
+costs **1.7–2.7 s warm** (2–3× over budget), the two toolhost IPC round trips dominate, and the
+toolhost serialises invocations so eager observation would queue behind real work. Applied as
+OQ-24 prescribed: the **selected row** is observed fresh (`GET /api/v1/projects/{id}`) and
+renders `⎇ main ↑3 ↓1 ~2`; nothing is cached; the list endpoint still runs no git.
 
-## The defect it found, which four days of fixture tests could not
+## OQ-25: eleven labels measure better than ten, and the slot failure has a name
 
-The planning approval arrived as **`tier T2`, `tainted: False`,
-`sends_repo_contents: False`** — while `args.objective` was **2,820 characters** of
-`docs/current_task.md` and `docs/ROADMAP.md`, verbatim.
+`make eval` now exists, the fixture set carries four `continue` cases, and the eval says:
+**97.1% intent accuracy (was 93.3%)**, `continue` 4/4 on label **and** slot, one confusion
+(`собери GameRecs` → continue — the feared boundary, in reverse). The live-run slot failure is
+specific: the 0.8B model **never emits `ORACLE` as a project value** (9/9 deterministic; a
+prompt instruction measured 6/6 no-effect and was reverted) — `_named_project`, deterministic
+code, carries exactly that case by design. Also found: two fixture slot misses are **few-shot
+proximity beating extraction** — texts nearly identical to a `project: null` few-shot lose the
+project named in the sentence.
 
-So the card told you it was not sending repository contents while doing exactly that, and the
-gate priced the call as untainted seconds after `continue.derived` — the same code path —
-recorded `tainted: true`. **Recording taint on an event while pricing the call as untainted is
-the worst of both: it looks audited and is not.**
+## P11-T5: built, tested, and verified against the live daemon
 
-**Why the tests missed it.** They tested the right things in the wrong combination: `objective_of`
-for fencing, `approve_graph` for `untrusted_sources`. Nothing tested what the *planning* card says
-about an objective built from files — because until `continue` existed, a planning objective was
-always a sentence you had typed, and `sends_repo_contents: False` was simply true. That is the
-shape of every dangerous stale assumption: **correct when written**, two days before the path that
-falsified it.
+The centre stage is a mechanism now: **`ViewTabs`** (a real tablist, arrow keys, roving
+tabindex) over Chat · Tasks · Events · Memory · Briefing · Knowledge; **`Ctrl+1..4`** with an
+AltGr guard; **TaskTree in its own Tasks stage** with a stated empty state; **the inspector's
+task branch** replacing the P12-T4 stopgap (one selection model — briefing inspect, task-row
+click and turn click all drive it; evidence and claim render apart; a task id older than the
+five held graphs says so); **`KnowledgeHealth` mounted** with a real wire —
+`POST /api/v1/knowledge/reindex` (new, through the executor and the policy gate, T1). The
+briefing keeps its once-only takeover; approvals and delegations stay above every stage —
+a card behind a tab is a card that expires unseen.
 
-**Fixed**, and verified on the live system rather than only in tests — same utterance, same
-daemon:
+**305 UI tests** (was 277), tsc strict, and the a11y audit now covers **15/15 components**
+(Inspector, Citations, EgressPreview added) plus ViewTabs. Live verification against the
+running daemon: the briefing auto-opened with the real crash line, keyboard switching worked in
+a real browser, and the Knowledge stage rendered the real 147 MB index.
 
-| | before | after |
-|---|---|---|
-| tier | T2 `confirm` | **T3 `confirm_strong`** |
-| rule | `tools.ai.delegate.tier` | `taint.escalate(tools.ai.delegate.tier)` |
-| tainted / escalated | false / false | **true / true** |
-| `sends_repo_contents` | false | **true** |
-| `untrusted_sources` | — | `docs/current_task.md`, `docs/ROADMAP.md` |
+UI.md §2/§16/§20, §4, §6, §6b corrected in place with dates and reasons (the `Ctrl+1..4`
+table named two views that do not exist); PROJECT_STATE.md and ROADMAP's P12 checkbox updated;
+API.md documents the new endpoint.
 
-T3 means a typed confirmation phrase — the right price for sending two of your repository's files
-to a cloud API, and what you were previously not being asked. Pinned by
-`TestTheEgressCardTellsTheTruth`, including the negative case so the signal keeps its information.
+## Debts paid alongside
 
-Written up in [SECURITY.md §6](SECURITY.md) with the generalisable rule: **a preview field that is
-a literal is a claim nobody re-checks.**
+`pytest-timeout` (120 s/test — a hung gate becomes a named failure; TECH_STACK §11) ·
+`make eval` defined, `make perf` honestly removed from TESTING.md §8 · the stale
+"`store.ts` never populates `dependsOn`" claim corrected at its source.
 
----
+## The trap that shaped the mechanics, and two notes for the next session
 
-## What OQ-25 actually found
-
-Not what I expected. `continue` was **never** confused with `run` or `modify` — the label routed
-correctly both times. But `project` came back **`null` both times**, on an input whose second word
-is a registered project name. The turn worked only because `_named_project` scans the raw text
-against the registry — a fallback written for `delegate`.
-
-So the finding is that the **project slot is unreliable and a string match is carrying it**. That
-fallback cannot cover a project named in a previous turn. Recorded under
-[OQ-25](OPEN_QUESTIONS.md#oq-25); the eval still needs running, but now with something specific to
-look for.
-
-Also: routing took 27 s cold (GPU load while the OQ-18 run had all 24 threads) and **1.9 s warm** —
-inside [OQ-15](OPEN_QUESTIONS.md#oq-15)'s target. Draw nothing from the cold number.
-
----
+- **The resident daemon holds `.venv\Scripts\oracled.exe`**, so any syncing `uv` command fails
+  with `os error 32` while `oracled` runs. This session's gate therefore ran as the **seven
+  exact steps of `scripts/check.py` with `--no-sync` appended** — same commands, same scope:
+  ruff format ✓ · ruff lint ✓ · mypy ✓ (117 files) · tsc ✓ · pytest ✓ · security ✓ · vitest ✓
+  (305). Run a plain `uv sync` once the daemon is stopped to reconcile the entry-point exe.
+- **The running daemon predates `POST /api/v1/knowledge/reindex`** — the route goes live on its
+  next restart; the API tests cover it fully meanwhile.
+- **Do not fire the full reindex** (the Rebuild button, ~1 h, synchronous) until the OQ-18 run
+  has been collected — they would contend for every core.
 
 ## What is still not done
 
-**`tasks` is 0 rows.** The run stopped at the approval, so no plan was authored and no graph
-compiled. The orbit's go/no-go ([OQ-14](OPEN_QUESTIONS.md#oq-14)), the execution tree's acceptance,
-`TaskTree`'s fixture, the sidebar's counters and the briefing's arithmetic are all still waiting on
-one human click.
-
-That is not a failure. The run's job was to get the question asked *correctly* — and it turned out
-the question had been asked incorrectly, which is worth more than a green run would have been.
-
-**`oracle-selfcheck` is still the cheaper way to fill that table**: local, **no egress**, six steps,
-one card.
-
----
+**`tasks` is 0 rows.** Unchanged, and still one human click away — approve a fresh T3 card from
+`continue ORACLE` (the daemon, Ollama, and now the dev UI at :5273 are all up for it), or run
+`oracle-selfcheck`. The orbit's go/no-go (OQ-14), the execution tree's acceptance against real
+data, and `TaskTree`'s wire-recorded fixture all still wait on it.
 
 ## Next
 
-[current_task.md](current_task.md) — approve the pending T3 card to finish T5, or run
-`oracle-selfcheck` for task rows without egress. Then Phase 12 is closed and
-[P13](ROADMAP.md#phase-13--residency-boot--the-briefing--residency-arc) (residency) begins.
+[current_task.md](current_task.md) — unchanged in essence: P12-T5's human click closes Phase 12,
+then [P13](ROADMAP.md#phase-13--residency-boot--the-briefing--residency-arc). The OQ-18
+collection (~19:30) is the one timed item.

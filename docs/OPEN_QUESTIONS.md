@@ -35,8 +35,8 @@ doc, delete the marker.
 | [OQ-21](#oq-21) | When does ORACLE's MCP server need the 2026-07-28 spec? | `UNKNOWN` | none — watch item | monitoring |
 | [OQ-22](#oq-22) | Does the knowledge graph hold its budgets at corpus scale? | measured 2026-08-26 | Phase 11 (graph view only) | **3 of 4 answered — build it, narrower; canvas-vs-SVG still needs a real window** |
 | [OQ-23](#oq-23) | Does a failure-carrying prompt produce a *different* plan? | `EXPERIMENT NEEDED` | nothing — replanning ships bounded | opened 2026-08-25 |
-| [OQ-24](#oq-24) | Does observing every project fit the glance budget? | `EXPERIMENT NEEDED` | Phase 12 (the sidebar and the briefing) | opened 2026-08-26 |
-| [OQ-25](#oq-25) | Did adding the `continue` label move intent accuracy? | `TO VERIFY` | nothing — but it is a regression risk carried knowingly | **first real evidence 2026-08-28: the label routes; the project slot does not** |
+| [OQ-24](#oq-24) | Does observing every project fit the glance budget? | **RESOLVED 2026-08-28** — no: 1.7–2.7 s warm for 8 rows; the sidebar observes lazily, per selected row | — | measured by `scripts/measure_observation.py` |
+| [OQ-25](#oq-25) | Did adding the `continue` label move intent accuracy? | **RESOLVED 2026-08-28** — 97.1% at eleven labels (was 93.3% at ten); the slot fails only for the name `ORACLE`, which the deterministic fallback carries | — | eval re-run with 4 `continue` cases |
 
 ---
 
@@ -837,8 +837,39 @@ Not questions, but things the design takes as true and would need revisiting if 
 ---
 
 ### OQ-24
-**Does observing every project fit the 3–5 second glance budget?** `EXPERIMENT NEEDED` ·
-opened 2026-08-26 · bounds **Phase 12**'s sidebar and briefing.
+**Does observing every project fit the 3–5 second glance budget?** **RESOLVED 2026-08-28 — no.**
+Opened 2026-08-26 · measured by `scripts/measure_observation.py` · answer applied the way this
+question said it would be: **lazily, per selected row, never cached.**
+
+**The measurement** (8 registered rows — the 7 candidates plus ORACLE — against the daemon's
+exact stack: registry → policy gate → toolhost, on this machine, while the OQ-18 ONNX eval held
+all cores at below-normal priority, so every number is an upper bound under deliberate load):
+
+| | cold | warm (median) |
+|---|---:|---:|
+| full 8-row fan-out | 1,982–2,490 ms | **1,654–2,673 ms** |
+| worst single repo (Asterim/ORACLE class) | ~460–540 ms | ~430–600 ms |
+| toolhost spawn (paid once at boot) | 2,846–3,115 ms | — |
+
+Per-call decomposition on the worst repo: `detect_project` 14–16 ms in-process, `git.status`
+213–242 ms, `git.log --limit 1` 186–192 ms — **the two IPC round trips dominate; git itself is
+single-digit ms.** Under load a toolhost invocation costs ~176–310 ms against the documented
+idle p50 of 27.9 ms, and pass-to-pass variance was ±40%.
+
+**Verdict.** The fan-out misses the 1 s budget 2–3× and would eat most of the 3–5 s glance
+budget on its own. Two structural findings sharpen the "no":
+
+- **the toolhost serialises invocations**, so an eager fan-out does not just cost wall time — it
+  queues behind (and ahead of) real work;
+- the projected `~13 projects ≈ 1 s` arithmetic failed the same way ADR-0004's did, which is why
+  it was measured instead of trusted.
+
+**Applied 2026-08-28 (P11-T5 arc):** the sidebar observes **the selected row only** —
+`GET /api/v1/projects/{id}` on selection and on task events, rendered as `⎇ branch ↑n ↓n ~n`,
+held in no cache (a re-selection re-reads). The list endpoint still runs no git, and the test
+pinning that is unchanged. One caveat recorded honestly: the `Source2DemViewer`-sized-repo
+scenario this question asked for does not exist — that directory has 3,893 files in `target/`
+and **no `.git`**, so the heaviest real rows are ordinary repos at ~300–600 ms each.
 
 [VISION.md §2](VISION.md#2-the-day--the-acceptance-test) allocates 3–5 seconds to understanding
 the screen. Observed state is deliberately never cached
@@ -864,8 +895,9 @@ switches branches in their editor, which is the failure this whole design is sha
 ---
 
 ### OQ-25
-**Did adding the `continue` label move intent accuracy?** `TO VERIFY` · opened 2026-08-26 ·
-**deliberately deferred by the owner**, recorded rather than skipped.
+**Did adding the `continue` label move intent accuracy?** **RESOLVED 2026-08-28 — no; it went
+up.** Opened 2026-08-26 · deliberately deferred by the owner, then measured once `make eval`
+existed and the fixture set carried `continue` cases.
 
 P12-T2 added an eleventh `IntentLabel`. Accuracy was measured at **93.3%** and single-tool
 selection at **100%** on a 30-case fixture set with ten labels
@@ -911,3 +943,45 @@ That fallback cannot cover the cases that matter later: a project named in a *pr
 referred to obliquely. Fixtures should pin the slot, not just the label, before anything trusts
 it. This does not change the marker — the eval is still un-rerun — but it narrows what to look
 for when it is.
+
+### Resolution  `2026-08-28`
+
+Four `continue` cases added to `tests/fixtures/intent/cases.yaml` — pinning the **slot** as
+deliberately as the label, per the live evidence above — and the eval re-run
+(`uv run python scripts/eval_intent.py`, now also `make eval`):
+
+```
+intent accuracy     97.1%   (33/34)   gate: 85%   PASS      (was 93.3% at ten labels)
+project accuracy    88.2%   (30/34)                          (was 90.0% at 30 cases)
+clarify behaviour  100.0%   (34/34)
+continue cases      4/4 label AND slot: Asterim, GameRecs, Asterim, and an honest null
+confusions          run -> continue ×1  ("собери GameRecs" — the feared boundary, in reverse)
+structured output   0 repairs, 0 failures
+route latency       p50 2611 ms — POLLUTED: the OQ-18 corpus run held all 24 cores during the
+                    eval. Not comparable to the 1542 ms idle baseline; draw nothing from it.
+route prompt        1447 tokens estimated avg (budget 1200) — the continue few-shots grew it;
+                    real prompt 1071 tok. Worth trimming if the budget is ever enforced.
+```
+
+**The four project-slot misses decompose cleanly, and none is a `continue` case:**
+
+- **2 are pre-routed by construction** (`en-delegate-explicit`, `en-pipeline-named`): the
+  deterministic path answers before the model runs, and the eval scores their slot as missed.
+  An artefact of the scoring, carried since OQ-01's 90.0%.
+- **2 are few-shot proximity beating slot extraction** (`en-delegate-refactor`,
+  `en-question-doc`): each text is nearly identical to a few-shot that carries
+  `project: null` — *"refactor the entire auth module"*, *"what does the relay Dockerfile
+  do"* — and the model reproduces the example's null over the `Asterim` present in the actual
+  sentence. At 0.8B, a matching example outweighs the instruction to read the sentence.
+
+**The live-run slot failure is explained, and it is not general.** A 9-call probe with `ORACLE`
+in the registry: `continue ORACLE` → project `null` **9/9, deterministic**, while
+`continue Asterim` resolves 3/3 in the same session. The 0.8B model will not emit `ORACLE` as a
+project value — the word is saturated as a common noun/company name — and **a prompt instruction
+did not move it** (one boundary line under `project:` was tried, measured 6/6 still-null, and
+reverted; the fixture suite is the stop condition for prompt polishing). The turn still works
+because `_named_project` — deterministic code — carries exactly this case, which is the
+architecture's own rule: the most common correct action is not to call the LLM at all. If a
+second self-colliding name ever appears, the options recorded here are (a) a deterministic
+`continue <registered-name>` pre-route, which also removes ~2.6 s of model latency, or (b)
+renaming the row — not more prompt work.

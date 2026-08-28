@@ -21,7 +21,7 @@ Verified against source 2026-08-24, not against docs:
 | Subsystem | Status | Evidence |
 |---|---|---|
 | Event-sourced runtime, sessions, WS resume | **implemented** | `src/oracle/core/`, `api/app.py` |
-| Pre-router, intent, single-tool selection | **implemented, measured** (93.3% / 100%) | `src/oracle/router/` |
+| Pre-router, intent, single-tool selection | **implemented, measured** (97.1% at 11 labels, [OQ-25](OPEN_QUESTIONS.md#oq-25) / 100%) | `src/oracle/router/` |
 | Tool system: 33 contracts, registry, undo | **implemented** | `src/oracle/tools/` |
 | Policy gate: tiers, scopes, taint, approvals, HALT, audit chain | **implemented** (265 security tests) | `src/oracle/policy/` |
 | Toolhost: separate process, Job Objects | **implemented, measured** | `src/oracle/toolhost/` |
@@ -444,7 +444,9 @@ security: no direct subprocess path in the observer, repo task documents cannot 
 - [ ] `continue <project>` produces a plan from *real* state, or asks a question when state is empty
       — it never invents work.
 - [ ] One real end-to-end run completes and writes rows to `tasks` with evidence, timings and cost.
-- [ ] The sidebar's `Asterim  2 tasks  branch main +3` line renders from real data.
+- [x] The sidebar's `Asterim  2 tasks  branch main +3` line renders from real data — *2026-08-28,
+      lazily for the selected row, which is what [OQ-24](OPEN_QUESTIONS.md#oq-24)'s measurement
+      (fan-out 2–3× over budget) said the shape had to be.*
 - [ ] Observed state is never persisted — asserted by a test, not by convention.
 - [ ] `make check` green, security suite grown.
 

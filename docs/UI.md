@@ -77,6 +77,14 @@ conversation starts, ORACLE **auto-switches to Chat** and the orbit demotes to a
 in the command bar. This is the resolution of "beautiful centrepiece vs. useful interface": the orbit
 is the ambient/idle view, chat is the working view, and the transition is automatic.
 
+> **As built — P11-T5, 2026-08-28.** The switcher exists (`ViewTabs`, a real tablist with
+> arrow-key roving) over the stages that exist: **Chat · Tasks · Events · Memory · Briefing ·
+> Knowledge**, with `Ctrl+1..4` on the first four (§16 has the corrected table and the reason).
+> The auto-switch to Chat on a new conversation is implemented and is the one stage change the
+> app makes for you (§21 rule 6); the briefing's once-only first-paint takeover (§7b) is the
+> documented exception. Orbit still owns a slot when it lands (P11-T2, gated on
+> [OQ-14](OPEN_QUESTIONS.md#oq-14)).
+
 ---
 
 ## 3. The core (orbital view) — **Phase 11**
@@ -173,12 +181,16 @@ that governs this row is that document's §2: `2 tasks` is **stored**, `branch m
 fresh** from git and never cached.
 
 **As built `P12-T4`:** task counts, status and registration are live from
-`GET /api/v1/projects`. **Branch and ahead/behind are deliberately absent**, and a test asserts
-their absence — producing them per row costs a `git` subprocess per project per render and that
-fan-out is unmeasured ([OQ-24](OPEN_QUESTIONS.md#oq-24)). When it is measured, the answer if it
-misses is lazy per-row observation, never a cache. Directories nobody registered appear
-collapsed under *"N not tracked"*: the real projects root holds ten, including `New folder` and
-`docs.zip`.
+`GET /api/v1/projects`. Directories nobody registered appear collapsed under *"N not tracked"*:
+the real projects root holds ten, including `New folder` and `docs.zip`.
+
+**As built `P11-T5 arc, 2026-08-28` — the branch line, lazily.**
+[OQ-24](OPEN_QUESTIONS.md#oq-24) was measured: the full fan-out costs 1.7–2.7 s warm for 8 rows
+(2–3× over the 1 s budget) and the toolhost serialises invocations, so eager observation would
+also queue behind real work. Per that question's own fallback, the **selected row** — the one
+being looked at — is observed via `GET /api/v1/projects/{id}` on selection and on task events,
+rendered as `⎇ main ↑3 ↓1 ~2`, cached nowhere; every other row still shows stored fields only,
+and the test asserting the list endpoint exposes no observed state is unchanged.
 
 Rules: sections collapse and persist · counts are live · **"Waiting on me" is the only sidebar item
 allowed to demand attention** (amber, and it sorts to the top when non-empty) · the agent section
@@ -257,9 +269,17 @@ Rules: every row is a link to evidence · costs are shown because delegation is 
 always present and always works · a failed step shows the typed error plus a retry affordance where
 retrying is safe.
 
----
-
-## 6b. The execution tree — **Phase 11**
+> **As built — P11-T5, 2026-08-28: the task branch exists.** The inspector now renders a TASK
+> section above the turn when the selection is a task — objective verbatim, status in
+> ORCHESTRATION.md §2's words, kind/role/agent, attempt *n of m*, wall time, cost only where
+> something measured it, `after` (dependencies) and `replaces` (lineage), then **ORACLE
+> MEASURED** (the evidence dict, verbatim) apart from **THE WORKER SAID** (the claim, styled as
+> a quote). Selection is one model app-wide (§21 rule 1): a turn click, a task-row click in the
+> Tasks stage, and the briefing's inspect button all drive the same selector — the P12-T4
+> stopgap that pushed a task id into a turn-only selector is gone. A task id that outlived the
+> store's five held graphs says so instead of silently showing a turn. The mock's PROGRESS /
+> FILES / worktree affordances stay future: they need per-task tool streams the wire does not
+> group yet.
 
 The supervisor architecture's primary new surface: one root task, its plan, its tasks, their
 attempts, and the evidence for each — as a tree, because that is what it is
@@ -322,6 +342,16 @@ The store folds `task.*` events stamped `source: "graph"` into a `graphs` slice,
 `delegations`. Both are folded from the same event types: a delegation is one worker's lifecycle,
 a graph is the shape of the work, and a `DELEGATION` task appears in both under one `task_id` —
 which is what will let a reader click from one to the other when Phase 11 draws it properly.
+
+### What P11-T5 moved  `2026-08-28`
+
+Two of the deferred pieces above have since landed: the **longest-path column assignment** ships
+(`graph/rank.ts`; every row shows its stage number) and the **superseded-attempt lineage** renders
+collapsed under its replacement. And the tree moved **into its own Tasks stage** (`Ctrl+2`) with a
+stated empty state, instead of sitting above every view — which had been invisible in practice
+only because `tasks` has been 0 rows. Task rows now also participate in the app-wide selection:
+clicking a task id opens it in the inspector's task branch (§6). The orbital drawing and OQ-14's
+go/no-go remain where they were — waiting on the first real graph.
 
 ## 7. Activity timeline
 
@@ -776,7 +806,7 @@ tests, not assumed.
 |---|---|
 | `Ctrl+K` | Command palette |
 | `Ctrl+Shift+F` | Global search |
-| `Ctrl+1..4` | Orbit / Chat / Timeline / Tasks |
+| `Ctrl+1..4` | Chat / Tasks / Events / Memory — see note below |
 | `Ctrl+B` / `Ctrl+I` | Toggle sidebar / inspector |
 | `Ctrl+\`` / `Ctrl+Shift+\`` | Cycle dock / expand dock |
 | `Ctrl+Enter` | Send message |
@@ -790,6 +820,18 @@ tests, not assumed.
 
 HALT is deliberately awkward: four keys, so it cannot be hit by accident, but it is a **global**
 hotkey so it works when the window isn't focused — which is exactly when I'd need it.
+
+> **`Ctrl+1..4`, corrected 2026-08-28 (P11-T5).** This table originally read
+> `Orbit / Chat / Timeline / Tasks`, written before Memory and the Briefing existed as views.
+> Two of those four cannot be bound today: Orbit is P11-T2 and gated on
+> [OQ-14](OPEN_QUESTIONS.md#oq-14), and §7's grouped TimelineView is unbuilt — the flat event
+> table is what exists, and the tab is labelled **Events** because labelling it Timeline would
+> claim a view that is not there. So the keys bind to the four primary stages that exist:
+> **1 Chat · 2 Tasks · 3 Events · 4 Memory**. Briefing and Knowledge are tabs without digits —
+> the briefing has its own arrival affordance (§7b) and index health is a maintenance view.
+> When Orbit lands it takes a digit and this table changes again, with the date attached.
+> The AltGr guard matters: `Ctrl+Alt+digit` types characters on some layouts, so the binding
+> requires Alt **up**.
 
 **Everything in the MVP is reachable without a mouse.** That is a P4 acceptance criterion.
 
@@ -870,6 +912,15 @@ AppShell
 └── Overlays
     ├── CommandPalette  ├── GlobalSearch  ├── ConfirmationModal(T3)
     ├── ToastStack      └── OnboardingFlow
+
+> **As built — P11-T5, 2026-08-28.** `ViewTabs` ships as drawn; the stages behind it are the
+> ones that exist (Chat · Tasks · Events · Memory · Briefing · Knowledge — the last two are
+> views this chart predates), and `CenterStage` as a component is folded into the app shell
+> until Orbit gives it a second consumer. `TasksView` is `TaskTree` in its own stage;
+> `KnowledgeHealth` (index health, not the §11b graph) is mounted as the Knowledge stage; the
+> inspector's task branch is the first slice of `TaskInspector`. Approvals and delegations stay
+> above the switched panel on every stage — the safety surface is not a tab, because approvals
+> expire in 180 s and a card behind a tab is a card that expires unseen.
 ```
 
 Shared primitives: `StatusDot`, `RiskBadge`, `Duration`, `TokenCount`, `PathChip`, `ProjectChip`,

@@ -273,13 +273,15 @@ been displayed.
 
 | Question | Answer, and why |
 |---|---|
-| Does the sidebar show git state? | **No, and a test asserts it does not.** [OQ-24](OPEN_QUESTIONS.md#oq-24) is unmeasured, and an omission that is merely intended gets added back by the next person who wants a branch name. |
+| Does the sidebar show git state? | **For the selected row only, read fresh each time** — [OQ-24](OPEN_QUESTIONS.md#oq-24) was measured 2026-08-28 (full fan-out 2–3× over the 1 s budget) and the lazy per-row shape it prescribed is what shipped. The list endpoint still runs no git, and the test asserting that is unchanged. |
 | How are candidates presented? | Collapsed, under *"N not tracked"*. The live run found **10** — including `New folder` and `Kaggle`. Registration stays an explicit act. |
 | What acknowledges the briefing? | The dismiss button only. The component has no effect that calls `onAcknowledge`, and a test re-renders it twice to prove it. The sequence sent is the one that was **displayed**. |
 | Where do fixtures come from? | The wire shape, snake_case and complete. `TaskTree.test.tsx` is green on a shape the app cannot produce; that is the bug this avoided repeating. |
 
-**Not built:** the inspector still opens turns rather than tasks — `onInspect` routes a task id
-into the turn selector, which is P11-T5's shape and is a stopgap.
+**Built 2026-08-28 (P11-T5):** the inspector grew its task branch. `onInspect` now selects a
+*task* — one selection model app-wide — and the briefing's inspect button opens the actual task
+with its evidence and claim rendered apart, instead of the stopgap that pushed a task id into
+the turn selector and silently showed the latest turn.
 
 ---
 
@@ -369,6 +371,7 @@ the agent queue are all *renderings of state*, and three of the four are current
 fact that no state has ever been produced ([current_state.md §11](current_state.md)).
 
 Building the views first produces components that are green against fixtures and dead against the
-running app — which has already happened once, to `TaskTree`, whose `after {deps}` line renders a
-field the store never populates. **The state comes first, then the run that fills it, then the views
-that read it.**
+running app — which has already happened once, to `TaskTree`, whose `after {deps}` line rendered a
+field the store did not populate until the scheduler learned to send `depends_on` (2026-08-26;
+`store.ts` now folds it and a test pins the real payload). **The state comes first, then the run
+that fills it, then the views that read it.**

@@ -1,8 +1,8 @@
 # ORACLE — Current State
 
-> **Hand-off brief for an agent picking this project up cold.** Rewritten **2026-08-28** against
-> source, the live databases and the running processes — not against the other docs. Where a doc
-> and the code disagree, that disagreement is recorded here rather than smoothed over.
+> **Hand-off brief for an agent picking this project up cold.** Rewritten **2026-08-28 evening**
+> against source, the live databases and the running processes — not against the other docs.
+> Where a doc and the code disagree, that disagreement is recorded here rather than smoothed over.
 >
 > This is a **snapshot** — overwrite it, do not append. For *what to do next* read
 > [current_task.md](current_task.md); for *what was just done* read
@@ -15,58 +15,43 @@
 
 | | |
 |---|---|
-| **OQ-18 corpus run** | **RUNNING**, PID 46076, started 2026-08-28 00:47. See §2 — it needs a decision. |
-| `oracled` | up on 127.0.0.1:8787, started by the previous session |
-| Ollama | up, `qwen3.5:0.8b` resident, started by the previous session |
-| A pending T3 approval | `ai.delegate`, from the P12-T5 run. Unanswered. Harmless; it expires. |
+| **OQ-18 corpus run** | **RUNNING (third attempt), re-fired 16:07 hardened.** See §2. |
+| `oracled` | up on 127.0.0.1:8787 since 01:05:42 — **predates the reindex endpoint**, restart to serve it |
+| Ollama | up, `qwen3.5:0.8b` resident |
+| Vite dev UI | up at http://localhost:5273, left running for P12-T5's human click |
 
-**Do not kill processes by pattern.** A `Stop-Process` sweep matching `python` destroyed the first
-OQ-18 attempt on 2026-08-27 (`LastTaskResult 3221225786` = `STATUS_CONTROL_C_EXIT`). Kill by PID,
+**Do not kill processes by pattern.** Two OQ-18 attempts have now died to console-control kills
+(`3221225786` = `STATUS_CONTROL_C_EXIT`); one was an agent's `Stop-Process` sweep. Kill by PID,
 and check what you are about to kill.
+
+**The `uv` trap while `oracled` runs:** the daemon holds `.venv\Scripts\oracled.exe`, so any
+*syncing* `uv` command fails with `os error 32`. Use `uv run --no-sync …`, or stop the daemon
+first (then one plain `uv sync` to reconcile the entry-point exe — content is current, only dev
+deps changed on 2026-08-28).
 
 ---
 
-## 2. The one open decision: OQ-18 is 4× over its wall budget
+## 2. OQ-18, third attempt: now supervisable
 
-`scripts/run_oq18_eval.cmd` says *"~2.5–3 hours of CPU on all cores"*. It has been running
-**13+ hours**.
+The second attempt died like the first — console control event, unattributable (the
+TaskScheduler operational log is disabled) — after losing **12 hours to the machine sleeping**
+(Kernel-Power 42 at 01:44, wake 13:37; that was the hand-off's "unexplained" stretch). Fifteen
+hours, zero artifacts, because the script only saved at the very end.
 
-**It is not stuck.** Measured 2026-08-28 14:0x:
+The relaunch removed all three failure modes, and the smoke test killed a real pass mid-flight
+and resumed it to prove the mechanism:
 
-| | |
-|---|---:|
-| CPU accumulating | **19.4 cores** sustained (581 CPU-s per 30 s wall) |
-| Disk I/O over 25 s | **0 reads, 0 writes** — normal for ONNX inference between checkpoints |
-| CPU-seconds so far | ~93,500 of a ~250,000 budget (24 cores × 3 h) → **~37%** |
-| RSS | ~1.6 GB, stable |
+- `logs/measurements/oq18-translated.txt` updates **live** (rate + ETA per 256-chunk
+  checkpoint). **An unchanging file now IS a stuck job** — the old caveat is inverted.
+- The forward pass checkpoints atomically to `D:/ORACLE/scratch/oq18-vectors-bge-m3.npz` and
+  `--load-vectors` resumes it: a kill costs ≤ one slice (~4 min). If it died again, just
+  `Start-ScheduledTask ORACLE-OQ18-eval` — it continues where it stopped.
+- `SetThreadExecutionState(ES_SYSTEM_REQUIRED)` holds the machine awake for the pass.
 
-At the current rate it needs roughly **another 2 hours**. The 13 hours elapsed are mostly a long
-stretch where it was not getting CPU; about an hour of that is explained by the previous session
-running the full gate four times alongside it. **The rest is unexplained.**
-
-**Why you cannot see progress:** the script redirects stdout to
-`logs/measurements/oq18-translated.txt`, and Python **block-buffers** stdout when redirected. The
-file has been 63 bytes since it started and will stay that way until the run ends. *An unchanging
-file is not a stuck job here.* Check CPU on the worker instead.
-
-> **A trap that has already cost time twice.** `.venv\Scripts\python.exe` is a **uv shim** — it is
-> idle by design and its *child* does the work. Checking CPU on the shim shows 0 and looks exactly
-> like a hang. The chain is `cmd.exe 45904 → shim 45692 → worker 46076`.
-
-**The decision is yours to make, and both answers are defensible:**
-
-- **Let it finish** (~2 h). It is genuinely computing and 37% done.
-- **Kill it and fix the observability first.** It has no progress output, no checkpoints, and its
-  own `ExecutionTimeLimit: PT6H` did not fire at 6 hours — so nothing about this job can currently
-  be supervised. A run you cannot observe is one you cannot trust the timing of.
-
-If you kill it: `Stop-Process -Id 46076,45692,45904 -Force`, then re-fire with
-`python -u` (unbuffered) added to the `.cmd` so the next run is observable.
-
-On collection: compose `dense_mt` against `dense_xl`, confirm or flip
-`Settings.translate_queries`, decide `en-relay-dockerfile`, resolve
-[OQ-18](OPEN_QUESTIONS.md#oq-18), state the answer-key correction wherever pre-2026-08-26 recall
-numbers are quoted, then `Unregister-ScheduledTask -TaskName ORACLE-OQ18-eval`.
+Measured mid-run: ~1.35 chunks/s over 16,519 semantic chunks (the recalibrated 1200-char
+chunker makes the corpus ~50% bigger than the 11,727 recorded 2026-08-25) → **~3.4 h of
+compute; expect it done ~19:30**. Collection steps, and the answer-key anomaly to check first
+(`0/38` keyed vs 37/38 on 2026-08-26), are in [current_task.md](current_task.md).
 
 ---
 
@@ -86,8 +71,9 @@ model in its own system:
 | Review, research | Antigravity (`agy`), read-only |
 | git / tests / search / launch | plain code, no model |
 
-**The governing idea:** the most common correct action is not to call the LLM at all. What the
-product is *for* — as a day rather than a diagram — is [VISION.md](VISION.md).
+**The governing idea:** the most common correct action is not to call the LLM at all — and
+OQ-25's resolution is the idea working: the one input the 0.8B model deterministically cannot
+slot (`continue ORACLE`) is carried by a deterministic string match, not by prompt surgery.
 
 ---
 
@@ -97,39 +83,36 @@ product is *for* — as a day rather than a diagram — is [VISION.md](VISION.md
  P0–P6  foundation                        done
  P7–P9  supervisor arc                    done
  P10    pipelines                         done
- P11    execution vis & advanced UI       IN PROGRESS — T1/T3/T4 done; T5 deferred; T2 blocked on data
- P12    project state & the continue loop  T1–T5 all done 2026-08-26/28  ← the last five commits
+ P11    execution vis & advanced UI       IN PROGRESS — T1/T3/T4/T5 done; T2 (orbit) blocked on data
+ P12    project state & the continue loop  T1–T5 built; ONE HUMAN CLICK from its DoD
  P13    residency, boot & the briefing    next
  P14 mobile · P15 voice · P16 tiers (GPU-conditional) · P17 hardening
 ```
 
-**Phase 12 shipped in one arc** ([ROADMAP.md](ROADMAP.md#phase-12--project-state--the-continue-loop--residency-arc)):
-a project became a durable entity (ADR-0024), `continue <project>` became answerable, the briefing
-was built, both surfaces were rendered, and the loop was run for real.
+**P11-T5 shipped 2026-08-28** ([dev log](../logs/development/2026-08-28-p11t5-and-measurements.md)):
+the centre stage is a real mechanism — `ViewTabs` (a proper tablist) over Chat · Tasks · Events ·
+Memory · Briefing · Knowledge, `Ctrl+1..4`, TaskTree in its own stage, the inspector's task
+branch (the P12-T4 stopgap is gone; one selection model app-wide), `KnowledgeHealth` mounted with
+a real wire (`POST /api/v1/knowledge/reindex`, T1, through the gate). UI.md corrected in place
+where its §16/§20 predated the views that exist.
 
 ### The caveat that still matters most
 
-**`tasks` is 0 rows.** It always has been. The P12-T5 run reached the egress approval and stopped
-there — correctly, because approving it is a person's job — so no plan was authored and no graph
-compiled. Everything that renders supervisor activity is still rendering it from fixtures:
-
-- [OQ-14](OPEN_QUESTIONS.md#oq-14), the orbital view's go/no-go — still unanswerable
-- the execution tree's acceptance criteria — still unjudgeable
-- `TaskTree.test.tsx` — still green on a fixture the running app cannot produce
-- the sidebar's counters and the briefing's arithmetic — never fed real input
-
-**One human click ends this.** Either approve the pending T3 card, or run `oracle-selfcheck`
-(local, **no egress**, six steps, one card, ~5 min) which produces a real six-task graph.
+**`tasks` is 0 rows.** It always has been. Everything that renders supervisor activity still
+renders fixtures: [OQ-14](OPEN_QUESTIONS.md#oq-14) unanswerable, the execution tree's acceptance
+unjudgeable, `TaskTree.test.tsx` green on a hand-written shape. **One human click ends this** —
+approve the T3 card a `continue ORACLE` produces (daemon, Ollama and the dev UI are all up for
+it), or run `oracle-selfcheck` (local, no egress, six steps, one card).
 
 ### Branch
 
 ```
-  phase6-integration   <- HEAD, 61 commits ahead of origin/main, pushed
+  phase6-integration   <- HEAD, ahead of origin/main
   origin/main          <- stale, Phase 5-era
 ```
 
-The branch name is a fossil: Phases 6–12 all live on it. Whether to merge or rename is a decision
-nobody has made.
+The branch name is a fossil: Phases 6–12 all live on it. Merge-or-rename is a decision nobody
+has made.
 
 ---
 
@@ -139,110 +122,95 @@ nobody has made.
 
 | Table | Rows |
 |---|---:|
-| `events` | 461 |
-| `sessions` | 16 |
-| `projects` | **1** (`ORACLE`, registered by the T4 live run) |
-| `meta` | 1 (`briefing.system_seq`) |
+| `events` | ~500+ and growing with live sessions |
+| `sessions` | 16+ |
+| `projects` | **1** (`ORACLE`) |
 | `tasks` | **0** |
 | `memory_facts` / `memory_attempts` | **0** / **0** |
 
-**`D:\ORACLE\knowledge.db`** — 142 MB, disposable. Delete to force a full reindex.
-
-Migrations added this arc: `0005_projects`, `0006_project_column_tolerates_bad_json`,
-`0007_briefing`.
+**`D:\ORACLE\knowledge.db`** — 147 MB, disposable, live-updated by the watcher (15,271 chunks /
+14,336 vectors as rendered by the new Knowledge stage). **57% of live rows exceed the 1200-char
+cap** — it wants a reindex, for which the endpoint and button now exist; fire it only after
+OQ-18 is collected, and only against a restarted daemon.
 
 ---
 
 ## 6. Tests and the gate
 
-**1,237 Python tests** · **277 UI tests** · `tests/security/` is a merge gate and is not optional.
+**1,240 Python tests, measured this session** (830 main + 410 security + 1 skip; 4 new:
+`TestKnowledgeReindex`) · **305 UI tests** (28 new across ViewTabs, stage keybindings, the task
+branch, lazy observation, and axe cases closing the a11y audit to **15/15 components**) ·
+`tests/security/` is a merge gate and is not optional.
 
 ```
 uv run python scripts/check.py     # ruff format -> ruff lint -> mypy -> tsc -> pytest -> security -> vitest
 ```
 
-**Gate status: GREEN**, 7/7, run 2026-08-28 at `6cba956`.
+**Gate status: GREEN, 2026-08-28 evening** — run as the seven exact steps with `--no-sync`
+appended (the daemon-holds-the-exe trap in §1), same commands and scope as `check.py`.
+`pytest-timeout` (120 s/test) now turns a hang under load into a named failure. One run of step
+5 dropped `TestDebounce::test_a_burst_becomes_one_group` under the OQ-18 load (an
+`asyncio.sleep(0)` hop outran the 50 ms debounce window) and passed solo and on retry — the
+third documented member of the wall-clock-under-load family (TESTING.md §6).
 
-> **Run the gate's own command, not a subset.** Three separate failures in this arc came from
-> checking less than the gate does: `ruff check src/oracle` instead of `src tests`; `tsc` run
-> *before* the test files existed; and tests passing while referencing an undefined `aiosqlite`
-> (annotations are strings under `from __future__ import annotations`, so only ruff caught it).
-> **Passing tests are evidence about behaviour, not about the code being well-formed.**
+> **Run the gate's own command, not a subset** — and when the daemon is up, the whole command
+> set with `--no-sync`, which is the same thing. Passing tests are evidence about behaviour,
+> not about the code being well-formed; three separate failures in this project's history came
+> from checking less than the gate does.
 
 ---
 
-## 7. What the last session found by running things
+## 7. What this session measured (all three by running things)
 
-Two defects that fixture tests could not have found, both on the safety surface:
-
-**A planning card that understated its own egress** (P12-T5, fixed). It hardcoded
-`sends_repo_contents: False` while sending 2,820 characters of `docs/current_task.md` and
-`docs/ROADMAP.md`, and the gate priced the call `tainted: False` seconds after `continue.derived`
-recorded `tainted: true`. Now escalates T2 → **T3 `confirm_strong`** and computes the flag. The
-rule, in [SECURITY.md §6](SECURITY.md): **a preview field that is a literal is a claim nobody
-re-checks.**
-
-**A generated column that could detonate** (P12-T1/0006, fixed). `json_extract` *raises* on
-malformed JSON, and the column was indexed — one corrupt `spec` row would have failed the
-migration at `CREATE INDEX` and made every subsequent read raise. `json_valid()` guards it.
-
-And one measurement finding: **`continue` routes correctly but its project slot does not.**
-`intent: continue` both runs; `project: null` both runs, on an input whose second word is a
-registered project. A string-matching fallback (`_named_project`, written for `delegate`) is
-carrying it. [OQ-25](OPEN_QUESTIONS.md#oq-25).
+1. **[OQ-24](OPEN_QUESTIONS.md#oq-24), resolved:** the 8-row observation fan-out costs
+   **1.7–2.7 s warm under load** — 2–3× over budget — and the toolhost **serialises**
+   invocations, so eager observation queues behind real work. The sidebar now observes the
+   selected row only, fresh each time, cached nowhere (`scripts/measure_observation.py`).
+2. **[OQ-25](OPEN_QUESTIONS.md#oq-25), resolved:** **97.1% intent accuracy at eleven labels**
+   (was 93.3% at ten); `continue` 4/4 on label and slot. Two sharp findings: the model
+   deterministically refuses to emit `ORACLE` as a project (9/9; prompt instruction measured
+   ineffective and reverted; deterministic fallback carries it), and **few-shot proximity beats
+   slot extraction** — two fixtures nearly identical to a `project: null` few-shot lose the
+   project named in their own sentence.
+3. **The OQ-18 post-mortem** (§2): sleep, not starvation; a console kill, not a hang; and a
+   measurement script that saved nothing until the end — now checkpointed, resumable, observable
+   and sleep-proof.
 
 ---
 
 ## 8. Known defects and doc-vs-code drift
 
-1. **`make eval` and `make perf`** are documented in TESTING.md §8 and **defined nowhere**.
-   [OQ-25](OPEN_QUESTIONS.md#oq-25)'s documented resolution path therefore does not exist.
-2. **The intent eval has not been re-run** since `continue` became an eleventh label — deferred
-   deliberately by the owner, mitigations shipped and pinned instead.
-3. **[OQ-24](OPEN_QUESTIONS.md#oq-24): the project-observation fan-out is unmeasured**, so
-   `GET /api/v1/projects` runs no git and the sidebar shows no branch or dirty count. **If it
-   misses the budget, observe lazily per row — never cache.**
-4. **The a11y audit covers 12 of 15 components.** Uncovered: `Inspector`, `Citations`,
-   `EgressPreview`. (An earlier revision of this file claimed only `Inspector`; that was wrong.)
-5. **The briefing's inspector affordance is a stopgap** — `onInspect` routes a *task* id into the
-   *turn* selector, because the inspector has no task branch. That is P11-T5.
-6. **`TaskTree.test.tsx` is green on a fixture the app cannot produce** — `store.ts` never
-   populates `dependsOn`. Re-record from the wire after the first real graph run.
-7. **`DATABASE.md`'s `facts`/`attempts`/`devices` blocks are still the pre-build sketch.** Only
-   `projects`, `meta` and the task/event indexes have been reconciled against source. The shipped
-   tables are `memory_facts` and `memory_attempts`; `devices` is not built.
-8. **The `chunker_version` guard does not fire on the indexes it was written for.** 57% of 14,586
-   live rows exceed the 1200-char cap, longest 4,055. The database wants a reindex.
-9. **A merge-gate test fails under CPU starvation** (`test_a_long_burst_arrives_complete`), and
-   **`pytest-timeout` is not installed**, which makes a hang expensive to bisect. One gate run
-   hung under concurrent load on 2026-08-26 and passed on retry.
-10. **Palette results are not discoverable to assistive tech** — `<li role="option">` with
-    `onClick`, no `role="combobox"`, no `aria-activedescendant`.
-11. **A correction typed while a graph runs is refused**, because "never mid-plan" is implemented
-    literally. The fix, when somebody hits it, is a queue — not an exception.
-12. **The visual references for the UI vision were never attached** and are not in the repository.
-    UI.md §1/§14/§15 are `TO VERIFY` against them; two surfaces shipped without them.
+1. **Palette results are not discoverable to assistive tech** — `<li role="option">` with
+   `onClick`, no `role="combobox"`, no `aria-activedescendant`. The last a11y debt.
+2. **`DATABASE.md`'s `facts`/`attempts`/`devices` blocks are still the pre-build sketch.**
+3. **`test_a_long_burst_arrives_complete` fails under CPU starvation** — bounded now by
+   pytest-timeout, but the wall-clock assumption stands (TESTING.md §6 discusses).
+4. **The knowledge index wants a reindex** (57% oversized chunks) — machinery exists as of
+   today; sequencing note in current_task.md.
+5. **A correction typed while a graph runs is refused** — the fix is a queue, not an exception.
+6. **The visual references for the UI vision were never attached**; UI.md §1/§14/§15 remain
+   `TO VERIFY`.
+7. **The running daemon predates today's reindex endpoint** — restart `oracled` before trusting
+   the Knowledge stage's Rebuild button against the live process.
+8. **`TaskTree.test.tsx`'s graph fixture is still hand-written** — re-record from the wire
+   after the first real graph run (the standing fix; blocked on §4's click).
 
 ---
 
 ## 9. If you are the next agent
 
 1. Read [../AGENTS.md](../AGENTS.md). Its hard rules are enforced by `tests/security/`.
-2. Read [current_task.md](current_task.md) — that is your assignment.
-3. Decide the OQ-18 question in §2 before starting anything CPU-heavy; the gate takes ~6 minutes
-   and will contend with it.
+2. Read [current_task.md](current_task.md) — the active task is a **person's**; your queue is
+   its "carried over" list, plus collecting OQ-18 if it has finished.
+3. Check what is running (§1) before anything CPU-heavy or any `uv` sync.
 4. Check [DECISIONS.md](DECISIONS.md) before choosing any technology — **26 ADRs**. Disagree by
    writing a superseding ADR, never by drifting.
-5. Check [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md). If your task rests on an `EXPERIMENT NEEDED`, run
-   the experiment first.
+5. Check [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md). If your task rests on an `EXPERIMENT NEEDED`,
+   run the experiment first — this session resolved two that way, and both measurements
+   contradicted the arithmetic that preceded them.
 6. On finishing: overwrite [current_report.md](current_report.md), update
-   [current_task.md](current_task.md), write a dev log to `logs/development/YYYY-MM-DD-<slug>.md`
-   — **dead ends are the most valuable thing you can record** — then commit and push.
-
-**Two habits this arc earned the hard way.** Run the gate's own command rather than a faster
-subset (§6). And when something looks stuck, check what it is actually doing — CPU on the right
-process, and I/O counters — before killing it; a pattern-matched `Stop-Process` already destroyed
-one three-hour measurement here.
+   [current_task.md](current_task.md), write a dev log to `logs/development/` — **dead ends are
+   the most valuable thing you can record** — then commit and push.
 
 The project is design-first and measurement-first. The recurring pattern in its history is that a
 number contradicted a design document and the document was corrected **in place**, with the number
