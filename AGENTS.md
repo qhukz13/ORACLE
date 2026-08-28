@@ -20,7 +20,9 @@ Update **both**:
 - `docs/current_task.md` — set it to the next task, or mark the current one `DONE` and state what's next.
 
 After:
-- Commit all files and push them into the GitHub Repo.
+- Commit all files and push them to **`main`** — after every completed task, not batched at
+  the end of a session (owner's standing instruction, 2026-08-28; PR #1 merged the
+  long-running `phase6-integration` branch and `main` is the working branch since).
 
 Write a development log to `logs/development/YYYY-MM-DD-<slug>.md` for any non-obvious investigation,
 benchmark, or dead end. Dead ends are the most valuable thing you can record.

@@ -15,10 +15,10 @@
 
 | | |
 |---|---|
-| **OQ-18 corpus run** | **RUNNING (third attempt), re-fired 16:07 hardened.** See §2. |
+| **OQ-18 corpus run** | **SCHEDULED: 04:00 2026-08-29, `WakeToRun`.** Stopped at ~60% on the owner's instruction (PC performance); expect a clean restart at 04:00 (evening commits changed the corpus, so the checkpoint will be refused — the guard working). See §2 and current_task.md. |
 | `oracled` | up on 127.0.0.1:8787 since 01:05:42 — **predates the reindex endpoint**, restart to serve it |
 | Ollama | up, `qwen3.5:0.8b` resident |
-| Vite dev UI | up at http://localhost:5273, left running for P12-T5's human click |
+| Vite dev UI | on 5273 when a session runs it (`npm --prefix apps/desktop run dev`) |
 
 **Do not kill processes by pattern.** Two OQ-18 attempts have now died to console-control kills
 (`3221225786` = `STATUS_CONTROL_C_EXIT`); one was an agent's `Stop-Process` sweep. Kill by PID,
@@ -112,13 +112,9 @@ it), or run `oracle-selfcheck` (local, no egress, six steps, one card).
 
 ### Branch
 
-```
-  phase6-integration   <- HEAD, ahead of origin/main
-  origin/main          <- stale, Phase 5-era
-```
-
-The branch name is a fossil: Phases 6–12 all live on it. Merge-or-rename is a decision nobody
-has made.
+**`main`, since 2026-08-28 evening.** The owner merged PR #1 (`phase6-integration` → `main`)
+and set the standing rule: work on `main`, commit and push after every completed task
+(AGENTS.md). The old branch survives as a pointer and can be deleted at leisure.
 
 ---
 

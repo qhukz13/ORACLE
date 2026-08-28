@@ -53,13 +53,17 @@ stage (`Ctrl+2`)** and the **inspector's task branch** will render it live as it
 
 ---
 
-## The one timed item: collect OQ-18 (~19:30 tonight)
+## The one timed item: OQ-18 runs at 04:00 tomorrow — collect it in the morning
 
-The corpus run was re-fired **hardened** at 16:07 — live progress in
-`logs/measurements/oq18-translated.txt` (rate + ETA per 256-chunk checkpoint), atomic resumable
-checkpoints at `D:/ORACLE/scratch/oq18-vectors-bge-m3.npz`, and a sleep guard. **An unchanging
-log now IS a stuck job** — the old "empty file is normal" caveat is dead. If it was killed
-again, just `Start-ScheduledTask ORACLE-OQ18-eval`: it resumes from the last checkpoint.
+The owner moved the corpus run off working hours (2026-08-28 ~21:45): the task now has a
+**one-time 04:00 2026-08-29 trigger with `WakeToRun`**, so the machine wakes for it and the
+script's own sleep guard holds it awake through the ~2.5–3 h pass — done by ~07:00 on an idle
+box. The evening attempt was stopped at ~60% for PC-performance reasons; its checkpoint will
+be **refused** at 04:00 if any tracked file changed after 20:14 (they did — evening commits),
+so expect a clean restart, which is the guard working, not a failure. Live progress in
+`logs/measurements/oq18-translated.txt` (rate + ETA per 256-chunk checkpoint); **an unchanging
+log IS a stuck job** — the old "empty file is normal" caveat is dead. If it needs a re-fire:
+`Start-ScheduledTask ORACLE-OQ18-eval` resumes from the last checkpoint.
 
 On collection:
 
@@ -104,7 +108,8 @@ The daemon holds `.venv\Scripts\oracled.exe`, so **syncing `uv` commands fail wi
   unenforced because nothing schedules anything.
 - **The visual references for the UI vision were never attached**; UI.md §1/§14/§15 remain
   `TO VERIFY` against them.
-- **Branch.** `phase6-integration` is a fossil name carrying Phases 6–12, ahead of a stale
-  `origin/main`. Merge-or-rename is still nobody's decision.
+- ~~Branch.~~ **Resolved 2026-08-28 evening:** the owner merged PR #1 (`phase6-integration`
+  → `main`) and set the standing rule — work on `main`, commit and push after every task
+  (AGENTS.md updated). The fossil branch can be deleted at leisure.
 - **P11 remainder:** T2 orbit (blocked on OQ-14 → blocked on the click above) · the knowledge
   graph (OQ-22 measurements first) · timeline proper (§7), global search, notifications.
