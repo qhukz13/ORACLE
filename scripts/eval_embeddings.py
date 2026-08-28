@@ -711,13 +711,32 @@ def corpus_fingerprint(
     return h.hexdigest()
 
 
-def save_vectors(path: str, raw: np.ndarray, fingerprint: str) -> None:
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(path, vectors=raw, fingerprint=np.array(fingerprint))
+#: How many chunks are embedded between checkpoints. At bge-m3's ~1.1 chunks/s this is a
+#: checkpoint every ~4 minutes, and the write itself is a few seconds of a ~50 MB .npz —
+#: ~1% overhead. Two corpus runs (2026-08-27, 2026-08-28) were killed mid-pass and lost
+#: everything, because the save only happened after the last batch; a kill now costs at
+#: most one slice. Length-sorted batching happens per slice rather than globally, which
+#: gives back a little of the 1.8x sorted-batch win; the vectors themselves are
+#: unaffected (padding is masked out of the pooling).
+CHECKPOINT_CHUNKS = 256
 
 
-def load_vectors(path: str, fingerprint: str) -> np.ndarray | None:
-    """The saved pass, or None — and a loud None, never a quiet wrong answer."""
+def save_vectors(path: str, raw: np.ndarray, fingerprint: str, complete: bool = True) -> None:
+    """Write the pass so far. Atomic — a kill mid-write must not corrupt the checkpoint."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = str(p) + ".tmp.npz"
+    np.savez_compressed(
+        tmp, vectors=raw, fingerprint=np.array(fingerprint), complete=np.array(complete)
+    )
+    os.replace(tmp, p)
+
+
+def load_vectors(path: str, fingerprint: str) -> tuple[np.ndarray, bool] | None:
+    """The saved pass and whether it is complete, or None — a loud None, never a quiet
+    wrong answer. A partial file (killed run) is returned for resumption; files written
+    before the `complete` flag existed were only ever written after the full pass, so
+    its absence means complete."""
     f = Path(path)
     if not f.exists():
         print(f"{Y}  no saved vectors at {path}; embedding from scratch{X}")
@@ -728,7 +747,23 @@ def load_vectors(path: str, fingerprint: str) -> np.ndarray | None:
         print(f"{R}  {path} was built from a different corpus or model; ignoring it{X}")
         print(f"{D}    saved {stored[:16]}…  wanted {fingerprint[:16]}…{X}")
         return None
-    return np.asarray(data["vectors"])
+    complete = bool(data["complete"]) if "complete" in data.files else True
+    return np.asarray(data["vectors"]), complete
+
+
+def keep_system_awake() -> None:
+    """Tell Windows the machine is busy while this measurement runs.
+
+    The 2026-08-28 corpus run lost twelve hours to the machine sleeping mid-pass
+    (Kernel-Power 42 at 01:44, wake at 13:37) — a scheduled task does not keep the
+    system awake on its own. ES_SYSTEM_REQUIRED does, for the life of this process;
+    the display may still sleep. No-op off Windows.
+    """
+    if sys.platform == "win32":
+        import ctypes
+
+        es_continuous, es_system_required = 0x80000000, 0x00000001
+        ctypes.windll.kernel32.SetThreadExecutionState(es_continuous | es_system_required)
 
 
 # ---------------------------------------------------------------------------
@@ -930,7 +965,12 @@ def main() -> int:
 
     # A Windows console defaults to cp1252 and this script prints Russian fixture ids
     # and arrows. Without this the run dies on the first print, after the embedding.
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    # Line-buffered, because the corpus run redirects stdout to a file and Python
+    # block-buffers redirected stdout — the 2026-08-28 run sat at 63 bytes of log for
+    # fifteen hours and its death left no trace of where it got to.
+    sys.stdout.reconfigure(  # type: ignore[union-attr]
+        encoding="utf-8", errors="replace", line_buffering=True
+    )
 
     print(f"{B}corpus{X}")
     t0 = time.perf_counter()
@@ -1051,23 +1091,49 @@ def main() -> int:
         if key in pooled:
             raw, cps, enc_s, model_mb = pooled[key]
             print(f"{D}  reusing the {cand.model_dir} forward pass ({enc_s:.0f}s){X}")
-        elif cached is not None:
-            raw, cps, enc_s, model_mb = cached, 0.0, 0.0, emb.model_bytes / 1e6
+        elif cached is not None and cached[1]:
+            raw, cps, enc_s, model_mb = cached[0], 0.0, 0.0, emb.model_bytes / 1e6
             pooled[key] = (raw, cps, enc_s, model_mb)
             print(f"{G}  loaded {len(raw)} corpus vectors from {args.load_vectors}{X}")
         else:
+            keep_system_awake()
+            texts = [pp + chunks[i].text for i in sem_idx]
+            parts: list[np.ndarray] = []
+            start = 0
+            if cached is not None:
+                parts, start = [cached[0]], len(cached[0])
+                print(
+                    f"{Y}  resuming a killed pass: {start}/{len(texts)} chunks already "
+                    f"in {args.load_vectors}{X}"
+                )
             t0 = time.perf_counter()
-            raw = emb.encode([pp + chunks[i].text for i in sem_idx], batch=args.batch)
+            for s in range(start, len(texts), CHECKPOINT_CHUNKS):
+                parts.append(emb.encode(texts[s : s + CHECKPOINT_CHUNKS], batch=args.batch))
+                raw = np.vstack(parts) if len(parts) > 1 else parts[0]
+                parts = [raw]
+                if args.save_vectors:
+                    save_vectors(
+                        args.save_vectors, raw, fingerprint, complete=len(raw) == len(texts)
+                    )
+                done_this_run = len(raw) - start
+                elapsed = time.perf_counter() - t0
+                rate = done_this_run / max(elapsed, 1e-9)
+                eta = (len(texts) - len(raw)) / max(rate, 1e-9)
+                print(
+                    f"{D}  {len(raw)}/{len(texts)} chunks  {rate:.2f} chunks/s  "
+                    f"elapsed {elapsed:.0f}s  eta {eta:.0f}s{X}"
+                )
+            raw = parts[0]
             enc_s = time.perf_counter() - t0
-            cps = len(sem_idx) / enc_s
+            cps = (len(raw) - start) / max(enc_s, 1e-9)
             model_mb = emb.model_bytes / 1e6
             pooled[key] = (raw, cps, enc_s, model_mb)
+            resumed = f" ({start} reused)" if start else ""
             print(
-                f"  embedded {len(sem_idx)} chunks in {enc_s:.1f}s → {G}{cps:.1f} chunks/s{X} "
-                f"(load {emb.load_s:.1f}s, model {model_mb:.0f} MB)"
+                f"  embedded {len(raw) - start} chunks{resumed} in {enc_s:.1f}s → "
+                f"{G}{cps:.1f} chunks/s{X} (load {emb.load_s:.1f}s, model {model_mb:.0f} MB)"
             )
             if args.save_vectors:
-                save_vectors(args.save_vectors, raw, fingerprint)
                 print(f"{D}  saved the forward pass to {args.save_vectors}{X}")
         vecs = Embedder.finish(raw, cand.truncate_to)
 
