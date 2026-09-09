@@ -7,8 +7,7 @@
 
 ## Task
 
-**P11-T3 remainder — what the graph view still owes.** The map is built and running; three
-described pieces are not.
+**P11-T3 is done — §11b is built. Next up: collect OQ-18, then the tool-selection defect.**
 
 **Phase:** [11 — execution visualisation & advanced UI](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc) · **Scope:** Capability arc
 **Status:** `READY` · **Set:** 2026-09-09 · **Blocked on:** nothing
@@ -22,23 +21,18 @@ verified against the real corpus at 1,564 documents / 3,465 edges.
 
 ### What remains
 
-1. **Select-as-context** — feed selected documents into a real context package, and if that package
-   later egresses, the ordinary preview prices it. The last unbuilt piece of §11b.
-2. **A live retrieval trace has never been seen.** The mechanism is built and unit-tested against
-   the exact payload `rag/retrieval.py:to_citation` emits, but no real retrieval has lit the map up,
-   because the router does not reach for `know.search` — see the selection finding below. Worth one
+**§11b is complete as specified.** Traces, hulls, the legend and select-as-context all landed
+2026-09-09. Two things are outstanding, and neither is new construction:
+
+1. **A live retrieval trace has never been seen.** The mechanism is unit-tested against the exact
+   payload `rag/retrieval.py:to_citation` emits, but no real retrieval has lit the map up, because
+   the router does not reach for `know.search` — see the tool-selection finding below. Worth one
    confirmation the first time a `know.*` call actually runs.
-3. **The collection hull is on probation.** It traces each collection's core (hulling the whole
+2. **The collection hull is on probation.** It traces each collection's core (hulling the whole
    collection just hulls the orphan ring, which is a polygon over the entire map). It reads weakly
    on this corpus, and the legend plus the per-row collection name are what actually discharge
-   UI.md §1. If it does not prove useful in real use, cut it — that is the honesty gate, and a faint
-   polygon that clarifies nothing is decoration.
-
-**Done 2026-09-09, second pass:** retrieval traces (`toTraces`), collection hulls, the labelled
-legend, and collection written into every list row.
-
-Not owed, deliberately: *bridges*. Measurement 3b struck it — one edge joins `notes` to `projects`
-at every k and every threshold.
+   UI.md §1. If it does not prove useful in real use, cut it — a faint polygon that clarifies
+   nothing is decoration.
 
 ### Two things to know before touching it
 
@@ -56,24 +50,31 @@ at every k and every threshold.
   go/no-go), the execution tree's acceptance criteria, `TaskTree`'s fixture, and the sidebar
   counters. Start the daemon and UI, type `continue ORACLE` in the command bar, approve the T3
   `confirm_strong` card. `oracle-selfcheck` is the cheaper first fill — local, no egress, ~5 min.
-- **OQ-18 is running (started 2026-09-09 19:22), and the cause of three failed runs is now
-  diagnosed.** It was never the idle timer: `STANDBYIDLE` on AC is already `0` (Never), and **21 of
-  the last 21 sleeps on this machine are `Sleep Reason: Application API`** — some other process
-  explicitly calls `SetSuspendState`, which `SetThreadExecutionState` cannot veto. The 2026-08-28
-  `keep_system_awake()` hardening was aimed at a timer that was already disabled, which is why two
-  sessions read the next death as "the guard did not hold".
+- **OQ-18 restarted 2026-09-09 ~20:10 on a stabilised tree, and three runs' worth of causes are
+  now understood.** It was never the idle timer: `STANDBYIDLE` on AC is already `0` (Never), and
+  **21 of the last 21 sleeps are `Sleep Reason: Application API`** — another process explicitly
+  calls `SetSuspendState`, which `SetThreadExecutionState` cannot veto, so the 2026-08-28
+  `keep_system_awake()` hardening was aimed at a timer that was already disabled.
   [Dev log](../logs/development/2026-09-09-oq18-the-wrong-thing-hardened-twice.md).
-  **The fix is to survive the sleep, not prevent it:** the task now repeats every 30 min for 24 h,
-  each firing resumes from the last 256-chunk checkpoint, `StopOnIdleEnd` is off, and the wrapper
-  exits immediately once `oq18-translated.json` exists. The log **appends** now — truncating it on
-  every attempt is what hid the evidence for three runs.
-  **On collection:** compose `dense_mt` against `dense_xl`, confirm or flip `Settings.translate_queries`,
-  decide `en-relay-dockerfile`, resolve [OQ-18](OPEN_QUESTIONS.md#oq-18), then
-  `Unregister-ScheduledTask -TaskName ORACLE-OQ18-eval`. The 2026-08-28 answer-key correction still
-  applies: **38/38 queries carry an answer-key chunk in their top-12 lexical candidates**, and the
-  old "0/38" diagnostic was broken from birth.
-  ⚠ **Heavy CPU work skews it** — the eval measures `chunks_per_s` and query latency, so avoid
-  running the test suite against it.
+  **The fix is to survive the sleep:** the task repeats every 30 min, each firing resumes from the
+  last 256-chunk checkpoint, `StopOnIdleEnd` is off, and the wrapper exits once
+  `oq18-translated.json` exists. The log **appends** now — truncating it is what hid the evidence.
+  **Two corpus findings from the 2026-09-09 attempt, both acted on:**
+  (a) a retrieval fixture pointed at `Asterim/docs/operations-runbook.md`, which Asterim moved into
+  `docs/archive/2026-08-pipeline-era/` — an automatic miss for every arm, depressing absolute recall
+  across all of them. **Repointed.** (b) The corpus has grown from 18,153 to 27,920 chunks since the
+  2026-08-26 baseline, so **this run's absolute numbers are not comparable to the earlier ones.**
+  OQ-18's actual question is a *within-run* comparison of arms, which corpus drift does not
+  invalidate — but do not quote the new recall figures against the old ones.
+  ⚠ **Do not run the test suite while it runs** — the eval measures `chunks_per_s` and query
+  latency, and concurrent work both slows it and corrupts those numbers. **Repo edits are worse than
+  slow:** ORACLE indexes itself, so any edit moves the corpus fingerprint and a retry after an edit
+  restarts the pass from zero. Leave the tree alone until it lands.
+  **On collection:** compose `dense_mt` against `dense_xl`, confirm or flip
+  `Settings.translate_queries`, decide `en-relay-dockerfile`, resolve
+  [OQ-18](OPEN_QUESTIONS.md#oq-18), then `Unregister-ScheduledTask -TaskName ORACLE-OQ18-eval`.
+  The 2026-08-28 answer-key correction still applies: **38/38 queries carry an answer-key chunk in
+  their top-12 lexical candidates**, and the old "0/38" diagnostic was broken from birth.
 - **Global search misses its budget, measured for the first time on 2026-09-09**: warm 504–1,467 ms
   against **p95 < 300 ms**, cold 7,932 ms. The previous session could not measure it (`know.*` was
   refusing). Wants its own task — profile before optimising; the cold number smells like model load.

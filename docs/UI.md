@@ -695,7 +695,11 @@ appear as a single ghosted hull with a "index this" action. No decorative nodes,
 > orphans visibly outside it. It remains the weakest of the three non-colour carriers; what actually
 > discharges §1 here is the **labelled legend** and the collection name in every list row.
 >
-> Still **not** built: select-as-context.
+> **Select-as-context landed 2026-09-09 and completes §11b.** Ticked documents are pinned to the
+> session and fill **band 6**, through a new `know.read_documents` (T0) — ids address the index, not
+> the filesystem. Band 6 was empty because *search* on the answer path costs seconds; a pin has no
+> query, so the argument does not apply. Provenance rides on each pinned document, so a pin taints a
+> turn exactly as retrieval would, and if the package later egresses the ordinary preview prices it.
 
 ### Rendering — canvas, and what it costs  `MEASURED 2026-09-09`
 
