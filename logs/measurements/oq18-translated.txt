@@ -28,3 +28,10 @@
 [31m  fixtures whose expected source is not in the corpus: ['en-relay-secret-rotation'][0m
 
 [34mlexical index[0m
+  BM25 over 27920 chunks, 152335 terms, 12.1s
+  recall@5 24%   misses: ['ru-token-refresh', 'ru-jwt-secret-storage', 'ru-own-yaml-parser', 'ru-two-users-one-agent', 'ru-feature-entitlement', 'ru-relay-encryption', 'ru-vector-search', 'ru-finetuning', 'en-relay-dockerfile', 'en-access-token-lifetime', 'en-secrets-at-rest', 'en-relay-secret-rotation', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-event-retention', 'ru-shutdown-order', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-migrations', 'ru-command-approval', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-bias-variance', 'ru-cross-validation', 'ru-learning-rate', 'ru-nonlinearity', 'ru-model-degrades']
+[2m  answer-key documents in the lexical candidates of 38/38 queries[0m
+
+[34mbge-m3[0m (1024d, cls pooling)
+[31m  D:/ORACLE/scratch/oq18-vectors-bge-m3.npz was built from a different corpus or model; ignoring it[0m
+[2m    saved 862307e5901c6c25…  wanted 33a22ee39b463d57…[0m

@@ -343,6 +343,51 @@ def test_relayout_reports_the_backfill_separately_from_the_layout(store: Knowled
     assert result["seconds"] >= 0
 
 
+def test_documents_by_id_returns_them_in_the_order_asked_for(store: KnowledgeStore) -> None:
+    """The person's selection has an order; a set does not. Reordering the context they chose
+    changes what the model reads first, for no reason they can see."""
+    put(store, document("a.md"), ["alpha"], [[1.0, 0, 0, 0]])
+    put(store, document("b.md"), ["beta"], [[0, 1.0, 0, 0]])
+
+    rows = store.documents_by_id(["projects/b.md", "projects/a.md"])
+    assert [r["path"] for r in rows] == ["b.md", "a.md"]
+    assert rows[0]["text"] == "beta"
+
+
+def test_documents_by_id_skips_what_is_gone_rather_than_faking_it(store: KnowledgeStore) -> None:
+    put(store, document("a.md"), ["alpha"], [[1.0, 0, 0, 0]])
+    rows = store.documents_by_id(["projects/a.md", "projects/deleted.md"])
+    assert [r["path"] for r in rows] == ["a.md"]
+
+
+def test_documents_by_id_truncates_per_document_and_says_so(store: KnowledgeStore) -> None:
+    """Applied per document, not by the caller: one 200 KB vault note would otherwise crowd out
+    every other document the person selected before the band budget is even consulted."""
+    put(store, document("big.md"), ["x" * 5000], [[1.0, 0, 0, 0]])
+    row = store.documents_by_id(["projects/big.md"], max_chars=100)[0]
+    assert len(row["text"]) == 100
+    assert row["truncated"] is True
+
+
+def test_documents_by_id_carries_provenance_so_a_pin_can_taint_a_turn(
+    store: KnowledgeStore,
+) -> None:
+    """Choosing a document by hand does not launder it (SECURITY.md §6)."""
+    doc = document("someone-elses.md")
+    cs = [Chunk(doc=doc, ordinal=0, anchor="a", text="untrusted")]
+    store.put(
+        doc,
+        cs,
+        np.array([[1.0, 0, 0, 0]], dtype=np.float32),
+        content_hash="h",
+        provenance="local_foreign",
+        indexed_at="2026-09-09T00:00:00Z",
+        idents=["untrusted"],
+        token_counts=[1],
+    )
+    assert store.documents_by_id(["projects/someone-elses.md"])[0]["provenance"] == "local_foreign"
+
+
 def test_build_on_an_empty_index_is_an_empty_graph(store: KnowledgeStore) -> None:
     graph = build(store)
     assert graph.nodes == []

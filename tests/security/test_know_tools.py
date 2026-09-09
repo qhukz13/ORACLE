@@ -158,3 +158,28 @@ class TestNoPathArguments:
     def test_they_declare_only_fs_read(self) -> None:
         for contract in KNOW_TOOLS:
             assert contract.capabilities <= {Capability.FS_READ}, contract.id
+
+    def test_a_document_id_cannot_become_a_file_read(self, tmp_path: Path) -> None:
+        """`know.read_documents` takes ids, and an id is not a path.
+
+        It is the one `know.*` tool that accepts caller-supplied strings naming *specific*
+        documents rather than a query, which makes it the obvious place to try to turn a
+        selection into an arbitrary read. The ids are matched against `documents.id` in
+        `knowledge.db`, so anything that was never indexed — and therefore never opted into via
+        collections.yaml — resolves to nothing at all rather than to a file.
+        """
+        from oracle.rag.embedding import DEFAULT
+        from oracle.rag.store import KnowledgeStore
+
+        store = KnowledgeStore(tmp_path / "knowledge.db", DEFAULT.out_dim)
+        try:
+            attempts = [
+                "C:/Windows/System32/drivers/etc/hosts",
+                "../../../../etc/passwd",
+                "projects/../../secrets.env",
+                str(REPO_ROOT / "config" / "policy.yaml"),
+                r"\\server\share\secret.txt",
+            ]
+            assert store.documents_by_id(attempts) == []
+        finally:
+            store.close()

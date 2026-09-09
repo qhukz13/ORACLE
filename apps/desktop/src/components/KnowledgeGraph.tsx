@@ -105,6 +105,10 @@ export interface KnowledgeGraphProps {
   data: KnowledgeGraphData;
   /** Most recent first. */
   traces?: RetrievalTrace[];
+  /** Documents already pinned as this session's context, so the view opens showing the truth. */
+  pinned?: string[];
+  /** Replaces the pin. An empty list clears it. */
+  onPin?(documents: string[]): void;
   /** True while a re-layout is running; the button holds its disabled state for the whole pass
    *  (34 s measured, plus a one-time 88 s vector backfill on an index built before that table). */
   relayouting?: boolean;
@@ -159,9 +163,11 @@ const FILTERS: { id: Filter; label: string; hint: string }[] = [
 export function KnowledgeGraph({
   data,
   traces = [],
+  pinned,
   relayouting,
   onRelayout,
   onOpen,
+  onPin,
 }: KnowledgeGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -172,6 +178,7 @@ export function KnowledgeGraph({
   const [query, setQuery] = useState("");
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [traceId, setTraceId] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<Set<string>>(() => new Set(pinned ?? []));
 
   const n = data.nodes.length;
 
@@ -619,6 +626,41 @@ export function KnowledgeGraph({
         </div>
       </header>
 
+      {onPin && (
+        <div className="kgraph-pin">
+          <span className="muted">
+            {chosen.size === 0
+              ? "Tick documents below to use them as context."
+              : `${chosen.size} document${chosen.size === 1 ? "" : "s"} selected.`}
+          </span>
+          <button
+            className="ghost"
+            disabled={chosen.size === 0}
+            onClick={() => onPin([...chosen])}
+          >
+            Use as context
+          </button>
+          {(pinned?.length ?? 0) > 0 && (
+            <>
+              <span className="kgraph-pinned">
+                {/* Stated, not implied by a highlight: context that silently steers answers is the
+                    thing this whole surface exists to make visible. */}
+                {pinned?.length} pinned for this conversation
+              </span>
+              <button
+                className="ghost"
+                onClick={() => {
+                  setChosen(new Set());
+                  onPin([]);
+                }}
+              >
+                Clear context
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {traces.length > 0 && (
         /* UI.md §11b's *use* question: "what did ORACLE just retrieve, and from where". It is a
            reading of the event log, so it appears only when there is something to read — an empty
@@ -739,6 +781,22 @@ export function KnowledgeGraph({
               if (!node) return null;
               return (
                 <li key={node.id}>
+                  {onPin && (
+                    <input
+                      type="checkbox"
+                      className="kgraph-check"
+                      checked={chosen.has(node.id)}
+                      aria-label={`Use ${node.rel_path} as context`}
+                      onChange={(e) =>
+                        setChosen((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(node.id);
+                          else next.delete(node.id);
+                          return next;
+                        })
+                      }
+                    />
+                  )}
                   <button
                     className={`kgraph-item${i === selected ? " sel" : ""}`}
                     onClick={() => centreOn(i)}

@@ -285,6 +285,43 @@ describe("KnowledgeGraph", () => {
     });
   });
 
+  describe("select-as-context", () => {
+    it("offers nothing until documents are ticked", () => {
+      render(<KnowledgeGraph data={data()} onPin={vi.fn()} />);
+      const button = screen.getByRole("button", { name: "Use as context" });
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("sends exactly the ticked documents, by id", () => {
+      const onPin = vi.fn();
+      render(<KnowledgeGraph data={data()} onPin={onPin} />);
+      fireEvent.click(screen.getByLabelText("Use a.md as context"));
+      fireEvent.click(screen.getByRole("button", { name: "Use as context" }));
+      // Ids, not paths: the backend resolves these against the index, and a path would be a
+      // file read of something that may never have been indexed or scoped.
+      expect(onPin).toHaveBeenCalledWith(["notes/a.md"]);
+    });
+
+    it("says what is pinned rather than only highlighting it", () => {
+      /* Context that steers answers invisibly is the thing this surface exists to expose. */
+      render(<KnowledgeGraph data={data()} pinned={["notes/a.md"]} onPin={vi.fn()} />);
+      expect(screen.getByText(/1 pinned for this conversation/)).toBeTruthy();
+    });
+
+    it("clearing sends an empty list, so the pin is replaced and not merely hidden", () => {
+      const onPin = vi.fn();
+      render(<KnowledgeGraph data={data()} pinned={["notes/a.md"]} onPin={onPin} />);
+      fireEvent.click(screen.getByRole("button", { name: "Clear context" }));
+      expect(onPin).toHaveBeenCalledWith([]);
+    });
+
+    it("shows no pinning affordance at all when the host does not support it", () => {
+      render(<KnowledgeGraph data={data()} />);
+      expect(screen.queryByRole("button", { name: "Use as context" })).toBeNull();
+      expect(screen.queryByLabelText("Use a.md as context")).toBeNull();
+    });
+  });
+
   it("caps the rendered list and says how much it is hiding rather than truncating silently", () => {
     const many = Array.from({ length: 450 }, (_, i) => node(`doc${i}.md`));
     render(

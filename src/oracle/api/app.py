@@ -1782,6 +1782,22 @@ async def _handle_command(st: AppState, raw: dict[str, Any]) -> None:
                 fact_id, reason=str(cmd.payload.get("reason") or ""), trace_id=bind_trace()
             )
 
+    elif cmd.type == "context.pin":
+        # Select-as-context (UI.md §11b): documents the person chose on the knowledge map become
+        # band 6 for this session's next turns. The ids address the *index*, not the filesystem —
+        # `know.read_documents` resolves them, so a client cannot turn this into a file read of
+        # something that was never indexed and never scoped.
+        # Not `raw`: that name is already bound in this handler, and rebinding it here would be
+        # the same class of bug the `memory.remember` branch notes about `project`.
+        pinned = cmd.payload.get("documents")
+        documents: list[str] = (
+            [d for d in pinned if isinstance(d, str)] if isinstance(pinned, list) else []
+        )
+        session = session_of(cmd) or ""
+        if session:
+            count = st.agent.pin_context(session, documents)
+            log.info("context.pin", session=session, documents=count)
+
     elif cmd.type == "graph.cancel":
         # One task, or the whole graph. Not HALT: HALT is above this and stops
         # everything, including graphs this daemon never started.

@@ -507,6 +507,50 @@ class KnowledgeStore:
             )
         ]
 
+    def documents_by_id(self, ids: Sequence[str], *, max_chars: int = 4000) -> list[dict[str, Any]]:
+        """Read named documents back, in the order asked for, with their chunk text joined.
+
+        The read path for select-as-context: the person has already chosen these, so there is no
+        query, no embedding and no ranking — which is exactly why this can sit on the interactive
+        answer path where retrieval cannot (AGENT_RUNTIME.md §5's band 6 note).
+
+        `max_chars` is per document and is applied **here**, not by the caller. A vault note can be
+        200 KB; reading it whole to hand the assembler something it will immediately truncate would
+        spend the memory and the I/O anyway, and one large document could crowd out every other
+        selected one before the budget is even consulted.
+        """
+        out: list[dict[str, Any]] = []
+        for doc_id in ids:
+            row = self.db.execute(
+                "SELECT id, collection_id, project_id, rel_path, path, kind, provenance, indexed_at"
+                " FROM documents WHERE id = ?",
+                (doc_id,),
+            ).fetchone()
+            if row is None:
+                # A selection can outlive the document it names. Skipped rather than faked: the
+                # caller reports the gap, because a context package quietly missing a source the
+                # person chose is worse than one that says so.
+                continue
+            chunks = self.db.execute(
+                "SELECT text FROM chunks WHERE document_id = ? ORDER BY ordinal", (doc_id,)
+            ).fetchall()
+            text = "\n\n".join(c["text"] for c in chunks)
+            out.append(
+                {
+                    "id": row["id"],
+                    "collection": row["collection_id"],
+                    "project": row["project_id"],
+                    "path": row["rel_path"],
+                    "abs_path": row["path"],
+                    "kind": row["kind"],
+                    "provenance": row["provenance"],
+                    "indexed_at": row["indexed_at"],
+                    "text": text[:max_chars],
+                    "truncated": len(text) > max_chars,
+                }
+            )
+        return out
+
     def prune(self, collection: str, keep: Iterable[str]) -> int:
         """Delete documents no longer present on disk. Returns how many went."""
         alive = set(keep)

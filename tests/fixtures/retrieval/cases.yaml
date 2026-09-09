@@ -148,12 +148,18 @@ cases:
     collection: projects
     expect_any: ["Asterim/apps/server/src/migrations/004_pipelines.ts"]
 
+  # Repointed 2026-09-09: Asterim moved this document to `docs/archive/2026-08-pipeline-era/`.
+  # The 2026-09-09 eval run reported it as "not in the corpus", which made this case an automatic
+  # miss for every arm and quietly depressed absolute recall for all of them. A fixture whose
+  # answer key does not exist does not measure retrieval — it measures the fixture.
   - id: en-relay-secret-rotation
     q: "what happens if the relay secret is not set on the relay server"
     lang: en
     kind: semantic
     collection: projects
-    expect_any: ["Asterim/docs/operations-runbook.md"]
+    expect_any:
+      - "Asterim/docs/archive/2026-08-pipeline-era/operations-runbook.md"
+      - "Asterim/docs/audit/security-audit.md"
 
   # ---- English, exact identifier / filename: BM25 territory ---------------
   - id: lex-entitlement-guard

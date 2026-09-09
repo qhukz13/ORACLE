@@ -54,6 +54,13 @@ HISTORY_TURNS = 3
 #: a bounded scan is the difference between a cheap band and a table scan per turn.
 HISTORY_SCAN = 200
 
+#: How many documents a session may pin from the knowledge map, and how much text they may
+#: contribute to band 6. Bounded here as well as by the band budget: the assembler would truncate
+#: anyway, but reading forty vault notes in order to throw most of them away spends the I/O
+#: regardless, and it is the pin that should be bounded, not just its effect.
+PINNED_MAX = 20
+PINNED_CHARS = 8000
+
 #: Intents where the user wants something DONE. Everything else is answered or asked
 #: about; only these reach tool selection.
 _ACTIONABLE = frozenset({"run", "modify", "investigate", "search", "status"})
@@ -172,6 +179,10 @@ class TurnPipeline:
         #: and a way to ask. Without all three the pipeline still talks — it just says
         #: it cannot act, which is what P1 did.
         self._executor = executor
+        #: Documents the person pinned on the knowledge map, per session — select-as-context
+        #: (UI.md §11b). Session-scoped and in memory on purpose: a pin is a statement about
+        #: *this* conversation, and persisting it would silently steer turns days later.
+        self._pinned: dict[str, list[str]] = {}
         self._selector = selector
         self._approvals = approvals
         self._projects_root = projects_root
@@ -840,12 +851,17 @@ class TurnPipeline:
         recent turn, both through `ContextAssembler` so they are budgeted, truncated and
         provenance-labelled like everything else.
 
-        **Band 6 (retrieval) is deliberately still empty here.** Filling it means putting
+        **Band 6 (retrieval) is still not filled by *searching* here.** Doing that means putting
         the embedder on the interactive answer path, which costs seconds against a latency
         budget with ~70 ms of headroom (OQ-15, OQ-18). Retrieval already runs where those
         seconds are free: the Handoff Packet, where a delegation takes minutes. Wiring it
         here without measuring first would trade a known-good latency for an unmeasured
-        recall gain."""
+        recall gain.
+
+        **Since 2026-09-09 band 6 is filled from a pin** — documents the person selected on the
+        knowledge map (UI.md §11b). That is not the same trade: a pin has no query, so there is
+        nothing to embed and the cost is a primary-key lookup. The band was empty because *search*
+        is expensive, not because the band is."""
         items = [
             Item(Band.SYSTEM, _ANSWER_SYSTEM, role="system", provenance="system"),
             Item(Band.TASK, f"Request: {text}", role="user", provenance="user"),
@@ -859,8 +875,76 @@ class TurnPipeline:
                 # A memory outage is not an answer outage. The turn proceeds with an
                 # empty band 5, which is exactly the pre-Phase-9 behaviour.
                 log.warning("memory.band_unavailable", exc_info=True)
+        items.extend(await self._pinned_items(session_id))
         items.extend(await self._history_items(session_id))
         return self._assembler.assemble(CallType.ANSWER, items).messages
+
+    def pin_context(self, session_id: str, documents: list[str]) -> int:
+        """Pin documents chosen on the knowledge map as this session's context. Returns the count.
+
+        Replaces rather than accumulates: the map's selection *is* the pin, so a person who
+        deselects something expects it gone. An additive pin would grow a context nobody can see
+        the whole of, which is the failure mode band budgets exist to prevent.
+        """
+        if documents:
+            self._pinned[session_id] = documents[:PINNED_MAX]
+        else:
+            self._pinned.pop(session_id, None)
+        return len(self._pinned.get(session_id, []))
+
+    def pinned_context(self, session_id: str) -> list[str]:
+        return list(self._pinned.get(session_id, []))
+
+    async def _pinned_items(self, session_id: str) -> list[Item]:
+        """Band 6, filled only when the person has chosen what goes in it.
+
+        The band's docstring above explains why retrieval is not on this path: embedding costs
+        seconds against a latency budget with ~70 ms of headroom. **A pin has no query to embed.**
+        The selection was made by a human on the map, so filling band 6 from it costs a
+        primary-key lookup, and the reason band 6 was empty does not apply.
+
+        It goes through the executor like every other tool call — the runtime never reads the index
+        directly (ROADMAP sequencing rule 2). A refusal or an outage leaves the band empty and the
+        turn proceeds, because a pin that cannot be read is not an answer outage.
+
+        Provenance rides on each document, so a pinned `local_foreign` note taints the turn exactly
+        as a retrieved one would. Choosing a document by hand does not launder it.
+        """
+        documents = self._pinned.get(session_id) or []
+        if not documents or self._executor is None:
+            return []
+        outcome = await self._executor.execute(
+            "know.read_documents", {"documents": documents, "max_chars": PINNED_CHARS}
+        )
+        if not outcome.ok or outcome.result is None:
+            log.warning("context.pinned_unavailable", documents=len(documents))
+            return []
+        payload = outcome.result.model_dump()
+        text = str(payload.get("context") or "")
+        if not text:
+            return []
+        citations = payload.get("citations") or []
+        tainted = bool(payload.get("tainted"))
+        missing = payload.get("missing") or []
+        if missing:
+            # Said, not swallowed: the person is owed the knowledge that something they chose is
+            # not in what the model was given.
+            text += "\n\n(no longer in the index: " + ", ".join(str(m) for m in missing) + ")"
+        log.info(
+            "context.pinned",
+            documents=len(citations),
+            missing=len(missing),
+            tainted=tainted,
+        )
+        return [
+            Item(
+                Band.RETRIEVAL,
+                "Documents you selected on the knowledge map:\n" + text,
+                role="user",
+                provenance="local_foreign" if tainted else "local_owned",
+                source="pinned",
+            )
+        ]
 
     async def _history_items(self, session_id: str, turns: int = HISTORY_TURNS) -> list[Item]:
         """Band 7: what was just said, read off the event log.

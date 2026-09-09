@@ -288,6 +288,15 @@ export default function App() {
   // Retrieval traces, read out of the event log rather than stored anywhere — see `toTraces`.
   const traces = useMemo(() => toTraces(s.events), [s.events]);
 
+  // Select-as-context. The pinned set is held here rather than in the view so it survives a stage
+  // switch — the person pins on the map and then goes to Chat to ask about it, which is the whole
+  // point of pinning.
+  const [pinnedDocs, setPinnedDocs] = useState<string[]>([]);
+  const pinContext = useCallback((documents: string[]) => {
+    clientRef.current?.send({ type: "context.pin", payload: { documents } });
+    setPinnedDocs(documents);
+  }, []);
+
   const relayout = useCallback(() => {
     // Synchronous and slow on purpose (~28 s measured): it moves every node, so the button holds
     // its disabled state for exactly as long as the work runs rather than implying it is done.
@@ -623,6 +632,8 @@ export default function App() {
               <KnowledgeGraph
                 data={graph}
                 traces={traces}
+                pinned={pinnedDocs}
+                onPin={pinContext}
                 relayouting={relayouting}
                 onRelayout={relayout}
               />

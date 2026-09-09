@@ -4,7 +4,9 @@ These run inside the toolhost child (ADR-0003), which is why they open `knowledg
 themselves rather than being handed a store: nothing routes back into the runtime from
 here, by design.
 
-**Four tools, not the five in TOOLS.md.** `know.summarize` is deliberately absent.
+**Five tools, and still not the `know.summarize` in TOOLS.md**, which is deliberately absent.
+(`know.read_documents` was added 2026-09-09 for select-as-context; it reads named documents by
+id, with no query and therefore no embedding, which is what lets it sit on the answer path.)
 As specified it "uses the local model", and a handler in the tool host cannot call the
 LLM layer — L7 must never re-enter L3-L6 (ARCHITECTURE.md §4), and the whole point of
 the process boundary is that the side of it holding an API key is not the side executing
@@ -278,6 +280,83 @@ async def know_read_context(
         tainted=any(c.get("provenance") != "local_owned" for c in citations),
         truncated=truncated,
     )
+
+
+# ------------------------------------------------------------- know.read_documents
+
+
+class KnowReadDocumentsArgs(ToolArgs):
+    #: Document ids as the graph and citations address them: `collection/rel_path`.
+    documents: Annotated[list[str], Field(min_length=1, max_length=40)]
+    max_chars: Annotated[int, Field(default=8000, ge=500, le=40000)] = 8000
+    per_document_chars: Annotated[int, Field(default=4000, ge=200, le=20000)] = 4000
+
+
+class KnowReadDocumentsResult(ToolResult):
+    context: str
+    citations: list[dict[str, Any]]
+    tainted: bool
+    truncated: bool
+    #: Ids that are no longer in the index. Named, never silently dropped.
+    missing: list[str]
+
+
+@tool(
+    id="know.read_documents",
+    summary="Read named documents from the index as a citable context block.",
+    args=KnowReadDocumentsArgs,
+    result=KnowReadDocumentsResult,
+    capabilities={Capability.FS_READ},
+    scopes=frozenset(),
+    risk=Tier.T0,
+    reversible=True,
+    intents={"question", "investigate", "explain"},
+    side_effects="None. Reads the local index only.",
+)
+async def know_read_documents(
+    *, ctx: ToolContext, args: KnowReadDocumentsArgs
+) -> KnowReadDocumentsResult:
+    """Read documents the **person** chose, by id — no query, no embedding, no ranking.
+
+    This is the read behind select-as-context (UI.md §11b), and the absence of a query is the
+    point. `know.read_context` answers *"find me things about X"*
+    and pays for an embedding to do it, which is why AGENT_RUNTIME.md §5 keeps retrieval off the
+    interactive answer path. Here the selection *is* the query, already made by a human on the map,
+    so band 6 can be filled for the cost of a primary-key lookup.
+
+    **It is not a file reader.** Ids address the index, not the filesystem, so this cannot be talked
+    into reading a path that was never indexed and never scoped — which is also why it needs no
+    scope of its own beyond `FS_READ`. What comes back is still untrusted: provenance rides on every
+    citation and one `local_foreign` document sets `tainted`, escalating the tier of any plan built
+    on it (SECURITY.md §6), exactly as a searched result would.
+    """
+    store = _store()
+
+    def work() -> KnowReadDocumentsResult:
+        rows = store.documents_by_id(args.documents, max_chars=args.per_document_chars)
+        found = {r["id"] for r in rows}
+        blocks: list[str] = []
+        citations: list[dict[str, Any]] = []
+        used = 0
+        truncated = any(r["truncated"] for r in rows)
+        for i, r in enumerate(rows, start=1):
+            header = f"[{i}] {r['project'] or r['collection']} / {r['path']}"
+            block = f"{header}\n{r['text']}"
+            if used + len(block) > args.max_chars:
+                truncated = True
+                break
+            blocks.append(block)
+            citations.append({k: v for k, v in r.items() if k not in ("text", "truncated")})
+            used += len(block)
+        return KnowReadDocumentsResult(
+            context="\n\n".join(blocks),
+            citations=citations,
+            tainted=any(c.get("provenance") != "local_owned" for c in citations),
+            truncated=truncated,
+            missing=[d for d in args.documents if d not in found],
+        )
+
+    return await asyncio.to_thread(work)
 
 
 # -------------------------------------------------------------------- know.reindex

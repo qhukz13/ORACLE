@@ -195,6 +195,9 @@ tools:
   know.search:       { tier: T0 }
   know.search_code:  { tier: T0 }
   know.read_context: { tier: T0 }
+  # Reads named documents by index id. No path field, so no scope -- the ids address
+  # knowledge.db, not the filesystem, and an id that is not in the index reads nothing.
+  know.read_documents: { tier: T0 }
   # T1: it writes, but only to knowledge.db, which is disposable by design (ADR-0006).
   # A full rebuild costs about an hour of CPU, which is a reason to make it explicit in
   # the argument — not a reason to make it a confirmation.

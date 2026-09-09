@@ -700,6 +700,26 @@ button.tt-id:hover { text-decoration: underline; border: none; }
   background: var(--bg-1);
   font-size: 12px;
 }
+.kgraph-pin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.kgraph-pinned {
+  color: var(--st-think);
+}
+.kgraph-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.kgraph-check {
+  flex: none;
+  margin: 0;
+  accent-color: var(--st-think);
+}
 .kgraph-traces {
   display: flex;
   flex-wrap: wrap;
