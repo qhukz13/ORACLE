@@ -7,60 +7,40 @@
 
 ## Task
 
-**P11-T3 — the knowledge graph view.** Now unblocked, and every budget it must hold has a number.
+**P11-T3 remainder — what the graph view still owes.** The map is built and running; three
+described pieces are not.
 
 **Phase:** [11 — execution visualisation & advanced UI](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc) · **Scope:** Capability arc
 **Status:** `READY` · **Set:** 2026-09-09 · **Blocked on:** nothing
 
-[OQ-22](OPEN_QUESTIONS.md#oq-22) is **resolved on all four measurements** as of 2026-09-09 and
-[ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered) is
-**confirmed**: build it on canvas, at k=4 / thr=0.85, with semantic edges **on**. Sequencing rule 6
-is satisfied — the measurements came first.
+**Done 2026-09-09:** [OQ-22](OPEN_QUESTIONS.md#oq-22) resolved on all four measurements ·
+[ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered)
+confirmed · the data layer (`rag/graph.py`, `document_vectors`, `document_positions`) · the API
+(`GET /api/v1/knowledge/graph`, `POST /api/v1/knowledge/relayout`) · the view on **Ctrl+5**,
+verified against the real corpus at 1,564 documents / 3,465 edges.
 [Report](current_report.md) · [dev log](../logs/development/2026-09-09-oq22-canvas-vs-svg.md)
 
-## What to build
+### What remains
 
-Spec: [UI.md §11b](UI.md#11b-the-knowledge-graph--phase-11), which now carries the measured
-rendering budgets. In rough order:
+1. **Retrieval-trace edges** — [UI.md §11b](UI.md#11b-the-knowledge-graph--phase-11)'s *use*
+   question: "what did ORACLE just retrieve, and from where". Episodic, from the event log, shown
+   only in trace mode. This is the only one of the three remaining questions the view cannot
+   currently answer at all.
+2. **Collection hulls** — a tinted region behind each cluster, so collection is not carried by
+   colour alone. Today it is, which is a standing violation of UI.md §1 on this surface.
+3. **Select-as-context** — feed selected documents into a real context package, and if that package
+   later egresses, the ordinary preview prices it.
 
-1. **The offline layout pass and persisted positions.** `document_vectors` is a **required table**
-   (measurement 1b: without it, incremental indexing spends 52 s against a < 5 s budget and it
-   gets misdiagnosed as slow layout). Positions persist in `knowledge.db`; seeding is a **hash of
-   the node's own id**, never the array index — that bug is what made the stability metric
-   unresponsive, and it breaks ADR-0013's spatial-memory argument at the source.
-2. **The canvas view**, `Ctrl+5`. Budgets to hold, all measured 2026-09-09: frame p50 **6.1 ms**
-   (one vsync on this 164 Hz panel — *not* 16.7 ms), idle **< 5% CPU** (canvas measured 1.09% of one
-   core), first paint **< 1 s** (measured 10.1 ms). Node radius is **constant on screen at every
-   zoom** — measured free, so specify it rather than budget for it. Hit-testing is a plain linear
-   scan; it beat `elementFromPoint` by 4–9× and needs no spatial index at this corpus size.
-3. **The list-view equivalent and the DOM overlays.** This is ADR-0023's accessibility debt and it
-   is the price of shipping on canvas — the measurement retired the *performance* half of that
-   clause and left this half untouched. Every graph action must exist in the list, and it passes
-   the axe audit like every other surface.
-4. **Prompted re-layout**, not buried: incremental placement is stable but drifts
-   (Jaccard@10 0.477 at a 5% holdout against a 0.70 gate), and a full re-layout costs 28 s.
+Not owed, deliberately: *bridges*. Measurement 3b struck it — one edge joins `notes` to `projects`
+at every k and every threshold.
 
-**The view answers three questions, not four.** Shape, neglect, reach. *Bridges* was struck by
-measurement 3b — this corpus holds exactly one edge joining `notes` to `projects` at every k and
-every threshold, and no tuning invents a relationship that is not there. It inherits the orbit's
-honesty gate: if it answers none of the three better than search does, it gets cut and that gets an
-ADR.
+### Two things to know before touching it
 
-## The harness is reusable, and it is how the budgets stay honest
-
-`apps/desktop/bench/graph-render.html` measures the real thing in the real window. Re-run it against
-the built view rather than re-deriving numbers by hand:
-
-```bash
-npm --prefix apps/desktop run tauri -- dev --no-watch --config <override with ?autorun=1>
-```
-
-It writes `logs/measurements/oq22-render.json` itself; `?idle=canvas` mounts and stops so an external
-sampler has a window. **It refuses to run where frames are not arriving** — which is not a
-formality: in a hidden pane, `visibilityState` reports `"visible"`, timers fire, and `rAF` delivers
-nothing. Regenerate the scene with `uv run python scripts/export_graph_scene.py`.
-
----
+- **Frame budgets written as constants are wrong here.** This display is **163.9 Hz**, so one vsync
+  is **6.1 ms**, not 16.7. Measure the floor; never assume it. `apps/desktop/bench/graph-render.html`
+  re-measures the real thing in the real window and records itself to `logs/measurements/`.
+- **The view must never simulate.** It draws on demand, one coalesced `requestAnimationFrame` per
+  change. A standing loop would burn a core to say nothing and break the measured 1.09% idle.
 
 ## Still owed, in rough priority order
 
@@ -80,14 +60,18 @@ nothing. Regenerate the scene with `uv run python scripts/export_graph_scene.py`
   against **p95 < 300 ms**, cold 7,932 ms. The previous session could not measure it (`know.*` was
   refusing). Wants its own task — profile before optimising; the cold number smells like model load.
 - **The reindex is still unfired** — 57% of live rows exceed the 1200-char cap. `POST
-  /api/v1/knowledge/reindex` is verified live now. Full rebuild ~1 h synchronous.
+  /api/v1/knowledge/reindex` is verified live. Full rebuild ~1 h synchronous. Note it will also
+  repopulate `document_vectors` as it goes, which makes the graph's one-time 88 s backfill free.
 - **Palette results are not discoverable to assistive tech** — `<li role="option">` with `onClick`,
   no `role="combobox"`, no `aria-activedescendant`. The rest of the a11y audit is 15/15.
 - **`DATABASE.md`'s `facts`/`attempts`/`devices` blocks are still the pre-build sketch.**
-- **A merge-gate test fails under CPU starvation** (`test_a_long_burst_arrives_complete`) — seen a
-  third time on 2026-09-09, under real load, green immediately after on an idle box. `pytest-timeout`
-  (120 s) bounds the hang; the wall-clock assumption underneath is still implicit. Third sighting is
-  an argument for making it explicit.
+- **Tests with implicit wall-clock assumptions, now on a fourth sighting across two tests.**
+  `test_a_long_burst_arrives_complete` fails under CPU starvation and passed immediately after on an
+  idle box (2026-09-09). Separately, `test_the_launched_app_survives_the_toolhost_dying` was found
+  racing its own startup — it launched `python.exe` with no args and no stdin, which exits in
+  milliseconds, then asserted it was alive, failing ~1 run in 3 and *blaming the Job Object*. That
+  one is **fixed** (it now launches something that sleeps). The pattern is not: these should become
+  explicit perf tests or carry deadlines, rather than staying implicit in the merge gate.
 - **A correction typed while a graph runs is refused** — the fix, when somebody hits it, is a queue.
 - **Scheduled pipeline runs** are post-MVP; PIPELINES.md §5's "nothing above T1 unattended" is
   unenforced because nothing schedules anything.

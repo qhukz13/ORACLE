@@ -113,7 +113,8 @@ Regressions here are silent and cumulative, so they are asserted:
 | WS event fan-out | < 20 ms |
 | Global search | p95 < 300 ms |
 | Orbit view, idle | < 5% CPU |
-| Knowledge-graph layout, cold (1.4k docs) | < 10 min — **measured 27.8 s** |
+| Knowledge-graph layout, cold (1.4k docs) | < 10 min — **measured 27.8 s** offline, **34 s** in the daemon (1,455 docs / 3,737 edges, 2026-09-09) |
+| Knowledge-graph document-vector backfill, one-time | no budget — **measured 88 s** (1,455 docs); paid once, then `store.put()` maintains it |
 | Knowledge-graph layout, peak RSS | < 500 MB — **measured 121 MB** |
 | Knowledge-graph incremental placement | < 250 ms — **measured 0.032 ms p95** |
 | Knowledge-graph canvas pan/zoom | p95 frame < 16.7 ms — **measured 6.2 ms** (p50 6.1 ms = vsync) |

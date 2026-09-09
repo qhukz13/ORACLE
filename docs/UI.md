@@ -676,6 +676,13 @@ Finding them is question 2; hiding them would delete the answer. Documents that 
 index** appear hollow with an error affordance; collections that are registered but unindexed
 appear as a single ghosted hull with a "index this" action. No decorative nodes, ever.
 
+> **AS BUILT — 2026-09-09.** `apps/desktop/src/components/KnowledgeGraph.tsx`, stage `Ctrl+5`
+> ("Map"), served by `GET /api/v1/knowledge/graph` over `rag/graph.py`. Verified against the real
+> corpus, not a fixture: **1,564 documents · 988 wikilinks · 2,477 inferred edges · 195 orphans**,
+> and `Learning Path.md` answers the reach question with *126 direct, 34 at two hops*. The two
+> populations render as measurement 3b said they would — the vault and the projects visibly barely
+> touch. What is **not** built yet: retrieval-trace edges, collection hulls, and select-as-context.
+
 ### Rendering — canvas, and what it costs  `MEASURED 2026-09-09`
 
 [OQ-22](OPEN_QUESTIONS.md#oq-22)'s last open measurement ran in the Tauri/WebView2 shell at the real
