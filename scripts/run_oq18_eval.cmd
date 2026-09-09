@@ -34,6 +34,26 @@ REM So: stop trying to keep the machine awake, and survive it being slept. The p
 REM checkpoints every 256 chunks and resumes, so a sleep costs only the time asleep. The
 REM scheduled task repeats; each firing resumes; the first thing this script does is
 REM check whether the run already finished and exit if so.
+REM
+REM AND A SECOND FAILURE MODE, FOUND 2026-09-09 20:00: the pass HANGS.
+REM
+REM It burned 661 s of CPU, then stopped dead -- 0% CPU over repeated 30 s samples, memory
+REM flat, 71 threads all in Wait with 23 of them on kernel objects (Executive). That is a
+REM thread-pool deadlock, not a slow pass, and it is a different failure from the sleep:
+REM nothing terminated the process, it simply stopped doing anything.
+REM
+REM `--threads` defaulted to 24 -- every logical processor on this machine -- so ONNX
+REM Runtime's intra-op pool was sized to leave the OS, the tokenizer threads and the main
+REM thread nothing to run on. Dropping it to 20 is a mitigation for oversubscription, NOT a
+REM proven root cause: an ORT deadlock cannot be pinned from outside the process, and this
+REM has not yet been reproduced deliberately.
+REM
+REM What makes the run finish regardless of which of the two failures strikes is structural,
+REM not diagnostic: the task's ExecutionTimeLimit is now 45 minutes. A healthy pass needs
+REM ~2 h, so it completes across several firings, each resuming from the checkpoint -- and a
+REM hang costs at most 45 minutes instead of blocking every retry for six hours, which is
+REM what the original PT6H limit did. A watchdog you already have is better than a diagnosis
+REM you do not.
 REM ---------------------------------------------------------------------------
 
 cd /d "C:\Projects\ORACLE"
@@ -51,6 +71,7 @@ echo === OQ-18 corpus run, attempt started %DATE% %TIME% === >> logs\measurement
 
 ".venv\Scripts\python.exe" -u scripts\eval_embeddings.py ^
   --models bge-m3 ^
+  --threads 20 ^
   --translations logs/measurements/oq18-translations.json ^
   --save-vectors D:/ORACLE/scratch/oq18-vectors-bge-m3.npz ^
   --load-vectors D:/ORACLE/scratch/oq18-vectors-bge-m3.npz ^

@@ -35,3 +35,37 @@
 [34mbge-m3[0m (1024d, cls pooling)
 [31m  D:/ORACLE/scratch/oq18-vectors-bge-m3.npz was built from a different corpus or model; ignoring it[0m
 [2m    saved 862307e5901c6c25…  wanted 33a22ee39b463d57…[0m
+ 
+=== OQ-18 corpus run, attempt started Wed 09/09/2026 19:56:18.51 === 
+[34mcorpus[0m
+[2m  skipped: {'type': 918, 'deny': 2, 'untracked': 10, 'exclude': 5, 'unreadable': 1}[0m
+  1738 docs {'projects': 1542, 'notes': 196} {'markdown': 638, 'config': 182, 'code': 906, 'text': 12}
+  27962 chunks (18677 semantic, 9285 lexical-only) in 5.4s
+  chars/chunk: mean 999 p50 1151 p95 1200 max 1303
+[34mtranslations[0m  qwen3.5:0.8b: 20 of 25 usable, 5 failed
+[32m  all 38 fixture sources present in the corpus[0m
+
+[34mlexical index[0m
+  BM25 over 27962 chunks, 152405 terms, 14.0s
+  recall@5 26%   misses: ['ru-token-refresh', 'ru-jwt-secret-storage', 'ru-own-yaml-parser', 'ru-two-users-one-agent', 'ru-feature-entitlement', 'ru-relay-encryption', 'ru-vector-search', 'ru-finetuning', 'en-relay-dockerfile', 'en-access-token-lifetime', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-event-retention', 'ru-shutdown-order', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-migrations', 'ru-command-approval', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-bias-variance', 'ru-cross-validation', 'ru-learning-rate', 'ru-nonlinearity', 'ru-model-degrades']
+[2m  answer-key documents in the lexical candidates of 38/38 queries[0m
+
+[34mbge-m3[0m (1024d, cls pooling)
+[33m  no saved vectors at D:/ORACLE/scratch/oq18-vectors-bge-m3.npz; embedding from scratch[0m
+ 
+=== OQ-18 corpus run, attempt started Wed 09/09/2026 20:20:48.68 === 
+[34mcorpus[0m
+[2m  skipped: {'type': 918, 'deny': 2, 'untracked': 10, 'exclude': 5, 'unreadable': 1}[0m
+  1738 docs {'projects': 1542, 'notes': 196} {'markdown': 638, 'config': 182, 'code': 906, 'text': 12}
+  27964 chunks (18679 semantic, 9285 lexical-only) in 4.0s
+  chars/chunk: mean 999 p50 1151 p95 1200 max 1303
+[34mtranslations[0m  qwen3.5:0.8b: 20 of 25 usable, 5 failed
+[32m  all 38 fixture sources present in the corpus[0m
+
+[34mlexical index[0m
+  BM25 over 27964 chunks, 152406 terms, 11.6s
+  recall@5 26%   misses: ['ru-token-refresh', 'ru-jwt-secret-storage', 'ru-own-yaml-parser', 'ru-two-users-one-agent', 'ru-feature-entitlement', 'ru-relay-encryption', 'ru-vector-search', 'ru-finetuning', 'en-relay-dockerfile', 'en-access-token-lifetime', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-event-retention', 'ru-shutdown-order', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-migrations', 'ru-command-approval', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-bias-variance', 'ru-cross-validation', 'ru-learning-rate', 'ru-nonlinearity', 'ru-model-degrades']
+[2m  answer-key documents in the lexical candidates of 38/38 queries[0m
+
+[34mbge-m3[0m (1024d, cls pooling)
+[33m  no saved vectors at D:/ORACLE/scratch/oq18-vectors-bge-m3.npz; embedding from scratch[0m
