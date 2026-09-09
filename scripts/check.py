@@ -57,6 +57,14 @@ def main() -> int:
     ap.add_argument("--fail-fast", action="store_true", help="stop at the first failure")
     args = ap.parse_args()
 
+    # The gate reports failures by printing the failing tool's output, and that output routinely
+    # contains characters cp1252 cannot encode — pytest's own box-drawing, a source file's em
+    # dash, or the U+FFFD that `errors="replace"` already substituted upstream. On this console
+    # that made `print()` raise, so **the gate crashed precisely when it had something to say**
+    # and the failing step's output was lost. A gate that cannot report a failure is worse than a
+    # slow one; it looks like a broken script rather than a broken build.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+
     failures: list[tuple[str, str]] = []
     for step in STEPS:
         name = step[0]

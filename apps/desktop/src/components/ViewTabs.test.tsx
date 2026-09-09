@@ -34,15 +34,20 @@ describe("ViewTabs", () => {
     expect(onSwitch).toHaveBeenCalledWith("memory");
   });
 
+  // The last stage is derived, never named. These assert *wrapping*, and spelling the final
+  // stage into them turned adding one — the Phase 11 map — into two red tests about a behaviour
+  // that had not changed.
+  const LAST = STAGES[STAGES.length - 1]!.id;
+
   it("moves with the arrow keys, wrapping at both ends", () => {
     const onSwitch = vi.fn();
     const { rerender } = render(<ViewTabs stage="chat" onSwitch={onSwitch} />);
     fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowRight" });
     expect(onSwitch).toHaveBeenLastCalledWith("tasks");
     fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowLeft" });
-    expect(onSwitch).toHaveBeenLastCalledWith("knowledge"); // wraps backwards off chat
+    expect(onSwitch).toHaveBeenLastCalledWith(LAST); // wraps backwards off chat
 
-    rerender(<ViewTabs stage="knowledge" onSwitch={onSwitch} />);
+    rerender(<ViewTabs stage={LAST} onSwitch={onSwitch} />);
     fireEvent.keyDown(screen.getByRole("tablist"), { key: "ArrowRight" });
     expect(onSwitch).toHaveBeenLastCalledWith("chat"); // wraps forwards off the end
   });
@@ -53,13 +58,14 @@ describe("ViewTabs", () => {
     fireEvent.keyDown(screen.getByRole("tablist"), { key: "Home" });
     expect(onSwitch).toHaveBeenLastCalledWith("chat");
     fireEvent.keyDown(screen.getByRole("tablist"), { key: "End" });
-    expect(onSwitch).toHaveBeenLastCalledWith("knowledge");
+    expect(onSwitch).toHaveBeenLastCalledWith(LAST);
   });
 
-  it("advertises the Ctrl+digit keys on the four primary tabs", () => {
+  it("advertises the Ctrl+digit keys on the tabs that have one", () => {
     render(<ViewTabs stage="chat" onSwitch={vi.fn()} />);
     expect(screen.getByRole("tab", { name: "Chat" }).title).toContain("Ctrl+1");
     expect(screen.getByRole("tab", { name: "Tasks" }).title).toContain("Ctrl+2");
+    expect(screen.getByRole("tab", { name: "Map" }).title).toContain("Ctrl+5");
     expect(screen.getByRole("tab", { name: "Briefing" }).title).not.toContain("Ctrl+");
   });
 

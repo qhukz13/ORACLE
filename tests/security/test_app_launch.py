@@ -61,6 +61,12 @@ apps:
   missing:
     path: "C:/nowhere/not-installed.exe"
     tier: T1
+  longlived:
+    path: "{exe}"
+    tier: T1
+    accepts_path: false
+    args: ["-c", "import time; time.sleep(30)"]
+    description: "stays up long enough to be asked whether it is still up"
 """
 
 
@@ -191,8 +197,15 @@ class TestDetachment:
 
         If `app.launch` ran inside the toolhost, killing the job would take the app with
         it — which is what would happen to a user's editor on the next HALT.
+
+        **Uses `longlived`, not `noargs`, and that is the whole reliability of this test.**
+        `noargs` is `python.exe` with no arguments and no stdin, so it reaches EOF and exits on
+        its own within milliseconds — this test was then racing that exit, failing about one run
+        in three, and reporting the loss as *"the launched application died with the toolhost"*.
+        A flaky test is bad; a flaky test in the unskippable merge gate that names the wrong cause
+        is worse, because the message sends the next reader to audit the Job Object.
         """
-        out = await ex.execute("app.launch", {"app": "noargs"})
+        out = await ex.execute("app.launch", {"app": "longlived"})
         assert out.ok, out.error and out.error.message
         pid = out.result.pid  # type: ignore[union-attr]
         assert _alive(pid)

@@ -30,6 +30,7 @@ import { DelegationPanel } from "./components/DelegationPanel";
 import { EgressPreview } from "./components/EgressPreview";
 import { GraphCard } from "./components/GraphCard";
 import { Inspector } from "./components/Inspector";
+import { KnowledgeGraph } from "./components/KnowledgeGraph";
 import { KnowledgeHealth } from "./components/KnowledgeHealth";
 import { MemoryView } from "./components/MemoryView";
 import { PipelineCard } from "./components/PipelineCard";
@@ -42,6 +43,45 @@ import { ToolCard } from "./components/ToolCard";
 import { ViewTabs } from "./components/ViewTabs";
 import type { Approval, GraphTask, ToolCall } from "./protocol";
 import type { Turn } from "./store";
+
+const graphData = {
+  built: true,
+  nodes: [
+    {
+      id: "notes/a.md",
+      collection: "notes",
+      project: null,
+      rel_path: "a.md",
+      kind: "markdown",
+      state: "placed",
+      degree: 1,
+      indexed_at: "2026-09-09T00:00:00Z",
+    },
+    {
+      id: "notes/b.md",
+      collection: "notes",
+      project: null,
+      rel_path: "b.md",
+      kind: "markdown",
+      state: "failed",
+      degree: 0,
+      indexed_at: "2026-09-09T00:00:00Z",
+    },
+  ],
+  x: [0, 1],
+  y: [0, 1],
+  placed: ["layout", "incremental"],
+  explicit_edges: [0, 1],
+  semantic_edges: [],
+  stats: {
+    documents: 2,
+    explicit_edges: 1,
+    semantic_edges: 0,
+    orphans: 0,
+    unplaced: 1,
+    edge_model: { k: 4, threshold: 0.85 },
+  },
+};
 
 /** Rules happy-dom cannot answer honestly, because it does not lay anything out. */
 const DISABLED = {
@@ -291,6 +331,14 @@ describe("no serious or critical accessibility violations", () => {
         onReindex={() => {}}
       />,
     );
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it("the knowledge graph", async () => {
+    // ADR-0023 permits canvas for this view *only* by owing a list equivalent, so the audit here
+    // is not a formality — it is the payment. The canvas itself carries `role="img"` and a label
+    // that says where the real content is; every document and every action lives in the list.
+    const { container } = render(<KnowledgeGraph data={graphData} onRelayout={() => {}} />);
     expect(await violations(container)).toEqual([]);
   });
 });

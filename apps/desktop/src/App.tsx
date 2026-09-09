@@ -22,6 +22,8 @@ import { ProjectList, toObservation, toProjects } from "./components/ProjectList
 import type { Observation, ProjectRow, ProjectsData } from "./components/ProjectList";
 import { MemoryView, toFacts } from "./components/MemoryView";
 import type { MemoryFact } from "./components/MemoryView";
+import { KnowledgeGraph } from "./components/KnowledgeGraph";
+import type { KnowledgeGraphData } from "./components/KnowledgeGraph";
 import { KnowledgeHealth, toHealth } from "./components/KnowledgeHealth";
 import type { KnowledgeHealthData } from "./components/KnowledgeHealth";
 import { TaskTree } from "./components/TaskTree";
@@ -53,7 +55,13 @@ type Selection = { kind: "turn" | "task"; id: string } | null;
 
 /** Ctrl+digit → stage, for the four primary views (docs/UI.md §16, corrected in place:
  *  Orbit takes a slot when it exists — it is P11-T2, gated on OQ-14). */
-const STAGE_KEYS: Record<string, Stage> = { "1": "chat", "2": "tasks", "3": "events", "4": "memory" };
+const STAGE_KEYS: Record<string, Stage> = {
+  "1": "chat",
+  "2": "tasks",
+  "3": "events",
+  "4": "memory",
+  "5": "graph",
+};
 
 const NO_PROJECTS: ProjectsData = { projects: [], candidates: [], projectsRoot: "" };
 
@@ -79,6 +87,8 @@ export default function App() {
   const [projectsRoot, setProjectsRoot] = useState("");
   const [facts, setFacts] = useState<MemoryFact[]>([]);
   const [health, setHealth] = useState<KnowledgeHealthData | null>(null);
+  const [graph, setGraph] = useState<KnowledgeGraphData | null>(null);
+  const [relayouting, setRelayouting] = useState(false);
   const clientRef = useRef<OracleClient | null>(null);
   const logEnd = useRef<HTMLDivElement>(null);
 
@@ -258,6 +268,37 @@ export default function App() {
     };
   }, [s.connection, knowledgeSeq]);
 
+  // The map is fetched lazily — only once the stage is actually looked at. At the corpus ceiling
+  // the payload is 10k nodes and ~32k edge indices, and paying for that on every connect to render
+  // a stage nobody opened is the fan-out mistake OQ-24 already measured on the sidebar.
+  useEffect(() => {
+    if (stage !== "graph") return;
+    let cancelled = false;
+    fetch("/api/v1/knowledge/graph")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: KnowledgeGraphData | null) => {
+        if (!cancelled && d) setGraph(d);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [stage, knowledgeSeq]);
+
+  const relayout = useCallback(() => {
+    // Synchronous and slow on purpose (~28 s measured): it moves every node, so the button holds
+    // its disabled state for exactly as long as the work runs rather than implying it is done.
+    setRelayouting(true);
+    fetch("/api/v1/knowledge/relayout", { method: "POST" })
+      .then(() => fetch("/api/v1/knowledge/graph"))
+      .then((r) => (r && r.ok ? r.json() : null))
+      .then((d: KnowledgeGraphData | null) => {
+        if (d) setGraph(d);
+      })
+      .catch(() => undefined)
+      .finally(() => setRelayouting(false));
+  }, []);
+
   const reindex = useCallback((full: boolean) => {
     // Through the API and therefore through the tool layer and the policy gate — the
     // UI computes nothing and executes nothing (docs/API.md, `POST /knowledge/reindex`).
@@ -394,7 +435,7 @@ export default function App() {
         e.preventDefault();
         halt();
       } else {
-        // Ctrl+1..4 → the four primary stages (UI.md §16). `!altKey` matters: AltGr
+        // Ctrl+1..5 → the primary stages (UI.md §16). `!altKey` matters: AltGr
         // arrives as Ctrl+Alt, and a layout where AltGr+digit types a character must
         // not lose the character to a stage switch.
         const to =
@@ -573,6 +614,16 @@ export default function App() {
               />
             ) : (
               <p className="muted">Reading the index…</p>
+            )
+          ) : stage === "graph" ? (
+            graph ? (
+              <KnowledgeGraph
+                data={graph}
+                relayouting={relayouting}
+                onRelayout={relayout}
+              />
+            ) : (
+              <p className="muted">Reading the map…</p>
             )
           ) : stage === "events" ? (
             <Timeline

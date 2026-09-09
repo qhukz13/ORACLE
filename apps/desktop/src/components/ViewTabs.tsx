@@ -19,7 +19,7 @@
 
 import { useRef } from "react";
 
-export type Stage = "chat" | "tasks" | "events" | "memory" | "briefing" | "knowledge";
+export type Stage = "chat" | "tasks" | "events" | "memory" | "briefing" | "knowledge" | "graph";
 
 export interface StageDef {
   id: Stage;
@@ -29,7 +29,8 @@ export interface StageDef {
   hotkey?: string;
 }
 
-/** Order is layout order AND hotkey order: Ctrl+1..4 are the first four. */
+/** Order is layout order AND hotkey order: Ctrl+1..4 are the first four; the map is Ctrl+5
+ *  (UI.md §2's stage list), which is why its digit does not follow its position. */
 export const STAGES: readonly StageDef[] = [
   { id: "chat", label: "Chat", title: "the conversation", hotkey: "1" },
   { id: "tasks", label: "Tasks", title: "task graphs, workers and their evidence", hotkey: "2" },
@@ -37,6 +38,7 @@ export const STAGES: readonly StageDef[] = [
   { id: "memory", label: "Memory", title: "what ORACLE has recorded, and why", hotkey: "4" },
   { id: "briefing", label: "Briefing", title: "what happened while you were away" },
   { id: "knowledge", label: "Knowledge", title: "index health" },
+  { id: "graph", label: "Map", title: "the knowledge graph", hotkey: "5" },
 ];
 
 export interface ViewTabsProps {

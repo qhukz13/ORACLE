@@ -317,7 +317,13 @@ def build(
         )
 
     orphans = [n for n in nodes if n.degree == 0 and n.state == "placed"]
-    stale = [n for n in nodes if n.id not in positions]
+    # Only documents that *can* be placed count as unplaced. Measured on the real corpus
+    # 2026-09-09: 106 of 1,561 documents are config, which has no vector by policy and therefore
+    # no position, ever. Counting those would have put a permanent "106 documents have no settled
+    # position — Re-layout" banner in the view, offering a 30-second action that cannot change the
+    # number. A prompt that can never be satisfied is worse than no prompt: it trains the reader to
+    # ignore the one that matters.
+    stale = [n for n in nodes if n.state == "placed" and n.id not in positions]
     return KnowledgeGraph(
         nodes=nodes,
         explicit_edges=explicit,
@@ -347,10 +353,18 @@ def relayout(
     **This is an explicit action, never a side effect of indexing.** It destroys spatial memory —
     every position may move — and OQ-22 measurement 4 says fidelity degrades as documents are added
     incrementally (Jaccard@10 0.477 at a 5% holdout against a 0.70 gate), so a re-layout must be
-    *offered* on that evidence rather than buried in a background job. It costs 28 s, which is cheap
-    enough to offer and far too visible to hide.
+    *offered* on that evidence rather than buried in a background job.
+
+    **Timings, measured on the real corpus 2026-09-09** (1,455 embeddable documents, 3,737 edges):
+    the layout itself is **34 s**, and the caller is told that separately from the one-time
+    `backfill_document_vectors()` cost, which was **88 s** on an index built before that table
+    existed. The first re-layout after upgrading is therefore ~2 minutes and every later one is
+    ~34 s — so the two are reported as separate numbers rather than as one total that would make
+    the steady-state cost look four times worse than it is.
     """
-    store.backfill_document_vectors()
+    backfill_started = time.perf_counter()
+    backfilled = store.backfill_document_vectors()
+    backfill_seconds = time.perf_counter() - backfill_started
     documents = store.graph_documents()
     explicit_pairs, _ = resolve_wikilinks(documents, store.wikilinks())
     vec_ids, vecs = store.document_vectors()
@@ -378,6 +392,8 @@ def relayout(
         "edges": len(edges),
         "iterations": iterations,
         "seconds": round(elapsed, 3),
+        "backfilled": backfilled,
+        "backfill_seconds": round(backfill_seconds, 3),
     }
 
 

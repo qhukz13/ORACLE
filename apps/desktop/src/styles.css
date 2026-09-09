@@ -629,3 +629,184 @@ button.tt-id:hover { text-decoration: underline; border: none; }
 .gs-group { list-style: none; margin: 0; padding: 0; }
 .gs-head { font-size: 10px; letter-spacing: .1em; padding: 8px 11px 2px; cursor: default; }
 .gs-note { margin: 0; padding: 8px 15px; border-top: 1px solid var(--line); font-size: 11px; }
+
+/* ---------------------------------------------------------------- knowledge graph
+   docs/UI.md §11b. The canvas fills its pane and the list sits beside it at a fixed
+   width — the list is the accessible equivalent ADR-0023 owes, not an overflow panel,
+   so it does not collapse away when the window narrows. */
+/* The stage panel is a plain block shared by every view, so it has no definite height and
+   `height: 100%` on a child resolves to `auto`. Measured before this rule existed: the 400-row
+   list drove the panel to 11,662 px and the canvas was sized 166x11280 — a tall thin strip, off
+   screen, and a 1.9-megapixel backing store for it. Every test still passed, because none of them
+   lay anything out. Scoped with `:has()` so no other stage's scrolling changes. */
+.stage > #stage-panel:has(> .kgraph) {
+  height: 100%;
+}
+.kgraph {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: 8px;
+}
+.kgraph-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.kgraph-stats {
+  color: var(--fg-1);
+  font-size: 12px;
+}
+.kgraph-stats strong {
+  color: var(--fg-0);
+  font-weight: 600;
+}
+/* Wraps and shrinks. A non-wrapping row of four filter buttons plus a search box measured
+   554 px against a 523 px stage, which put a horizontal scrollbar under the whole view — the
+   one thing a pane containing a pannable map must never have, because the reader cannot tell
+   which surface their trackpad is about to move. */
+.kgraph-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+.kgraph-controls input[type="search"] {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--fg-0);
+  font: inherit;
+  padding: 4px 8px;
+  min-width: 0;
+  flex: 1 1 8ch;
+}
+.kgraph-controls .ghost.on {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+.kgraph-stale {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--st-wait);
+  border-radius: 5px;
+  background: var(--bg-1);
+  font-size: 12px;
+}
+.kgraph-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+}
+.kgraph-canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg-0);
+  cursor: grab;
+  touch-action: none;
+}
+.kgraph-canvas:active {
+  cursor: grabbing;
+}
+.kgraph-tip {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 3px 7px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--fg-0);
+  pointer-events: none;
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kgraph-list {
+  width: clamp(180px, 34%, 300px);
+  flex: none;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-1);
+  padding: 6px;
+}
+.kgraph-count {
+  margin: 0 0 6px;
+  font-size: 11px;
+}
+.kgraph-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.kgraph-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.kgraph-item:hover {
+  background: var(--bg-2);
+}
+.kgraph-item.sel {
+  background: var(--bg-3);
+  border-color: var(--line);
+}
+.kgraph-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.kgraph-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kgraph-item .muted {
+  font-size: 11px;
+  flex: none;
+}
+.kgraph-sel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg-1);
+  font-size: 12px;
+}
+.kgraph-sel strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kgraph-sel .muted {
+  flex: 1;
+}

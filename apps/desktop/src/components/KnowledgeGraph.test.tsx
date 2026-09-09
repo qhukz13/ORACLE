@@ -1,0 +1,178 @@
+/**
+ * The knowledge graph view.
+ *
+ * happy-dom has no canvas and no layout engine, so what is testable here is deliberately not
+ * "does it draw" — it is everything the drawing depends on and everything a person can reach
+ * without a mouse. Those are also the parts that can be wrong while the picture still looks fine:
+ * a list that silently omits documents, a stale map that never says it is stale, a "reach" answer
+ * computed off the wrong edge set.
+ */
+
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { KnowledgeGraph } from "./KnowledgeGraph";
+import type { KnowledgeGraphData } from "./KnowledgeGraph";
+
+function node(
+  id: string,
+  over: Partial<KnowledgeGraphData["nodes"][number]> = {},
+): KnowledgeGraphData["nodes"][number] {
+  return {
+    id,
+    collection: "notes",
+    project: null,
+    rel_path: id,
+    kind: "markdown",
+    state: "placed",
+    degree: 1,
+    indexed_at: "2026-09-09T00:00:00Z",
+    ...over,
+  };
+}
+
+function data(over: Partial<KnowledgeGraphData> = {}): KnowledgeGraphData {
+  return {
+    built: true,
+    nodes: [node("a.md"), node("b.md"), node("c.md", { degree: 0 })],
+    x: [0, 1, 2],
+    y: [0, 1, 2],
+    placed: ["layout", "layout", "layout"],
+    explicit_edges: [0, 1],
+    semantic_edges: [],
+    stats: {
+      documents: 3,
+      explicit_edges: 1,
+      semantic_edges: 0,
+      orphans: 1,
+      unplaced: 0,
+      edge_model: { k: 4, threshold: 0.85 },
+    },
+    ...over,
+  };
+}
+
+describe("KnowledgeGraph", () => {
+  it("says so rather than drawing an empty map when there is no index", () => {
+    render(<KnowledgeGraph data={{ ...data(), built: false }} />);
+    expect(screen.getByText(/No knowledge index yet/)).toBeTruthy();
+  });
+
+  it("lists every document beside the canvas, because the list is the equivalent", () => {
+    render(<KnowledgeGraph data={data()} />);
+    for (const name of ["a.md", "b.md", "c.md"]) {
+      expect(screen.getByTitle(name)).toBeTruthy();
+    }
+  });
+
+  it("gives the canvas a label that points at the list rather than announcing 'canvas'", () => {
+    render(<KnowledgeGraph data={data()} />);
+    const img = screen.getByRole("img");
+    expect(img.getAttribute("aria-label")).toContain("3 documents");
+    expect(img.getAttribute("aria-label")).toContain("list beside it");
+  });
+
+  it("the orphan filter finds the document connected to nothing", () => {
+    render(<KnowledgeGraph data={data()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Orphans" }));
+    expect(screen.queryByTitle("a.md")).toBeNull();
+    expect(screen.getByTitle("c.md")).toBeTruthy();
+  });
+
+  it("counts an unembeddable document as neither orphan nor failure in the list", () => {
+    /* Config has no vector by policy. Listing it under "orphans" would give the neglect
+       question a permanent floor of things that are not actually neglected. */
+    render(
+      <KnowledgeGraph
+        data={data({
+          nodes: [node("a.md"), node("tsconfig.json", { degree: 0, state: "unembeddable" })],
+          x: [0, 1],
+          y: [0, 1],
+          placed: ["layout", "layout"],
+          explicit_edges: [],
+          semantic_edges: [],
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Orphans" }));
+    expect(screen.queryByTitle("tsconfig.json")).toBeNull();
+  });
+
+  it("offers a re-layout only when the map has actually drifted, and says what it costs", () => {
+    /* OQ-22 measurement 4: incremental placement is stable but loses fidelity, so the fix is
+       prompted rather than buried — and never nagged when there is nothing to fix. */
+    const { rerender } = render(<KnowledgeGraph data={data()} />);
+    expect(screen.queryByRole("button", { name: /Re-layout/ })).toBeNull();
+
+    rerender(
+      <KnowledgeGraph data={data({ stats: { ...data().stats, unplaced: 4 } })} />,
+    );
+    expect(screen.getByRole("button", { name: "Re-layout" })).toBeTruthy();
+    expect(screen.getByText(/moves everything/)).toBeTruthy();
+  });
+
+  it("holds the re-layout button disabled while the 28-second pass runs", () => {
+    const onRelayout = vi.fn();
+    render(
+      <KnowledgeGraph
+        data={data({ stats: { ...data().stats, unplaced: 4 } })}
+        relayouting
+        onRelayout={onRelayout}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Re-laying out…" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button);
+    expect(onRelayout).not.toHaveBeenCalled();
+  });
+
+  it("selecting from the list reports the two-hop neighbourhood — the reach question", () => {
+    render(
+      <KnowledgeGraph
+        data={data({
+          nodes: [node("a.md"), node("b.md"), node("c.md")],
+          explicit_edges: [0, 1, 1, 2],
+          stats: { ...data().stats, explicit_edges: 2 },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByTitle("a.md"));
+    // a—b—c: one direct neighbour, one at two hops. Getting this off the wrong edge set is
+    // invisible in the picture and wrong in the answer.
+    expect(screen.getByText(/1 direct, 1 at two hops/)).toBeTruthy();
+  });
+
+  it("the path filter narrows the list", () => {
+    render(<KnowledgeGraph data={data()} />);
+    fireEvent.change(screen.getByLabelText("Filter documents by path"), {
+      target: { value: "b.md" },
+    });
+    expect(screen.getByTitle("b.md")).toBeTruthy();
+    expect(screen.queryByTitle("a.md")).toBeNull();
+  });
+
+  it("every action in the footer is reachable as a real button", () => {
+    const onOpen = vi.fn();
+    render(<KnowledgeGraph data={data()} onOpen={onOpen} />);
+    fireEvent.click(screen.getByTitle("a.md"));
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ rel_path: "a.md" }));
+  });
+
+  it("caps the rendered list and says how much it is hiding rather than truncating silently", () => {
+    const many = Array.from({ length: 450 }, (_, i) => node(`doc${i}.md`));
+    render(
+      <KnowledgeGraph
+        data={data({
+          nodes: many,
+          x: many.map(() => 0),
+          y: many.map(() => 0),
+          placed: many.map(() => "layout"),
+          explicit_edges: [],
+          semantic_edges: [],
+          stats: { ...data().stats, documents: 450 },
+        })}
+      />,
+    );
+    expect(screen.getByText(/50 more — narrow the filter/)).toBeTruthy();
+  });
+});

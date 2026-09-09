@@ -311,6 +311,38 @@ def test_build_reports_unplaced_documents_rather_than_laying_them_out(
     assert graph.stats["unplaced"] == 1
 
 
+def test_a_document_that_can_never_be_placed_is_not_counted_as_unplaced(
+    store: KnowledgeStore,
+) -> None:
+    """Config has no vector by policy, so it has no position — ever.
+
+    Counting it as unplaced puts a permanent "N documents have no settled position — Re-layout"
+    banner in the view, offering a 30-second action that cannot change the number. Measured on the
+    real corpus 2026-09-09: 106 of 1,561 documents, every one of them config. A prompt that can
+    never be satisfied trains the reader to ignore the one that matters.
+    """
+    put(store, document("a.md"), ["x"], [[1.0, 0, 0, 0]])
+    put(store, document("tsconfig.json", kind=ContentKind.CONFIG), ["{}"], None)
+    relayout(store, iterations=10)
+
+    graph = build(store)
+    assert graph.stats["unplaced"] == 0
+    assert {n.state for n in graph.nodes} == {"placed", "unembeddable"}
+
+
+def test_relayout_reports_the_backfill_separately_from_the_layout(store: KnowledgeStore) -> None:
+    """One total would make the steady-state cost look four times worse than it is: the backfill
+    is a one-time 88 s on an index built before the table existed, the layout is 34 s every time."""
+    put(store, document("a.md"), ["x"], [[1.0, 0, 0, 0]])
+    store.db.execute("DELETE FROM document_vectors")
+    store.db.commit()
+
+    result = relayout(store, iterations=10)
+    assert result["backfilled"] == 1
+    assert "backfill_seconds" in result
+    assert result["seconds"] >= 0
+
+
 def test_build_on_an_empty_index_is_an_empty_graph(store: KnowledgeStore) -> None:
     graph = build(store)
     assert graph.nodes == []
