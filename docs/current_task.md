@@ -66,6 +66,11 @@ verified against the real corpus at 1,564 documents / 3,465 edges.
   2026-08-26 baseline, so **this run's absolute numbers are not comparable to the earlier ones.**
   OQ-18's actual question is a *within-run* comparison of arms, which corpus drift does not
   invalidate — but do not quote the new recall figures against the old ones.
+  ⚠ **A 2026-09-09 20:00 "hang" was a misdiagnosis** — 0% CPU samples, 71 threads in Wait and a
+  py-spy stack inside `session.run()` were all real, but the pass was merely running at
+  **0.20 chunks/s against 2.52**, because two full `check.py` runs were executing in the same
+  window. `Win32_Processor` `LoadPercentage` is a stale counter and was trusted over the eval's own
+  progress line. A stack in native code proves where a thread *is*, not that it is stuck.
   ⚠ **Do not run the test suite while it runs** — the eval measures `chunks_per_s` and query
   latency, and concurrent work both slows it and corrupts those numbers. **Repo edits are worse than
   slow:** ORACLE indexes itself, so any edit moves the corpus fingerprint and a retry after an edit

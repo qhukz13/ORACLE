@@ -69,3 +69,4 @@
 
 [34mbge-m3[0m (1024d, cls pooling)
 [33m  no saved vectors at D:/ORACLE/scratch/oq18-vectors-bge-m3.npz; embedding from scratch[0m
+[2m  256/18679 chunks  0.20 chunks/s  elapsed 1297s  eta 93341s[0m
