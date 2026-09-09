@@ -17,3 +17,14 @@
 [2m    saved c2682739164f00e6…  wanted 862307e5901c6c25…[0m
 [2m  256/16717 chunks  2.52 chunks/s  elapsed 101s  eta 6525s[0m
 === finished Sat 08/29/2026  4:05:22.18 with exit code 1073807364 === 
+ 
+=== OQ-18 corpus run, attempt started Wed 09/09/2026 19:22:59.06 === 
+[34mcorpus[0m
+[2m  skipped: {'type': 918, 'deny': 2, 'untracked': 10, 'exclude': 5, 'unreadable': 1}[0m
+  1736 docs {'projects': 1540, 'notes': 196} {'markdown': 637, 'config': 182, 'code': 905, 'text': 12}
+  27920 chunks (18636 semantic, 9284 lexical-only) in 43.6s
+  chars/chunk: mean 999 p50 1151 p95 1200 max 1303
+[34mtranslations[0m  qwen3.5:0.8b: 20 of 25 usable, 5 failed
+[31m  fixtures whose expected source is not in the corpus: ['en-relay-secret-rotation'][0m
+
+[34mlexical index[0m

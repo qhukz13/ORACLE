@@ -752,12 +752,19 @@ def load_vectors(path: str, fingerprint: str) -> tuple[np.ndarray, bool] | None:
 
 
 def keep_system_awake() -> None:
-    """Tell Windows the machine is busy while this measurement runs.
+    """Ask Windows not to *idle*-sleep while this measurement runs.
 
-    The 2026-08-28 corpus run lost twelve hours to the machine sleeping mid-pass
-    (Kernel-Power 42 at 01:44, wake at 13:37) — a scheduled task does not keep the
-    system awake on its own. ES_SYSTEM_REQUIRED does, for the life of this process;
-    the display may still sleep. No-op off Windows.
+    **This is not what keeps the run alive, and believing it was cost two sessions.**
+    `SetThreadExecutionState` suppresses the idle timeout and nothing else; it cannot veto another
+    process calling `SetSuspendState`. On this machine the idle timeout is already disabled
+    (`STANDBYIDLE` on AC = 0) and 21 of the last 21 sleeps were `Sleep Reason: Application API` —
+    an explicit suspend from some other program — so this call has never once been the thing
+    standing between a run and a sleep. See
+    `logs/development/2026-09-09-oq18-the-wrong-thing-hardened-twice.md`.
+
+    Kept because it is cheap, it is the right call for the idle case, and this machine's power
+    configuration is not a constant. What actually makes the run survive is the checkpoint plus a
+    scheduled task that re-fires it (`scripts/run_oq18_eval.cmd`). No-op off Windows.
     """
     if sys.platform == "win32":
         import ctypes

@@ -56,12 +56,24 @@ at every k and every threshold.
   go/no-go), the execution tree's acceptance criteria, `TaskTree`'s fixture, and the sidebar
   counters. Start the daemon and UI, type `continue ORACLE` in the command bar, approve the T3
   `confirm_strong` card. `oracle-selfcheck` is the cheaper first fill — local, no egress, ~5 min.
-- **OQ-18 never ran.** The 04:00 2026-08-29 attempt died at 04:05 after 256 of 16,717 chunks —
-  exit `1073807364` (`DBG_TERMINATE_PROCESS`); the machine went back to sleep despite `WakeToRun`.
-  The task is still registered and has not fired since. Diagnose the sleep before re-firing, or it
-  stops again; treat it as a cold ~2.5–3 h run. On collection, the 2026-08-28 answer-key correction
-  still applies: **38/38 queries carry an answer-key chunk in their top-12 lexical candidates**, and
-  the old "0/38" diagnostic was broken from birth.
+- **OQ-18 is running (started 2026-09-09 19:22), and the cause of three failed runs is now
+  diagnosed.** It was never the idle timer: `STANDBYIDLE` on AC is already `0` (Never), and **21 of
+  the last 21 sleeps on this machine are `Sleep Reason: Application API`** — some other process
+  explicitly calls `SetSuspendState`, which `SetThreadExecutionState` cannot veto. The 2026-08-28
+  `keep_system_awake()` hardening was aimed at a timer that was already disabled, which is why two
+  sessions read the next death as "the guard did not hold".
+  [Dev log](../logs/development/2026-09-09-oq18-the-wrong-thing-hardened-twice.md).
+  **The fix is to survive the sleep, not prevent it:** the task now repeats every 30 min for 24 h,
+  each firing resumes from the last 256-chunk checkpoint, `StopOnIdleEnd` is off, and the wrapper
+  exits immediately once `oq18-translated.json` exists. The log **appends** now — truncating it on
+  every attempt is what hid the evidence for three runs.
+  **On collection:** compose `dense_mt` against `dense_xl`, confirm or flip `Settings.translate_queries`,
+  decide `en-relay-dockerfile`, resolve [OQ-18](OPEN_QUESTIONS.md#oq-18), then
+  `Unregister-ScheduledTask -TaskName ORACLE-OQ18-eval`. The 2026-08-28 answer-key correction still
+  applies: **38/38 queries carry an answer-key chunk in their top-12 lexical candidates**, and the
+  old "0/38" diagnostic was broken from birth.
+  ⚠ **Heavy CPU work skews it** — the eval measures `chunks_per_s` and query latency, so avoid
+  running the test suite against it.
 - **Global search misses its budget, measured for the first time on 2026-09-09**: warm 504–1,467 ms
   against **p95 < 300 ms**, cold 7,932 ms. The previous session could not measure it (`know.*` was
   refusing). Wants its own task — profile before optimising; the cold number smells like model load.
