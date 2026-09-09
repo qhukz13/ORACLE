@@ -590,6 +590,24 @@ function render(): void {
   copyButton.disabled = false;
 }
 
+/**
+ * Hand the result to the dev server, which writes it to `logs/measurements/oq22-render.json`.
+ * A failure here is reported, never swallowed: a run whose numbers were not recorded is a run that
+ * has to happen again, and silently pretending otherwise wastes the only expensive part.
+ */
+async function save(r: Report): Promise<string | null> {
+  try {
+    const res = await fetch("/bench-result", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(r),
+    });
+    return res.ok ? await res.text() : null;
+  } catch {
+    return null;
+  }
+}
+
 async function run(kinds: string[]): Promise<void> {
   const buttons = [...document.querySelectorAll("button")];
   buttons.forEach((b) => (b.disabled = true));
@@ -619,7 +637,8 @@ async function run(kinds: string[]): Promise<void> {
       runs,
     };
     render();
-    say("done");
+    const where = await save(report);
+    say(where ? `done — written to ${where}` : "done (result not saved; dev sink unavailable)");
   } catch (err) {
     say(`failed: ${err instanceof Error ? err.message : String(err)}`);
     throw err;
@@ -653,6 +672,13 @@ async function mountIdle(kind: string): Promise<string> {
   r.draw(cameraAt(0, ctx.bbox));
   const at = new Date().toISOString();
   say(`${kind} mounted, idle since ${at}`);
+  // The beacon is the whole point of the idle mode: it is what separates "1,420 nodes sitting
+  // still" from "a page that never loaded" in a CPU sample, and both look identical from outside.
+  await fetch("/bench-idle", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind, mounted_at: at, elements: r.elements, scene: ctx.scene.json.counts }),
+  }).catch(() => undefined);
   return at;
 }
 
@@ -665,9 +691,24 @@ Object.assign(window, {
   },
 });
 
+/**
+ * `?autorun=1` runs the whole suite on load and records it. This is the only way the Tauri shell —
+ * the WebView2 window ADR-0023 is actually about — can be measured: nothing can drive that window,
+ * so it has to measure itself and post the answer.
+ */
+const PARAMS = new URLSearchParams(location.search);
+const AUTORUN = PARAMS.get("autorun");
+/** `&idle=canvas` leaves that renderer mounted and still after the run, for the CPU sampler. */
+const IDLE = PARAMS.get("idle");
+
 void loadScene()
-  .then((c) => {
+  .then(async (c) => {
     ctx = c;
-    say("ready — run it at a real window, not a headless one");
+    if (AUTORUN) {
+      const kinds = AUTORUN === "1" ? ["canvas", "svg-group", "svg-constant"] : AUTORUN.split(",");
+      await run(kinds);
+    }
+    if (IDLE) await mountIdle(IDLE);
+    if (!AUTORUN && !IDLE) say("ready — run it at a real window, not a headless one");
   })
-  .catch((err: unknown) => say(`scene failed to load: ${String(err)}`));
+  .catch((err: unknown) => say(`failed: ${String(err)}`));

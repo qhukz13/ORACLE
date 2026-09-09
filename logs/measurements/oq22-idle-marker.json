@@ -1,0 +1,10 @@
+{
+  "kind": "canvas",
+  "mounted_at": "2026-09-09T12:48:32.147Z",
+  "elements": 1,
+  "scene": {
+    "nodes": 1420,
+    "edges": 3103,
+    "explicit": 1172
+  }
+}

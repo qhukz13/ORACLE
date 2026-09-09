@@ -1,0 +1,74 @@
+{
+  "measurement": "OQ-22 #2 — canvas vs SVG",
+  "when": "2026-09-09T12:45:52.718Z",
+  "agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0",
+  "dpr": 1,
+  "viewport": {
+    "w": 860,
+    "h": 820
+  },
+  "scene": {
+    "nodes": 1420,
+    "edges": 3103,
+    "explicit": 1172
+  },
+  "fingerprint": "e342f8a55a6ce17db236a356552cc5ad83e1953dab5a2dbe4b13402e89f6a38e",
+  "vsync_ms": 6.1,
+  "animate_ms": 6000,
+  "runs": [
+    {
+      "kind": "canvas",
+      "build_ms": 0.4,
+      "first_paint_ms": 10.9,
+      "elements": 1,
+      "animate": {
+        "frames": 916,
+        "fps_median": 163.9,
+        "ms_p50": 6.1,
+        "ms_p95": 12,
+        "ms_p99": 12.4,
+        "ms_worst": 60.8,
+        "over_vsync": 60,
+        "janky": 1
+      },
+      "pick_p50_ms": 0,
+      "pick_p95_ms": 0.1
+    },
+    {
+      "kind": "svg-group",
+      "build_ms": 39.2,
+      "first_paint_ms": 47.1,
+      "elements": 4523,
+      "animate": {
+        "frames": 207,
+        "fps_median": 33.1,
+        "ms_p50": 30.2,
+        "ms_p95": 36.7,
+        "ms_p99": 42.5,
+        "ms_worst": 48.5,
+        "over_vsync": 205,
+        "janky": 35
+      },
+      "pick_p50_ms": 0.9,
+      "pick_p95_ms": 1.1
+    },
+    {
+      "kind": "svg-constant",
+      "build_ms": 32.9,
+      "first_paint_ms": 48.8,
+      "elements": 4523,
+      "animate": {
+        "frames": 199,
+        "fps_median": 33,
+        "ms_p50": 30.3,
+        "ms_p95": 42.3,
+        "ms_p99": 48.4,
+        "ms_worst": 60.6,
+        "over_vsync": 199,
+        "janky": 49
+      },
+      "pick_p50_ms": 0.9,
+      "pick_p95_ms": 1.2
+    }
+  ]
+}

@@ -666,7 +666,7 @@ between a graph and a scatter of dots.
 |---|---|---|
 | **Node = document** | `knowledge.db` documents (~1,330 today; design ceiling 10k) | colour = **collection** (each vault/project/doc-set gets a stable token-derived hue) · size = link degree · opacity = staleness (same semantics as the orbit) |
 | **Explicit edge** | the `links` table (`[[wikilinks]]`, already extracted at index time) | solid, dim by default |
-| **Semantic edge** | k-nearest-neighbour over document embeddings, thresholded, capped per node — computed offline with the index, never live | fainter, dashed; **off by default**, a toggle — inferred similarity is a suggestion, and drawing it like a fact would lie |
+| **Semantic edge** | k-nearest-neighbour over document embeddings, thresholded, capped per node — computed offline with the index, never live | fainter, dashed; **on by default** at k=4 / thr=0.85, with the knob exposed over the useful 0.80–0.90 band (`MEASURED 2026-08-26`, see above — off by default is a scatter of dots on this corpus). Inferred similarity is still a suggestion: that is discharged by the *encoding*, not by absence |
 | **Retrieval edge** | episodic: documents co-cited in one answer (event log) | appears only in trace mode, below |
 | **Collection hull** | derived | a barely-visible tinted region behind each cluster, so colour is not the only carrier (accessibility rule) |
 
@@ -675,6 +675,31 @@ reference images' peripheral ring, kept because it *is* the honest rendering of 
 Finding them is question 2; hiding them would delete the answer. Documents that **failed to
 index** appear hollow with an error affordance; collections that are registered but unindexed
 appear as a single ghosted hull with a "index this" action. No decorative nodes, ever.
+
+### Rendering — canvas, and what it costs  `MEASURED 2026-09-09`
+
+[OQ-22](OPEN_QUESTIONS.md#oq-22)'s last open measurement ran in the Tauri/WebView2 shell at the real
+scene (1,420 nodes, 3,103 edges), and
+[ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered) is
+**confirmed**. The numbers the view must hold, and the ones it inherits:
+
+| | canvas | SVG control |
+|---|---|---|
+| frame p50 | **6.1 ms** — the display's vsync interval exactly | 12.2 ms — exactly twice it |
+| frames over budget | 2.6% | 96% |
+| first paint from frozen positions | 10.1 ms | 24–26 ms |
+| idle CPU | **1.09% of one core** | — |
+| hit test | **0.0 ms** (linear scan, 1,420 nodes) | 0.4 ms (`elementFromPoint`) |
+
+Two consequences for this section specifically:
+
+- **Constant-size nodes are free.** Keeping node radius fixed on screen at every zoom — which the
+  view needs, or nodes stop being clickable when zoomed out — was measured against the cheaper
+  scaling alternative and cost *nothing*. Specify it, do not budget for it.
+- **The hit-testing worry was misplaced; the accessibility one was not.** Canvas picking is faster
+  than the DOM's, so no spatial index is needed at this corpus size. The **list-view equivalent and
+  the DOM overlays for everything focusable are still owed in full** — that debt is unchanged and is
+  the price of this section shipping on canvas.
 
 ### Layout — simulated, then frozen
 

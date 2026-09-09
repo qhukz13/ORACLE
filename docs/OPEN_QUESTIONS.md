@@ -33,7 +33,7 @@ doc, delete the marker.
 | [OQ-19](#oq-19) | Should the Claude integration move to the Claude Agent SDK? | `TO VERIFY` (on trigger) | none — trigger-based | open |
 | [OQ-20](#oq-20) | Can `agy --json-schema` reliably return a valid ExecutionPlan? | measured 2026-08-24 | P6-T5 / Phase 8 | **answered NO — 75% vs a 90% gate; the ladder promoted Claude** |
 | [OQ-21](#oq-21) | When does ORACLE's MCP server need the 2026-07-28 spec? | `UNKNOWN` | none — watch item | monitoring |
-| [OQ-22](#oq-22) | Does the knowledge graph hold its budgets at corpus scale? | measured 2026-08-26 | Phase 11 (graph view only) | **3 of 4 answered — build it, narrower; canvas-vs-SVG still needs a real window** |
+| [OQ-22](#oq-22) | Does the knowledge graph hold its budgets at corpus scale? | **resolved 2026-09-09** | Phase 11 (graph view only) | **All four answered. Build it on canvas, narrower — SVG runs at exactly half the panel's rate; ADR-0023 confirmed** |
 | [OQ-23](#oq-23) | Does a failure-carrying prompt produce a *different* plan? | `EXPERIMENT NEEDED` | nothing — replanning ships bounded | opened 2026-08-25 |
 | [OQ-24](#oq-24) | Does observing every project fit the glance budget? | **RESOLVED 2026-08-28** — no: 1.7–2.7 s warm for 8 rows; the sidebar observes lazily, per selected row | — | measured by `scripts/measure_observation.py` |
 | [OQ-25](#oq-25) | Did adding the `continue` label move intent accuracy? | **RESOLVED 2026-08-28** — 97.1% at eleven labels (was 93.3% at ten); the slot fails only for the name `ORACLE`, which the deterministic fallback carries | — | eval re-run with 4 `continue` cases |
@@ -742,7 +742,8 @@ current surface works and the SDK costs 24 packages in the trusted base (measure
 
 ### OQ-22
 **Does the knowledge-graph view hold its layout, rendering and quality budgets at corpus scale?**
-`EXPERIMENT NEEDED` · blocks the Phase 11 graph view (nothing else); design in
+**RESOLVED 2026-09-09** — all four measurements taken; the view is unblocked and builds on canvas.
+Design in
 [UI.md §11b](UI.md#11b-the-knowledge-graph--phase-11), decision in
 [ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered)
 
@@ -782,7 +783,46 @@ count and the node count is what the rendering question is asked at.
 | **1b · the real cost** | Reading 13,771 vectors out of `vec0` is **51.8 s**; pooling and the full kNN together are **0.2 s**. The arithmetic is 0.2% of the work. **`document_vectors` is a required table**, written by `store.put()` — otherwise incremental indexing spends 52 s against a `< 5 s` budget and it gets misdiagnosed as slow layout. |
 | **1c · the ceiling** | Clean O(N²): 500/1k/2k/4k → 3.4/13.8/55.4/200.7 s projected. Extrapolated to ADR-0023's 10k ceiling: ~21 min, ~800 MB — inside the time gate, **outside the 500 MB one**. The current corpus does not need Barnes-Hut; a 7x larger one would. |
 | **4 · stability** | **Reframed as a holdout**, because "after a week of real edits" is unanswerable inside a phase. Jaccard@10 against a full re-layout: **0.477 / 0.410 / 0.336** at 5 / 10 / 20% holdout, against a self-imposed 0.70 gate — **missed**. Positions remain *stable* (nothing moves on its own, per ADR-0023); what degrades is *fidelity*. So re-layout must be prompted after a few percent growth, not buried — and at 28 s it is cheap. |
-| **2 · canvas vs SVG** | **Not answered.** It needs rAF deltas from a compositing window on this GPU inside WebView2, and the spike ran without one. Frozen positions are in `oq22-graph.positions.npz` so the harness has its input. At 1,420 nodes / 3,103 edges the scene is unremarkable for SVG, and OQ-22 asks for that control precisely to keep ADR-0023 honest — so **[ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered) is UNCONFIRMED** until somebody runs it. |
+| **2 · canvas vs SVG** | **Answered 2026-09-09 — see below.** |
+
+#### Measured  `2026-09-09, measurement 2`
+
+`apps/desktop/bench/graph-render.html` in the **Tauri/WebView2 shell**,
+[dev log](../logs/development/2026-09-09-oq22-canvas-vs-svg.md), data in
+`logs/measurements/oq22-render.json`. Same scene, rebuilt from the frozen artifacts: 1,420 nodes,
+3,103 edges. **Display measured at 163.9 Hz**, not assumed at 60.
+
+| renderer | fps | p50 | p95 | worst | over budget | first paint | pick p50 |
+|---|---|---|---|---|---|---|---|
+| **canvas** | **163.9** | **6.1** | 6.2 | 145.5 | **2.6%** | 10.1 ms | **0.0 ms** |
+| svg-group | 82.0 | 12.2 | 18.3 | 90.9 | 96% | 26.5 ms | 0.4 ms |
+| svg-constant | 82.0 | 12.2 | 18.3 | 30.3 | 97% | 24.0 ms | 0.3 ms |
+
+Idle CPU, canvas mounted over the shell and its six WebView2 children: **1.09% of one core** (0.046%
+of the machine) — gate < 5%, passed.
+
+**[ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered)
+is CONFIRMED — and the gate this question wrote is not what confirms it.** Against the literal
+criteria (60 fps, idle < 5%, first paint < 1 s) *every* renderer passes; SVG turns in 82 fps. What
+separates them only appears against the measured refresh rate: canvas sits at p50 **6.1 ms, the
+vsync interval exactly** — never the bottleneck — while SVG sits at **12.2 ms, exactly twice it**,
+the signature of missing the budget and dropping to every second refresh. On a 60 Hz panel SVG would
+pass on merit and the canvas complexity would be unjustified at this node count, which is what this
+question suspected. This machine has a 164 Hz panel, so "60 fps" and "smooth" are no longer the same
+requirement. The ceiling argument is the stronger one and is untouched: at the 10k-document ceiling
+the SVG scene is ~32,000 elements against today's 4,523.
+
+**Two results that contradict the pre-run reasoning.** (a) The two SVG variants are **identical**
+(12.2 / 18.3 both) — the cost is compositing 4,523 elements, not the 1,420 per-frame attribute
+writes, so constant-size nodes are free and there is no SVG optimisation left to take. (b) Canvas
+hit-testing, written as a naive O(n) scan to keep its cost visible, is **4–9× faster** than
+`elementFromPoint`. ADR-0023's accessibility debt for canvas stands in full; its implied *performance*
+cost does not exist, and no quadtree is needed.
+
+**Unexplained, carried forward:** canvas's worst frame was 145.5 ms — one janky frame in 936, 24× its
+own median. Not a budget failure; not dismissed either.
+
+---
 
 **And one finding that was not one of the four.** The first stability run returned 0.249 at *every*
 holdout fraction — a metric not responding to its own variable. The cause was in the layout:

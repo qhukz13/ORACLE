@@ -3,67 +3,107 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** the P11 queue, on the owner's three mid-evening calls: OQ-18 moved to **04:00**
-(`WakeToRun`), **`main` is the branch** (PR #1; push after every task — AGENTS.md), keep working.
-**Status:** four tasks shipped and pushed: the **Timeline** (§7), the **global search backend**
-(`GET /api/v1/search`) whose measurement flushed out a four-day live defect, the **search
-overlay** (`Ctrl+Shift+F`), and this ledger.
-**Date:** 2026-08-28, evening arc (into the small hours)
-**Dev logs:** [search, timeline, and a four-day defect](../logs/development/2026-08-28-search-timeline-and-a-four-day-defect.md) ·
-[the afternoon arc](../logs/development/2026-08-28-p11t5-and-measurements.md)
+**Task:** find the state, find the next task, build it. The repo had been cold for eleven days; the
+one unblocked, highest-value item was **OQ-22's measurement 2 — canvas vs SVG**, the last open
+measurement in the project and the only thing holding
+[ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered)
+at UNCONFIRMED.
+**Status:** **measured, in the real Tauri/WebView2 window. OQ-22 is resolved on all four
+measurements. ADR-0023 is confirmed. The Phase 11 knowledge graph view is unblocked.**
+**Date:** 2026-09-09
+**Dev log:** [canvas vs SVG, answered](../logs/development/2026-09-09-oq22-canvas-vs-svg.md) ·
+data in `logs/measurements/oq22-render.json`
 
 ---
 
-## The defect that matters: `know.*` was dead in the live system since 2026-08-24
+## What the eleven-day gap actually contained: nothing
 
-Measuring global search's 300 ms target returned refusals instead of numbers, and the reason
-was real: `tools/knowledge.py` had **hardcoded `E5_BASE`** while the indexer moved to `bge-m3`
-on 2026-08-24 — so every `know.search` / `know.read_context` / `know.reindex` through the
-toolhost has failed `bind()` with a SchemaMismatch for four days. Fixture tests never saw it:
-an empty tmp index binds whatever the tool asks for, self-consistently — green on a world the
-machine does not have, the `TaskTree` lesson one layer down. Fixed (the tool layer aliases
-`embedding.DEFAULT` once; a security test pins it), and mercifully `bind()` raises before the
-store opens, so the wrong-model rebuild was never reachable.
+The 04:00 OQ-18 corpus run **died four minutes in** on 2026-08-29 — exit code `1073807364`
+(`DBG_TERMINATE_PROCESS`) at 04:05, 256 of 16,717 chunks done. `WakeToRun` woke the machine and
+something put it back to sleep; the sleep guard did not hold. The scheduled task is still
+registered, has not fired since, and **OQ-18 remains unmeasured**. Nothing else ran: no commits, no
+daemon, since 2026-08-28.
 
-**⚠ The fix and both new endpoints reach the live system on the next `oracled` restart.** The
-running daemon (up since 01:05) predates `POST /api/v1/knowledge/reindex`, `GET /api/v1/search`
-**and** the `know.*` fix — one restart lights up the Rebuild button, the search overlay, and
-live retrieval at once.
+The re-fire is still `Start-ScheduledTask ORACLE-OQ18-eval`, and it still resumes from the last
+checkpoint — but the checkpoint is 256 chunks, so this is effectively a cold ~2.5–3 h run, and
+whatever stopped it needs diagnosing first or it will stop again.
 
-## What shipped
+## The measurement
 
-1. **Timeline (UI.md §7)** — the flat events table became the grouped, filterable stream on
-   `Ctrl+3`, contiguity-grouped (never re-sorted), per-group `[inspect]` into the app-wide
-   selection. The a11y audit caught a `nested-interactive` violation before first commit —
-   the disclosure is a proper `button[aria-expanded]` because of it. Verified live: 14 groups
-   from the real 500-event stream.
-2. **`GET /api/v1/search`** — six groups: files/notes via `know.search` through the gate
-   (taint rides through), projects/tasks/events as SQL over stored rows, GIT only when a
-   project is named (an all-repo sweep is OQ-24's fan-out under a new name). Each group fails
-   alone; LIKE is escaped. **Measured: warm p50 681 / p95 1,270 ms** for the retrieval half —
-   §11's pre-bge-m3 300 ms target is missed 4× and recorded in place.
-3. **The overlay** — palette-style combobox, six labelled groups, 300 ms debounce,
-   `elapsed_ms` on screen. Enter does only what the app can honestly do (select a project —
-   not `continue` — inspect a task, jump to the Timeline); files/notes/git are previews and
-   Enter refuses to pretend; `Ctrl+Enter` deferred until a context-package API exists.
+`apps/desktop/bench/graph-render.html` + `scripts/export_graph_scene.py`, run in the **Tauri shell**
+— real WebView2, not a near-neighbour — at the scene measurement 3 chose, rebuilt from the frozen
+artifacts to exactly **1,420 nodes and 3,103 edges**.
 
-Also this evening, before the queue: the palette became a real combobox (the audit's last
-debt), DATABASE.md was reconciled to the seven tables that actually exist (five sketched
-tables never were), and the eval's answer-key diagnostic — which had printed `0/38` since
-birth — was fixed after a probe measured the truth at 38/38.
+| renderer | fps | p50 | p95 | worst | over budget | first paint | pick p50 |
+|---|---|---|---|---|---|---|---|
+| **canvas** | **163.9** | **6.1 ms** | 6.2 | 145.5 | **2.6%** | 10.1 ms | **0.0 ms** |
+| svg-group | 82.0 | 12.2 ms | 18.3 | 90.9 | 96% | 26.5 ms | 0.4 ms |
+| svg-constant | 82.0 | 12.2 ms | 18.3 | 30.3 | 97% | 24.0 ms | 0.3 ms |
 
-## Suites
+Idle CPU with the graph mounted: **1.09% of one core** (gate < 5%).
 
-**834 + 411 python · 327 UI**, gate green per task before each push. One first-run 120 s
-timeout (the first-ever successful bge-m3 load in a test, cold cache) named by
-`pytest-timeout` and clean on every rerun.
+**The verdict is narrower than "canvas won", and that is the finding.** Against OQ-22's written gate
+— 60 fps — *every* renderer passes; SVG turns in 82 fps. The two only separate against the display's
+**measured 163.9 Hz**: canvas sits at p50 6.1 ms, the vsync interval exactly, never the bottleneck;
+SVG sits at 12.2 ms, exactly twice it — the signature of missing the budget and dropping to every
+second refresh. **On a 60 Hz panel SVG would pass on merit and the canvas complexity would be
+unjustified at this node count**, which is what OQ-22 suspected when it demanded the control. What
+carries the decision beyond this panel is the ceiling: 10k documents makes the SVG scene ~32,000
+elements against today's 4,523.
 
-## The morning's two items
+Two results contradicted the reasoning going in. The two SVG variants are **identical** — the cost
+is compositing 4,523 elements, not the 1,420 per-frame attribute writes — so constant-size nodes are
+free and no SVG optimisation remains to be taken. And canvas hit-testing, written as a naive O(n)
+scan *specifically* to keep its cost visible, is **4–9× faster** than `elementFromPoint`. ADR-0023's
+accessibility debt for canvas stands in full; the performance cost it implied does not exist.
 
-1. **OQ-18 collects after ~07:00.** Fires 04:00 with `WakeToRun`; the evening checkpoint will
-   be refused (tonight's commits changed the corpus — the guard working) so it runs clean on
-   an idle box. Steps in [current_task.md](current_task.md); the `0/38` answer-key line is the
-   old broken diagnostic — the fixed one prints from this run onward.
-2. **Restart `oracled`** (then the human click that ends `tasks = 0`): the daemon, Ollama and
-   `npm --prefix apps/desktop run dev` — then `continue ORACLE`, approve the T3 card, and the
-   Tasks stage, orbit go/no-go and briefing arithmetic all get their first real rows.
+## The trap, which is the more transferable result
+
+The first attempt ran in a hidden browser pane where `document.visibilityState` reported
+**`"visible"`**, `document.hidden` was **`false`**, `setTimeout` fired normally — and
+`requestAnimationFrame` delivered **zero callbacks in 1,500 ms**. Every guard anyone would reach for
+passes there, and the harness would have produced a plausible frame distribution from a compositor
+that never ran. The liveness check is now the frame loop itself and nothing else, and the harness
+refuses with an explanation rather than reporting.
+
+## Two defects found on the way
+
+1. **`tauri dev` + Vite could not coexist.** Vite's watcher opened
+   `src-tauri/target/debug/deps/oracle_desktop.exe` mid-link and died with `EBUSY`, taking the dev
+   server down and leaving the Tauri window pointed at nothing — presenting as "the harness didn't
+   run". Fixed: `server.watch.ignored: ["**/src-tauri/**"]`.
+2. **ADR-0023 had been telling readers the opposite of a two-week-old measurement.** Its consequences
+   still said semantic edges "default off"; measurement 3 established on 2026-08-26 that off-by-
+   default is a scatter of dots (1,168 of 1,325 documents orphaned). UI.md §11b had been corrected;
+   the ADR had not. Amended, and UI.md's own table row — which still said "off by default" three
+   paragraphs under a note saying it was backwards — fixed too.
+
+## Global search: first real latency numbers, and they miss
+
+The daemon came up as a child of the Tauri shell, from current source, so the three things the last
+report said needed a restart are now live and verified: `GET /api/v1/search` returns 200, the
+`know.*` model fix is in, and `POST /api/v1/knowledge/reindex` exists.
+
+Measured for the first time (the previous session could not — `know.*` was returning refusals):
+
+| query | latency |
+|---|---|
+| cold, first query | **7,932 ms** |
+| knowledge graph | 504 ms |
+| project state | 541 ms |
+| task graph | 665 ms |
+| canvas rendering | 831 ms |
+| embedding model | 1,467 ms |
+
+Against **TESTING.md's p95 < 300 ms budget**, warm search is **2–5× over** and cold is **26× over**.
+This is not a regression — it is the first time the number could be taken. It wants its own task; it
+is listed below rather than quietly absorbed.
+
+## Gate
+
+`scripts/check.py` — all seven steps green (ruff format, ruff lint, mypy, tsc, pytest, security,
+vitest). One earlier run of the gate timed out in a WebSocket test *while the Tauri window, WebView2,
+the daemon and a CPU sampler were all running*; a full `pytest` immediately after was **1245 passed,
+1 skipped**, and the gate was green on an unloaded machine. That is the documented CPU-starvation
+flake, not a new failure — and it is now the third sighting, which is an argument for making those
+wall-clock assumptions explicit.

@@ -1,0 +1,19 @@
+=== OQ-18 corpus run, started Sat 08/29/2026  4:01:00.25 === 
+[34mcorpus[0m
+[2m  skipped: {'type': 441, 'deny': 2, 'exclude': 5, 'untracked': 15, 'unreadable': 1}[0m
+  1594 docs {'projects': 1398, 'notes': 196} {'markdown': 578, 'config': 112, 'code': 889, 'text': 15}
+  18153 chunks (16717 semantic, 1436 lexical-only) in 29.6s
+  chars/chunk: mean 921 p50 1028 p95 1196 max 1346
+[34mtranslations[0m  qwen3.5:0.8b: 20 of 25 usable, 5 failed
+[32m  all 38 fixture sources present in the corpus[0m
+
+[34mlexical index[0m
+  BM25 over 18153 chunks, 69384 terms, 6.8s
+  recall@5 29%   misses: ['ru-token-refresh', 'ru-jwt-secret-storage', 'ru-own-yaml-parser', 'ru-two-users-one-agent', 'ru-feature-entitlement', 'ru-relay-encryption', 'ru-vector-search', 'ru-finetuning', 'en-access-token-lifetime', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-event-retention', 'ru-shutdown-order', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-migrations', 'ru-command-approval', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-bias-variance', 'ru-cross-validation', 'ru-learning-rate', 'ru-nonlinearity', 'ru-model-degrades']
+[2m  answer-key documents in the lexical candidates of 38/38 queries[0m
+
+[34mbge-m3[0m (1024d, cls pooling)
+[31m  D:/ORACLE/scratch/oq18-vectors-bge-m3.npz was built from a different corpus or model; ignoring it[0m
+[2m    saved c2682739164f00e6…  wanted 862307e5901c6c25…[0m
+[2m  256/16717 chunks  2.52 chunks/s  elapsed 101s  eta 6525s[0m
+=== finished Sat 08/29/2026  4:05:22.18 with exit code 1073807364 === 

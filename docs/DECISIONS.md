@@ -29,7 +29,7 @@ Format per record: Decision · Context · Options · Chosen · Why · Trade-offs
 | [0020](#adr-0020--the-task-graph-is-a-durable-dag-with-append-only-replanning) | The task graph is a durable DAG with append-only replanning | accepted 2026-08-24 |
 | [0021](#adr-0021--planner-output-is-untrusted-input) | Planner output is untrusted input | accepted 2026-08-24 |
 | [0022](#adr-0022--external-agent-frameworks-evaluated-not-adopted) | External agent frameworks: evaluated, not adopted | accepted 2026-08-24 |
-| [0023](#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered) | The knowledge graph is simulated-then-frozen, canvas-rendered | accepted 2026-08-24 |
+| [0023](#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered) | The knowledge graph is simulated-then-frozen, canvas-rendered | accepted 2026-08-24 · **confirmed by measurement 2026-09-09** |
 | [0024](#adr-0024--a-project-is-a-first-class-persistent-entity) | A project is a first-class persistent entity | accepted 2026-08-26 |
 | [0025](#adr-0025--oracle-is-a-resident-service-the-window-is-a-client) | ORACLE is a resident service; the window is a client | accepted 2026-08-26 |
 | [0026](#adr-0026--the-local-tier-ladder-is-capability-shaped-and-gpu-conditional) | The local tier ladder is capability-shaped and GPU-conditional | accepted 2026-08-26, **conditions 0004** |
@@ -729,9 +729,41 @@ semantics — mitigated as above, and gated by the axe audit like every surface.
 **Consequences.** ADR-0013 is **scoped, not superseded**: the orbit keeps its deterministic polar
 layout and SVG; this ADR governs the knowledge graph alone, and a third visualisation would need
 its own argument. Layout runs beside indexing and respects its budgets; the viewport never
-simulates; semantic (embedding-kNN) edges are computed offline and default off. The rendering and
-layout budgets are measured at Phase 11 under [OQ-22](OPEN_QUESTIONS.md#oq-22) before the view is
-built on them. The view inherits the orbit's go/no-go honesty gate: if it does not answer
+simulates; semantic (embedding-kNN) edges are computed offline and ~~default off~~ **default on —
+see below**. The rendering and layout budgets are measured at Phase 11 under
+[OQ-22](OPEN_QUESTIONS.md#oq-22) before the view is built on them.
+
+**Confirmed 2026-09-09 on the rendering choice, by the control this decision asked for.**
+`apps/desktop/bench/graph-render.html`, run in the Tauri/WebView2 shell at the measured scene
+(1,420 nodes, 3,103 edges): canvas holds **p50 6.1 ms — the display's vsync interval exactly**,
+while SVG holds **12.2 ms, exactly twice it**, missing 96% of its frame budgets. Idle 1.09% of one
+core; first paint 10.1 ms.
+
+**The honest reading is narrower than "canvas won".** Against
+[OQ-22](OPEN_QUESTIONS.md#oq-22)'s written gate — 60 fps — SVG *passes*, at 82 fps. The verdict
+turns entirely on this machine's **164 Hz** panel, where 60 fps stopped meaning smooth; on a 60 Hz
+display the canvas complexity would be unjustified at this node count, exactly as OQ-22 suspected.
+What carries the decision beyond this panel is the ceiling: at the 10k-document ceiling the SVG
+scene is ~32,000 elements against today's 4,523.
+
+**And one clause of this ADR is now measured false.** "Canvas forfeits free DOM semantics" priced an
+accessibility cost *and* implied a hit-testing one. The accessibility debt stands in full — the
+list-view equivalent and DOM overlays are still owed. The performance half does not exist: a naive
+linear scan over 1,420 nodes hit-tests **4–9× faster** than `elementFromPoint` over 4,523 elements.
+[Dev log](../logs/development/2026-09-09-oq22-canvas-vs-svg.md).
+
+**Amended 2026-08-26 by measurement, on the clause this ADR was least sure of.** *"Semantic edges
+default off"* is wrong on this corpus and the measurement says so with a number: explicit wikilinks
+touch **11% of the corpus**, leaving 1,168 of 1,325 embeddable documents orphaned across 1,264
+components. With semantic edges at the recommended k=4 / thr=0.85, orphans fall to 189 and the giant
+component reaches 35%. Off by default is not a conservative default here — it is a scatter of dots,
+and it would have shipped as *"the graph view does not work"*. Semantic edges ship **on**, with the
+knob exposed over the useful 0.80–0.90 band rather than from zero. The reasoning behind the original
+clause survives intact — an inferred edge is a suggestion and must not be drawn like a fact — so it
+is discharged by *encoding* (fainter, dashed) rather than by absence. Recorded in
+[UI.md §11b](UI.md#11b-the-knowledge-graph--phase-11) and
+[the dev log](../logs/development/2026-08-26-oq22-knowledge-graph.md); this ADR had gone two weeks
+still telling a reader the opposite. The view inherits the orbit's go/no-go honesty gate: if it does not answer
 questions the list cannot, it is cut, and that outcome gets an ADR.
 
 ---

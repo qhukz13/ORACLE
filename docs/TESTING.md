@@ -116,16 +116,26 @@ Regressions here are silent and cumulative, so they are asserted:
 | Knowledge-graph layout, cold (1.4k docs) | < 10 min — **measured 27.8 s** |
 | Knowledge-graph layout, peak RSS | < 500 MB — **measured 121 MB** |
 | Knowledge-graph incremental placement | < 250 ms — **measured 0.032 ms p95** |
-| Knowledge-graph canvas pan/zoom | p95 frame < 16.7 ms — **not yet measured** |
+| Knowledge-graph canvas pan/zoom | p95 frame < 16.7 ms — **measured 6.2 ms** (p50 6.1 ms = vsync) |
+| Knowledge-graph view, idle | < 5% CPU — **measured 1.09% of one core** |
+| Knowledge-graph first paint, frozen positions | < 1 s — **measured 10.1 ms** |
 
 Measured nightly on this hardware. These numbers are hardware-specific by design — a budget that
 passes on a different machine tells us nothing about the machine ORACLE runs on.
 
 **These budgets still have no automated test to live in**: `make eval` exists as of 2026-08-28, but
-`make perf` still does not, and §8 no longer claims it does. The graph numbers above come from
+`make perf` still does not, and §8 no longer claims it does. The graph layout numbers come from
 `scripts/measure_graph.py` run by hand ([OQ-22](OPEN_QUESTIONS.md#oq-22),
-[dev log](../logs/development/2026-08-26-oq22-knowledge-graph.md)), and the canvas row is honestly
-blank because it needs a compositing window on this GPU inside WebView2.
+[dev log](../logs/development/2026-08-26-oq22-knowledge-graph.md)); the three render rows come from
+`apps/desktop/bench/graph-render.html` run in the Tauri/WebView2 window on 2026-09-09
+([dev log](../logs/development/2026-09-09-oq22-canvas-vs-svg.md)) and **cannot** move into a headless
+runner — the same page in a non-compositing window reports `visibilityState: "visible"` and zero
+frames.
+
+**⚠ The 16.7 ms in the pan/zoom row is a 60 Hz assumption, and this machine's display is 163.9 Hz.**
+Read against the panel, the budget is **6.1 ms**, and the SVG control that passes the written row at
+82 fps misses the real one on 96% of its frames. Any frame budget written as a constant here should
+be re-read as "one vsync interval on the machine under test" — measure the floor, do not assume it.
 
 **And one budget that is not in this table but bit twice on 2026-08-26**: several tests here carry
 implicit *wall-clock* assumptions — a watcher filtering 5,000 paths in under 2 s, a ConPTY burst
