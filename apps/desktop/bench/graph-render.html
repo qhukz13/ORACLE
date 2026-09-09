@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OQ-22 · canvas vs SVG</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0e1116;
+        --fg: #e6edf3;
+        --dim: #8b949e;
+        --line: #21262d;
+        --notes: #d2a8ff;
+        --projects: #79c0ff;
+        --ok: #3fb950;
+        --bad: #f85149;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        display: grid;
+        grid-template-columns: 1fr 420px;
+        height: 100vh;
+        overflow: hidden;
+      }
+      #stage { position: relative; overflow: hidden; }
+      #stage > * { position: absolute; inset: 0; width: 100%; height: 100%; }
+      #panel {
+        border-left: 1px solid var(--line);
+        padding: 14px 16px;
+        overflow-y: auto;
+        background: #0b0e13;
+      }
+      h1 { font-size: 13px; margin: 0 0 2px; letter-spacing: 0.04em; text-transform: uppercase; }
+      p.sub { color: var(--dim); margin: 0 0 14px; font-size: 12px; }
+      button {
+        font: inherit;
+        background: #1f2530;
+        color: var(--fg);
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        padding: 6px 10px;
+        cursor: pointer;
+        margin: 0 6px 6px 0;
+      }
+      button:hover:not(:disabled) { background: #2a323f; }
+      button:disabled { opacity: 0.45; cursor: default; }
+      #status { color: var(--dim); margin: 10px 0; min-height: 1.4em; }
+      table { border-collapse: collapse; width: 100%; font-size: 12px; margin-bottom: 14px; }
+      th, td { text-align: right; padding: 3px 5px; border-bottom: 1px solid var(--line); }
+      th:first-child, td:first-child { text-align: left; }
+      th { color: var(--dim); font-weight: 400; }
+      .pass { color: var(--ok); }
+      .fail { color: var(--bad); }
+      pre {
+        white-space: pre-wrap;
+        word-break: break-all;
+        font-size: 11px;
+        color: var(--dim);
+        background: #0e1116;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        padding: 8px;
+        max-height: 220px;
+        overflow: auto;
+      }
+      .legend { color: var(--dim); font-size: 11px; margin-bottom: 12px; }
+      .legend b { font-weight: 400; }
+      .legend .n { color: var(--notes); }
+      .legend .p { color: var(--projects); }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <div id="panel">
+      <h1>OQ-22 · measurement 2</h1>
+      <p class="sub">canvas vs SVG, at the scene measurement 3 chose</p>
+      <div class="legend">
+        <b class="n">■ notes</b> &nbsp; <b class="p">■ projects</b>
+        <div id="scene-line">loading scene…</div>
+      </div>
+      <div>
+        <button id="run-all">Run both</button>
+        <button id="run-canvas">Canvas only</button>
+        <button id="run-svg">SVG only</button>
+        <button id="copy" disabled>Copy JSON</button>
+      </div>
+      <div id="status"></div>
+      <div id="results"></div>
+      <pre id="json"></pre>
+    </div>
+    <script type="module" src="./graph-render.ts"></script>
+  </body>
+</html>
