@@ -10,18 +10,21 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { KnowledgeGraph } from "./KnowledgeGraph";
-import type { KnowledgeGraphData } from "./KnowledgeGraph";
+import { KnowledgeGraph, toTraces } from "./KnowledgeGraph";
+import type { KnowledgeGraphData, RetrievalTrace } from "./KnowledgeGraph";
 
 function node(
-  id: string,
+  rel: string,
   over: Partial<KnowledgeGraphData["nodes"][number]> = {},
 ): KnowledgeGraphData["nodes"][number] {
+  // A real document id is `collection/rel_path` — the same string a citation reconstructs to.
+  // A fixture that used the bare name would let a trace-matching bug pass here and fail live.
+  const collection = over.collection ?? "notes";
   return {
-    id,
-    collection: "notes",
+    id: `${collection}/${rel}`,
+    collection,
     project: null,
-    rel_path: id,
+    rel_path: rel,
     kind: "markdown",
     state: "placed",
     degree: 1,
@@ -156,6 +159,130 @@ describe("KnowledgeGraph", () => {
     fireEvent.click(screen.getByTitle("a.md"));
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ rel_path: "a.md" }));
+  });
+
+  describe("the use question — what was retrieved, and from where", () => {
+    const trace = (over: Partial<RetrievalTrace> = {}): RetrievalTrace => ({
+      id: "42",
+      at: "2026-09-09T12:00:00Z",
+      tool: "know.search",
+      query: "how does taint work",
+      documents: ["notes/a.md", "notes/b.md"],
+      ...over,
+    });
+
+    it("shows nothing at all when nothing has been retrieved", () => {
+      /* An empty trace bar is a permanent advertisement for a feature rather than an answer. */
+      render(<KnowledgeGraph data={data()} traces={[]} />);
+      expect(screen.queryByText("Retrievals:")).toBeNull();
+    });
+
+    it("names the retrieval and reports how many sources it lit up", () => {
+      render(<KnowledgeGraph data={data()} traces={[trace()]} />);
+      fireEvent.click(screen.getByRole("button", { name: /how does taint work/ }));
+      expect(screen.getByText(/Showing the 2 sources behind/)).toBeTruthy();
+    });
+
+    it("says when a cited document has left the index instead of quietly dropping it", () => {
+      /* A source that is gone is a real thing to know while you are checking the answer it
+         supported — silently drawing one fewer node would make the answer look better sourced
+         than it now is. */
+      render(
+        <KnowledgeGraph
+          data={data()}
+          traces={[trace({ documents: ["notes/a.md", "notes/deleted.md"] })]}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: /how does taint work/ }));
+      expect(screen.getByText(/1 cited document is no longer in the index/)).toBeTruthy();
+    });
+
+    it("toggles off when the same retrieval is clicked again", () => {
+      render(<KnowledgeGraph data={data()} traces={[trace()]} />);
+      const button = screen.getByRole("button", { name: /how does taint work/ });
+      fireEvent.click(button);
+      expect(button.getAttribute("aria-pressed")).toBe("true");
+      fireEvent.click(button);
+      expect(button.getAttribute("aria-pressed")).toBe("false");
+      expect(screen.queryByText(/Showing the/)).toBeNull();
+    });
+  });
+
+  describe("toTraces — reading retrievals out of the event log", () => {
+    /* The payload here is the exact shape `rag/retrieval.py:to_citation` emits, field names and
+       all. A fixture that invented its own key names would let a rename pass the suite and break
+       the feature live, which is the only way this derivation can fail. */
+    const finished = (seq: number, rows: Record<string, unknown>[]) => ({
+      v: 1,
+      seq,
+      ts: "2026-09-09T12:00:00Z",
+      type: "tool.finished",
+      trace_id: "tr_1",
+      payload: { tool: "know.search", summary: "taint tracking", citations: rows },
+    });
+    const row = (collection: string, path: string) => ({
+      chunk_id: `ch_${path}`,
+      collection,
+      project: "ORACLE",
+      path,
+      abs_path: `C:/Projects/${path}`,
+      anchor: "§6",
+      score: 0.8,
+      provenance: "local_owned",
+      indexed_at: "2026-09-09T00:00:00Z",
+    });
+
+    it("reconstructs the graph's document id from collection and path", () => {
+      const [trace] = toTraces([
+        finished(7, [row("projects", "ORACLE/docs/SECURITY.md")]),
+      ] as never);
+      expect(trace?.documents).toEqual(["projects/ORACLE/docs/SECURITY.md"]);
+    });
+
+    it("ignores tool calls that cited nothing", () => {
+      expect(toTraces([finished(7, [])] as never)).toEqual([]);
+    });
+
+    it("counts a document cited twice in one answer as one source", () => {
+      const [trace] = toTraces([
+        finished(7, [row("notes", "a.md"), row("notes", "a.md")]),
+      ] as never);
+      expect(trace?.documents).toEqual(["notes/a.md"]);
+    });
+
+    it("returns the most recent retrieval first", () => {
+      const traces = toTraces([
+        finished(1, [row("notes", "old.md")]),
+        finished(2, [row("notes", "new.md")]),
+      ] as never);
+      expect(traces.map((t) => t.documents[0])).toEqual(["notes/new.md", "notes/old.md"]);
+    });
+  });
+
+  describe("collection is never carried by colour alone", () => {
+    it("writes each collection's name and count in a legend", () => {
+      /* UI.md §1. The swatch is decoration; the name is the information. */
+      render(
+        <KnowledgeGraph
+          data={data({
+            nodes: [node("a.md"), node("b.md", { collection: "projects" })],
+            x: [0, 1],
+            y: [0, 1],
+            placed: ["layout", "layout"],
+            explicit_edges: [],
+            semantic_edges: [],
+          })}
+        />,
+      );
+      const legend = screen.getByRole("list", { name: "Collections" });
+      expect(legend.textContent).toContain("notes");
+      expect(legend.textContent).toContain("projects");
+    });
+
+    it("names the collection in each list row, not just its swatch", () => {
+      render(<KnowledgeGraph data={data()} />);
+      expect(screen.getByTitle("a.md").textContent).toContain("notes");
+    });
   });
 
   it("caps the rendered list and says how much it is hiding rather than truncating silently", () => {

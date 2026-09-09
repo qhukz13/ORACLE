@@ -10,6 +10,7 @@ import { type Citation, Citations, toCitations } from "./Citations";
 function citation(over: Partial<Citation> = {}): Citation {
   return {
     chunkId: "abc123",
+    collection: "projects",
     project: "Asterim",
     path: "apps/server/src/services/TokenService.ts",
     absPath: "C:/Projects/Asterim/apps/server/src/services/TokenService.ts",

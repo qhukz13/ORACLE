@@ -22,7 +22,7 @@ import { ProjectList, toObservation, toProjects } from "./components/ProjectList
 import type { Observation, ProjectRow, ProjectsData } from "./components/ProjectList";
 import { MemoryView, toFacts } from "./components/MemoryView";
 import type { MemoryFact } from "./components/MemoryView";
-import { KnowledgeGraph } from "./components/KnowledgeGraph";
+import { KnowledgeGraph, toTraces } from "./components/KnowledgeGraph";
 import type { KnowledgeGraphData } from "./components/KnowledgeGraph";
 import { KnowledgeHealth, toHealth } from "./components/KnowledgeHealth";
 import type { KnowledgeHealthData } from "./components/KnowledgeHealth";
@@ -284,6 +284,9 @@ export default function App() {
       cancelled = true;
     };
   }, [stage, knowledgeSeq]);
+
+  // Retrieval traces, read out of the event log rather than stored anywhere — see `toTraces`.
+  const traces = useMemo(() => toTraces(s.events), [s.events]);
 
   const relayout = useCallback(() => {
     // Synchronous and slow on purpose (~28 s measured): it moves every node, so the button holds
@@ -619,6 +622,7 @@ export default function App() {
             graph ? (
               <KnowledgeGraph
                 data={graph}
+                traces={traces}
                 relayouting={relayouting}
                 onRelayout={relayout}
               />

@@ -21,6 +21,9 @@ import { asRecord, num, str } from "../protocol";
 
 export interface Citation {
   chunkId: string;
+  /** The collection this came from. `collection/path` is the knowledge graph's document id,
+   *  which is what lets a retrieval be drawn on the map (UI.md §11b's "use" question). */
+  collection: string;
   project: string;
   path: string;
   absPath: string;
@@ -47,6 +50,7 @@ export function toCitations(results: unknown): Citation[] {
       const r = asRecord(raw);
       return {
         chunkId: str(r.chunk_id),
+        collection: str(r.collection),
         project: str(r.project),
         path: str(r.path),
         absPath: str(r.abs_path),

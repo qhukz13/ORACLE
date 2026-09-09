@@ -338,7 +338,21 @@ describe("no serious or critical accessibility violations", () => {
     // ADR-0023 permits canvas for this view *only* by owing a list equivalent, so the audit here
     // is not a formality — it is the payment. The canvas itself carries `role="img"` and a label
     // that says where the real content is; every document and every action lives in the list.
-    const { container } = render(<KnowledgeGraph data={graphData} onRelayout={() => {}} />);
+    const { container } = render(
+      <KnowledgeGraph
+        data={graphData}
+        onRelayout={() => {}}
+        traces={[
+          {
+            id: "1",
+            at: "2026-09-09T12:00:00Z",
+            tool: "know.search",
+            query: "taint",
+            documents: ["notes/a.md"],
+          },
+        ]}
+      />,
+    );
     expect(await violations(container)).toEqual([]);
   });
 });
@@ -562,6 +576,7 @@ describe("the components the audit missed, and the T5 surfaces", () => {
         citations={[
           {
             chunkId: "ch_1",
+            collection: "projects",
             project: "ORACLE",
             path: "docs/SECURITY.md",
             absPath: "C:\\Projects\\ORACLE\\docs\\SECURITY.md",
@@ -572,6 +587,7 @@ describe("the components the audit missed, and the T5 surfaces", () => {
           },
           {
             chunkId: "ch_2",
+            collection: "notes",
             project: "notes",
             path: "vault/agents.md",
             absPath: "D:\\Vault\\agents.md",
