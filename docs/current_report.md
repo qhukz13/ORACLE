@@ -5,7 +5,8 @@
 
 **Task:** find the state, find the next task, build it — then continue.
 **Status:** **OQ-22 resolved, ADR-0023 confirmed, and P11-T3 (the knowledge graph) built and
-running against the real corpus.** Four commits on `main`, gate green on all seven steps.
+running against the real corpus** — including retrieval traces and collection hulls. Six commits on
+`main`, gate green on all seven steps each time. One piece of §11b remains: select-as-context.
 **Date:** 2026-09-09
 **Dev log:** [canvas vs SVG, answered](../logs/development/2026-09-09-oq22-canvas-vs-svg.md) ·
 data in `logs/measurements/oq22-render.json`
@@ -89,7 +90,34 @@ Every one of these passed the test suite, because none of those tests lay anythi
 vector backfill. The docstring said 28 s and the button said "~30 s"; the first run anyone makes is
 ~2 minutes, so both say so now and the API returns the two numbers separately.
 
-## 3 · Four defects found in passing, all fixed
+## 3 · The graph's remaining pieces — two of three
+
+**Retrieval traces** (`toTraces`) read the *use* question out of the event log rather than storing
+it: every `tool.finished` for a `know.*` call already carries citations, and a citation's
+`collection` + `path` reconstruct exactly the node id the graph addresses. A table for this would be
+a second copy of a fact the log owns. Co-cited documents are ringed and joined with a dashed loop —
+not more graph edges, because co-citation is a fact about one turn, not a property of the corpus.
+A cited document that has left the index is named, not silently dropped.
+
+**⚠ Never verified live.** The 0.8b router classified *"search the knowledge index for taint
+tracking"* as intent `search` — correct — and then selected **`fs.list`**, replying *"I don't have a
+tool for that yet."* `know.search` was never called, so no real retrieval could light the map up.
+qwen2.5:7b does not fit this GPU (the turn stalled with no runner loaded). The derivation is tested
+against the exact payload `to_citation` emits, field names and all; the end-to-end path is not.
+**This is a tool-selection finding in its own right** — intent routing works, selection does not —
+and `scripts/eval_selection.py` is the harness that should be pointed at it.
+
+**Collection hulls, and an honest correction.** The first version hulled each collection whole and
+was useless: orphans sit on an outer ring *by design*, so the convex hull of a collection is the
+convex hull of the ring — a polygon covering the whole map that says only "these exist". §11b asks
+for a region behind each *cluster*, and with orphans on the rim a collection is not one. Outliers
+are dropped before hulling now, so the hull traces the core and orphans fall visibly outside it.
+
+**The hull is still the weakest carrier and is flagged as on probation.** What actually stops
+collection being colour-alone is the **labelled legend** and the collection name written into every
+list row — both verified live (`projects 1,397 · notes 167`).
+
+## 4 · Four defects found in passing, all fixed
 
 - **ADR-0023 had spent two weeks telling readers the opposite of its own measurement** — its
   consequences still said semantic edges "default off", which measurement 3 disproved on
@@ -105,13 +133,13 @@ vector backfill. The docstring said 28 s and the button said "~30 s"; the first 
   still alive, failing about one run in three and blaming the Job Object. It now launches something
   that sleeps: five for five, and faster.
 
-## Global search still misses its budget
+## 5 · Global search still misses its budget
 
 Measured for the first time (the previous session could not — `know.*` was returning refusals):
 warm **504–1,467 ms**, cold **7,932 ms**, against TESTING.md's **p95 < 300 ms**. Not a regression —
 the first time the number could be taken. It wants its own task.
 
-## Gate
+## 6 · Gate
 
 `scripts/check.py` — all seven steps green on an unloaded machine (ruff format, ruff lint, mypy,
 tsc, pytest, security, vitest). The CPU-starvation flake was seen once more under real load and is

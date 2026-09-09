@@ -22,14 +22,20 @@ verified against the real corpus at 1,564 documents / 3,465 edges.
 
 ### What remains
 
-1. **Retrieval-trace edges** — [UI.md §11b](UI.md#11b-the-knowledge-graph--phase-11)'s *use*
-   question: "what did ORACLE just retrieve, and from where". Episodic, from the event log, shown
-   only in trace mode. This is the only one of the three remaining questions the view cannot
-   currently answer at all.
-2. **Collection hulls** — a tinted region behind each cluster, so collection is not carried by
-   colour alone. Today it is, which is a standing violation of UI.md §1 on this surface.
-3. **Select-as-context** — feed selected documents into a real context package, and if that package
-   later egresses, the ordinary preview prices it.
+1. **Select-as-context** — feed selected documents into a real context package, and if that package
+   later egresses, the ordinary preview prices it. The last unbuilt piece of §11b.
+2. **A live retrieval trace has never been seen.** The mechanism is built and unit-tested against
+   the exact payload `rag/retrieval.py:to_citation` emits, but no real retrieval has lit the map up,
+   because the router does not reach for `know.search` — see the selection finding below. Worth one
+   confirmation the first time a `know.*` call actually runs.
+3. **The collection hull is on probation.** It traces each collection's core (hulling the whole
+   collection just hulls the orphan ring, which is a polygon over the entire map). It reads weakly
+   on this corpus, and the legend plus the per-row collection name are what actually discharge
+   UI.md §1. If it does not prove useful in real use, cut it — that is the honesty gate, and a faint
+   polygon that clarifies nothing is decoration.
+
+**Done 2026-09-09, second pass:** retrieval traces (`toTraces`), collection hulls, the labelled
+legend, and collection written into every list row.
 
 Not owed, deliberately: *bridges*. Measurement 3b struck it — one edge joins `notes` to `projects`
 at every k and every threshold.
@@ -62,6 +68,13 @@ at every k and every threshold.
 - **The reindex is still unfired** — 57% of live rows exceed the 1200-char cap. `POST
   /api/v1/knowledge/reindex` is verified live. Full rebuild ~1 h synchronous. Note it will also
   repopulate `document_vectors` as it goes, which makes the graph's one-time 88 s backfill free.
+- **Tool selection picks the wrong tool for a search-intent turn.** Measured 2026-09-09: the 0.8b
+  router classified *"search the knowledge index for taint tracking"* as intent `search` — correct —
+  and then selected **`fs.list`**, answering *"I don't have a tool for that yet — fs.list needs to
+  know which project."* `know.search` was never called. Intent routing is fine; selection is not.
+  `scripts/eval_selection.py` is the harness that should be pointed at this. It also means no
+  `know.*` call has run in the live system recently, so the retrieval-trace view is unproven
+  end-to-end. (qwen2.5:7b does not fit this GPU — the turn stalled with no runner loaded.)
 - **Palette results are not discoverable to assistive tech** — `<li role="option">` with `onClick`,
   no `role="combobox"`, no `aria-activedescendant`. The rest of the a11y audit is 15/15.
 - **`DATABASE.md`'s `facts`/`attempts`/`devices` blocks are still the pre-build sketch.**

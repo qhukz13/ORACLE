@@ -681,7 +681,21 @@ appear as a single ghosted hull with a "index this" action. No decorative nodes,
 > corpus, not a fixture: **1,564 documents · 988 wikilinks · 2,477 inferred edges · 195 orphans**,
 > and `Learning Path.md` answers the reach question with *126 direct, 34 at two hops*. The two
 > populations render as measurement 3b said they would — the vault and the projects visibly barely
-> touch. What is **not** built yet: retrieval-trace edges, collection hulls, and select-as-context.
+> touch.
+>
+> **Retrieval traces and collection hulls landed the same day.** Traces are read out of the event
+> log by `toTraces()` — a citation's `collection/path` *is* a node id, so the *use* question needs
+> no new table. **Not verified live:** the 0.8b router classifies "search the knowledge index for X"
+> as intent `search` and then selects `fs.list`, so no real retrieval could be produced to light the
+> map up; the derivation is tested against the exact payload `to_citation` emits.
+>
+> **The hull was wrong on the first attempt and the correction is the finding.** Hulling a whole
+> collection just hulls the orphan ring — a polygon over the entire map. Orphans sit on the rim *by
+> design*, so a collection is not a cluster, and the hull now traces the collection's core with the
+> orphans visibly outside it. It remains the weakest of the three non-colour carriers; what actually
+> discharges §1 here is the **labelled legend** and the collection name in every list row.
+>
+> Still **not** built: select-as-context.
 
 ### Rendering — canvas, and what it costs  `MEASURED 2026-09-09`
 
