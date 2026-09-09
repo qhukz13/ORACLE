@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import sqlite3
 import struct
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -40,6 +40,13 @@ log = get_logger(__name__)
 
 #: Bumped whenever the schema below changes. There is no migration; a mismatch means the
 #: file is deleted and rebuilt, which is the contract for a disposable index.
+#:
+#: **Not bumped for `document_vectors` / `document_positions` (2026-09-09).** The contract exists so
+#: that a schema change cannot leave *stale* rows behind, and a table that did not exist has no
+#: stale rows: `CREATE TABLE IF NOT EXISTS` gives an existing index the new tables empty, and both
+#: are derived — the vectors re-pool from `chunk_vectors`, the positions re-layout in 28 s. Bumping
+#: would have charged every existing index a ~1 h full rebuild to add two empty tables, which is a
+#: cost with no corresponding risk. A change to a table that *holds* retrieval state still bumps.
 _SCHEMA_VERSION = 1
 
 _PRAGMAS = (
@@ -107,6 +114,30 @@ CREATE TABLE IF NOT EXISTS links (
   kind    TEXT NOT NULL,
   PRIMARY KEY (from_document_id, to_path, kind)
 );
+
+-- One mean-pooled, L2-normalised vector per document. Derived from `chunk_vectors`, and
+-- **required rather than an optimisation** (OQ-22 measurement 1b): re-pooling it from `vec0` on
+-- demand costs 51.8 s on a 1.4k-document corpus against the < 5 s incremental-index budget, while
+-- the layout arithmetic on top of it is 0.2 s. Without this table the graph looks like a slow
+-- layout and is actually a slow read.
+--
+-- A plain table, not a second `vec0`: nothing queries these by similarity in SQL. They are read in
+-- bulk, all of them, by the layout pass — which is the one access pattern `vec0` is worst at.
+CREATE TABLE IF NOT EXISTS document_vectors (
+  document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+  embedding   BLOB NOT NULL
+);
+
+-- Frozen layout positions (ADR-0023). `placed` distinguishes a node the full layout settled from
+-- one dropped in at its neighbours' centroid afterwards, because the second kind is what degrades
+-- and what a prompted re-layout exists to fix (OQ-22 measurement 4: Jaccard@10 0.477 at a 5%
+-- holdout against a 0.70 gate).
+CREATE TABLE IF NOT EXISTS document_positions (
+  document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+  x           REAL NOT NULL,
+  y           REAL NOT NULL,
+  placed      TEXT NOT NULL CHECK (placed IN ('layout', 'incremental'))
+);
 """
 
 
@@ -128,6 +159,22 @@ class Hit:
 
 def _pack(vec: np.ndarray) -> bytes:
     return struct.pack(f"{len(vec)}f", *vec.astype(np.float32))
+
+
+def _unpack(blob: bytes, dim: int) -> np.ndarray:
+    return np.frombuffer(blob, dtype=np.float32, count=dim)
+
+
+def _pool(vectors: np.ndarray) -> np.ndarray:
+    """Mean of a document's chunk vectors, L2-normalised.
+
+    Normalised so that a dot product is a cosine: the layout's kNN compares documents of wildly
+    different lengths, and an unnormalised mean would rank long documents as similar to everything
+    simply for having a larger norm.
+    """
+    pooled = np.asarray(vectors, dtype=np.float32).mean(axis=0)
+    norm = float(np.linalg.norm(pooled))
+    return pooled / norm if norm > 1e-9 else pooled
 
 
 class KnowledgeStore:
@@ -355,6 +402,14 @@ class KnowledgeStore:
                         for c, v in zip(chunks, vectors, strict=True)
                     ],
                 )
+            if vectors is not None and len(vectors):
+                # Pooled here, inside the same transaction, because this is the only moment the
+                # vectors are already in memory. Deriving it later means the 51.8 s `vec0` read
+                # that OQ-22 measurement 1b exists to warn about.
+                self.db.execute(
+                    "INSERT INTO document_vectors(document_id, embedding) VALUES (?,?)",
+                    (doc_id, _pack(_pool(vectors))),
+                )
             links = {link for c in chunks for link in c.links}
             if links:
                 self.db.executemany(
@@ -362,6 +417,95 @@ class KnowledgeStore:
                     " VALUES (?,?,'wikilink')",
                     [(doc_id, link) for link in links],
                 )
+
+    # ------------------------------------------------------- the graph layer
+
+    def backfill_document_vectors(self) -> int:
+        """Pool document vectors for documents indexed before this table existed.
+
+        One-time, and it is the 51.8 s read OQ-22 measurement 1b measured — paid once here instead
+        of on every layout. Returns how many documents were filled. Documents whose chunks carry no
+        vectors (config, by RAG.md policy) are skipped rather than given a zero vector: a zero
+        vector is equidistant from everything and would sit in the middle of the map claiming to be
+        related to all of it.
+        """
+        missing = [
+            r["id"]
+            for r in self.db.execute(
+                "SELECT d.id FROM documents d"
+                " LEFT JOIN document_vectors v ON v.document_id = d.id"
+                " WHERE v.document_id IS NULL"
+            )
+        ]
+        if not missing:
+            return 0
+        filled = 0
+        with self.db:
+            for doc_id in missing:
+                rows = self.db.execute(
+                    "SELECT v.embedding AS emb FROM chunk_vectors v"
+                    " JOIN chunks c ON c.id = v.chunk_id WHERE c.document_id = ?",
+                    (doc_id,),
+                ).fetchall()
+                if not rows:
+                    continue
+                stacked = np.vstack([_unpack(r["emb"], self.dim) for r in rows])
+                self.db.execute(
+                    "INSERT OR REPLACE INTO document_vectors(document_id, embedding) VALUES (?,?)",
+                    (doc_id, _pack(_pool(stacked))),
+                )
+                filled += 1
+        log.info("rag.document_vectors.backfilled", count=filled, missing=len(missing))
+        return filled
+
+    def document_vectors(self) -> tuple[list[str], np.ndarray]:
+        """Every document vector, in stable id order, as one array."""
+        rows = self.db.execute(
+            "SELECT document_id, embedding FROM document_vectors ORDER BY document_id"
+        ).fetchall()
+        if not rows:
+            return [], np.zeros((0, self.dim), dtype=np.float32)
+        ids = [r["document_id"] for r in rows]
+        vecs = np.vstack([_unpack(r["embedding"], self.dim) for r in rows])
+        return ids, vecs
+
+    def graph_documents(self) -> list[sqlite3.Row]:
+        """Every document the graph can draw, with the fields the view needs."""
+        return self.db.execute(
+            "SELECT id, collection_id, project_id, rel_path, path, kind, indexed_at, parse_error"
+            " FROM documents ORDER BY id"
+        ).fetchall()
+
+    def wikilinks(self) -> list[sqlite3.Row]:
+        return self.db.execute("SELECT from_document_id, to_path, kind FROM links").fetchall()
+
+    def save_positions(self, positions: Mapping[str, tuple[float, float]], *, placed: str) -> None:
+        """Persist frozen layout positions (ADR-0023)."""
+        if placed not in ("layout", "incremental"):
+            raise ValueError(f"placed must be 'layout' or 'incremental', not {placed!r}")
+        with self.db:
+            self.db.executemany(
+                "INSERT OR REPLACE INTO document_positions(document_id, x, y, placed)"
+                " VALUES (?,?,?,?)",
+                [(doc_id, float(x), float(y), placed) for doc_id, (x, y) in positions.items()],
+            )
+
+    def positions(self) -> dict[str, tuple[float, float, str]]:
+        return {
+            r["document_id"]: (r["x"], r["y"], r["placed"])
+            for r in self.db.execute("SELECT document_id, x, y, placed FROM document_positions")
+        }
+
+    def unplaced_documents(self) -> list[str]:
+        """Documents with a vector but no position — what incremental placement is for."""
+        return [
+            r["document_id"]
+            for r in self.db.execute(
+                "SELECT v.document_id FROM document_vectors v"
+                " LEFT JOIN document_positions p ON p.document_id = v.document_id"
+                " WHERE p.document_id IS NULL ORDER BY v.document_id"
+            )
+        ]
 
     def prune(self, collection: str, keep: Iterable[str]) -> int:
         """Delete documents no longer present on disk. Returns how many went."""

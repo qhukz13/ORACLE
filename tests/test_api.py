@@ -282,6 +282,106 @@ class TestKnowledgeHealth:
         assert "reindex" in body["error"]
 
 
+class TestKnowledgeGraph:
+    """UI.md §11b / ADR-0023. The endpoint reads frozen positions and lays nothing out."""
+
+    @staticmethod
+    def _build(settings: Settings, *, docs: int = 3) -> None:
+        import numpy as np
+
+        from oracle.rag.chunking import Chunk
+        from oracle.rag.collections import ContentKind, Document
+        from oracle.rag.embedding import DEFAULT
+        from oracle.rag.store import KnowledgeStore
+
+        store = KnowledgeStore(settings.data_dir / "knowledge.db", DEFAULT.out_dim)
+        store.bind(DEFAULT.name, DEFAULT.out_dim)
+        for i in range(docs):
+            doc = Document(
+                collection="projects",
+                project="Asterim",
+                path=f"doc{i}.md",
+                abs_path=settings.data_dir / f"doc{i}.md",
+                kind=ContentKind.MARKDOWN,
+                size=10,
+                mtime_ns=1,
+            )
+            vec = np.zeros((1, DEFAULT.out_dim), dtype=np.float32)
+            vec[0][i % DEFAULT.out_dim] = 1.0
+            store.put(
+                doc,
+                [Chunk(doc=doc, ordinal=0, anchor="a", text=f"body {i}")],
+                vec,
+                content_hash=f"h{i}",
+                provenance="local_owned",
+                indexed_at="2026-09-09T00:00:00Z",
+                idents=["body"],
+                token_counts=[2],
+            )
+        store.close()
+
+    def test_an_unbuilt_index_says_so_rather_than_erroring(self, client: TestClient) -> None:
+        body = client.get("/api/v1/knowledge/graph").json()
+        assert body["built"] is False
+
+    def test_a_built_index_returns_nodes_and_parallel_position_arrays(
+        self, client: TestClient, settings: Settings
+    ) -> None:
+        self._build(settings)
+        body = client.get("/api/v1/knowledge/graph").json()
+        assert body["built"] is True
+        assert len(body["nodes"]) == 3
+        # Parallel arrays must stay the same length as the node list, or the view silently
+        # draws one document at another document's coordinates.
+        assert len(body["x"]) == len(body["y"]) == len(body["placed"]) == 3
+        assert body["stats"]["edge_model"] == {"k": 4, "threshold": 0.85}
+
+    def test_the_read_path_does_not_lay_anything_out(
+        self, client: TestClient, settings: Settings
+    ) -> None:
+        """ADR-0023's central prohibition: the viewport never simulates.
+
+        A read that quietly ran the layout would also spend 28 measured seconds inside an HTTP
+        request, so this failing looks like a hung UI rather than like a design violation.
+        """
+        self._build(settings)
+        body = client.get("/api/v1/knowledge/graph").json()
+        assert body["stats"]["unplaced"] == 3
+        assert set(body["placed"]) == {""}
+
+    def test_relayout_freezes_positions_that_the_graph_then_reports(
+        self, client: TestClient, settings: Settings
+    ) -> None:
+        self._build(settings)
+        result = client.post("/api/v1/knowledge/relayout", params={"iterations": 20}).json()
+        assert result["ok"] is True
+        assert result["nodes"] == 3
+
+        body = client.get("/api/v1/knowledge/graph").json()
+        assert body["stats"]["unplaced"] == 0
+        assert set(body["placed"]) == {"layout"}
+        assert any(x != 0.0 for x in body["x"])
+
+    def test_relayout_without_an_index_is_an_answer_not_a_crash(self, client: TestClient) -> None:
+        body = client.post("/api/v1/knowledge/relayout").json()
+        assert body["ok"] is False
+        assert body["error"]["kind"] == "no_index"
+
+    def test_an_index_built_by_another_model_is_reported_stale(
+        self, client: TestClient, settings: Settings
+    ) -> None:
+        from oracle.rag.embedding import DEFAULT
+        from oracle.rag.store import KnowledgeStore
+
+        store = KnowledgeStore(settings.data_dir / "knowledge.db", DEFAULT.out_dim)
+        store.bind("some-other-model", DEFAULT.out_dim)
+        store.close()
+
+        body = client.get("/api/v1/knowledge/graph").json()
+        assert body["built"] is False
+        assert body["stale"] is True
+
+
 class TestKnowledgeReindex:
     """The health view's one action. The endpoint owns no indexing code: everything it
     does is ask the executor for `know.reindex`, so the call crosses the policy gate

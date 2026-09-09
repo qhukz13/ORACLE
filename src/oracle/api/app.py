@@ -755,6 +755,114 @@ def _register_routes(app: FastAPI) -> None:
             }
         return {"ok": True, **outcome.result.model_dump()}
 
+    @app.get("/api/v1/knowledge/graph")
+    async def knowledge_graph(
+        k: int = Query(
+            0, ge=0, le=16, description="semantic neighbours per node; 0 = measured default"
+        ),
+        threshold: float = Query(0.0, ge=0.0, le=1.0, description="0 = measured default"),
+    ) -> dict[str, Any]:
+        """The knowledge graph as the view draws it (UI.md §11b, ADR-0023).
+
+        **Reads frozen positions; it never lays out.** A read path that quietly ran the layout
+        would be the viewport simulating by another name — ADR-0023's central prohibition — and it
+        would do it for 28 seconds inside an HTTP request. Documents with no position come back in
+        `unplaced` so the view can say so and offer the re-layout, which is the honest rendering of
+        "this map is out of date" and is also OQ-22 measurement 4's recommendation: prompted, not
+        buried.
+
+        The knobs default to the measured recommendation (k=4, thr=0.85) rather than to zero. Zero
+        would be a hairball, and `off` — which this endpoint deliberately cannot express — is a
+        scatter of dots: explicit wikilinks reach 11% of this corpus.
+        """
+        from oracle.rag import graph as graph_mod
+        from oracle.rag.embedding import DEFAULT
+        from oracle.rag.store import KnowledgeStore, SchemaMismatch
+
+        st = state_of(app)
+        path = st.settings.data_dir / "knowledge.db"
+        if not path.exists():
+            return {"built": False, "path": str(path)}
+        try:
+            store = KnowledgeStore(path, DEFAULT.out_dim)
+        except SchemaMismatch as exc:
+            return {"built": False, "path": str(path), "stale": True, "error": str(exc)}
+        try:
+            store.bind(DEFAULT.name, DEFAULT.out_dim)
+            built = graph_mod.build(
+                store,
+                k=k or graph_mod.DEFAULT_K,
+                threshold=threshold or graph_mod.DEFAULT_THRESHOLD,
+            )
+        except SchemaMismatch as exc:
+            return {"built": False, "path": str(path), "stale": True, "error": str(exc)}
+        finally:
+            store.close()
+
+        # Parallel arrays, not a list of objects. At the corpus ceiling this is 10k nodes, and
+        # `{"id":…,"x":…,"y":…}` records cost roughly three times the bytes for nothing the view
+        # does not get from an index — measured on the render harness's own scene export.
+        pos = built.positions
+        return {
+            "built": True,
+            "nodes": [
+                {
+                    "id": n.id,
+                    "collection": n.collection,
+                    "project": n.project,
+                    "rel_path": n.rel_path,
+                    "kind": n.kind,
+                    "state": n.state,
+                    "degree": n.degree,
+                    "indexed_at": n.indexed_at,
+                }
+                for n in built.nodes
+            ],
+            "x": [pos.get(n.id, (0.0, 0.0, ""))[0] for n in built.nodes],
+            "y": [pos.get(n.id, (0.0, 0.0, ""))[1] for n in built.nodes],
+            "placed": [pos.get(n.id, (0.0, 0.0, ""))[2] for n in built.nodes],
+            "explicit_edges": [i for e in built.explicit_edges for i in e],
+            "semantic_edges": [i for e in built.semantic_edges for i in e],
+            "stats": built.stats,
+        }
+
+    @app.post("/api/v1/knowledge/relayout")
+    async def knowledge_relayout(
+        iterations: int = Query(0, ge=0, le=1000, description="0 = measured default"),
+    ) -> dict[str, Any]:
+        """Run the offline layout and freeze the result — an explicit action, never a side effect.
+
+        Synchronous, like the reindex above and for the same reason: it was measured at 27.8 s on
+        the real corpus, the UI's button holds its disabled state for exactly as long as the request
+        runs, and a background job would hide a thing that **destroys spatial memory**. Every
+        position may move. That is a cost the person should choose, which is why nothing calls this
+        on their behalf.
+        """
+        from oracle.rag import graph as graph_mod
+        from oracle.rag.embedding import DEFAULT
+        from oracle.rag.store import KnowledgeStore, SchemaMismatch
+
+        st = state_of(app)
+        path = st.settings.data_dir / "knowledge.db"
+        if not path.exists():
+            return {"ok": False, "error": {"kind": "no_index", "message": "no knowledge index"}}
+        try:
+            store = KnowledgeStore(path, DEFAULT.out_dim)
+        except SchemaMismatch as exc:
+            return {"ok": False, "error": {"kind": "schema_mismatch", "message": str(exc)}}
+        try:
+            store.bind(DEFAULT.name, DEFAULT.out_dim)
+            result = await asyncio.to_thread(
+                graph_mod.relayout,
+                store,
+                iterations=iterations or graph_mod.DEFAULT_ITERATIONS,
+            )
+        except SchemaMismatch as exc:
+            return {"ok": False, "error": {"kind": "schema_mismatch", "message": str(exc)}}
+        finally:
+            store.close()
+        return {"ok": True, **result}
+
     # ---------------------------------------------------------------- MCP inbound
     #
     # A delegated agent calling back into ORACLE (INTEGRATIONS.md §4). Loopback only,

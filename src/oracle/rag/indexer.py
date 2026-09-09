@@ -67,6 +67,8 @@ class IndexStats:
     chunks: int = 0
     embedded: int = 0
     pruned: int = 0
+    #: Documents given an incremental graph position this run (ADR-0023).
+    placed: int = 0
     failed: int = 0
     #: Chunks whose vector came from the cache instead of the model. On a re-chunk this
     #: is most of them, and it is the difference between 43 minutes and a few.
@@ -90,6 +92,7 @@ class IndexStats:
             "chunks": self.chunks,
             "embedded": self.embedded,
             "pruned": self.pruned,
+            "placed": self.placed,
             "failed": self.failed,
             "cached": self.cached,
             "seconds": round(self.seconds, 1),
@@ -257,6 +260,19 @@ def index(
     # Once per build, because the fusion gate needs it per query and it costs a full scan
     # (see `KnowledgeStore.record_script_census`).
     store.record_script_census()
+
+    # New documents take a position at their neighbours' centroid, **moving nothing else**
+    # (ADR-0023). This is the only layout work indexing is allowed to do: a full re-layout costs a
+    # measured 27.8 s and may move every node, so it stays an explicit action the person chooses
+    # rather than something a background index does to their map. Placement here was measured at
+    # p95 0.032 ms against a 250 ms budget, so it is free at the scale it runs.
+    #
+    # It degrades — OQ-22 measurement 4 put neighbour-set Jaccard@10 at 0.477 after a 5% holdout,
+    # against a 0.70 gate — which is why the graph endpoint reports how many nodes were placed this
+    # way and the view offers a re-layout rather than hiding the drift.
+    from oracle.rag.graph import place_new_documents
+
+    stats.placed = place_new_documents(store)
 
     stats.seconds = time.perf_counter() - started
     log.info("rag.indexed", **stats.as_dict())
