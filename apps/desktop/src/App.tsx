@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OracleClient } from "./client";
 import { CommandPalette, type PipelineEntry } from "./components/CommandPalette";
 import { GlobalSearch } from "./components/GlobalSearch";
+import { degradations } from "./degradation";
 import { AgentQueue } from "./components/AgentQueue";
 import { ConfirmationCenter } from "./components/ConfirmationCenter";
 import { DelegationPanel } from "./components/DelegationPanel";
@@ -475,6 +476,7 @@ export default function App() {
   }, [s.connection, s.retryInSec]);
 
   const waiting = s.approvals.length;
+  const degraded = degradations(s.health, s.degraded);
 
   // Resolved from the store on every render, never held: MAX_GRAPHS bounds the search
   // to at most 5 × 12 tasks, and a held copy is a projection that gets to disagree.
@@ -523,16 +525,21 @@ export default function App() {
           ⚠ {s.gapWarning}
         </div>
       )}
-      {s.degraded && (
-        // A banner, never a modal: everything deterministic still works without a
-        // model, and blocking the UI would make a degraded ORACLE useless rather than
-        // reduced (ADR-0011).
-        <div className="banner warn" role="status">
-          ⚠ {s.degraded.component} is offline — {s.degraded.reason}
-          {s.degraded.remedy ? `. Try: ${s.degraded.remedy}` : ""}. Slash commands and the
-          command palette still work.
+      {/* A banner, never a modal: everything deterministic still works without a model, and
+          blocking the UI would make a degraded ORACLE useless rather than reduced (ADR-0011).
+          One row per thing that is missing, merged from the boot health phase and any live
+          `system.degraded` — `degradations()` explains why both exist and which wins.
+
+          This used to end every row with "Slash commands and the command palette still work",
+          which is the *reasoning* fallback and is false when the index is what is down. Each
+          row now carries its own `lost`, which is what the health phase produces it for. */}
+      {degraded.map((d) => (
+        <div className="banner warn" role="status" key={d.component}>
+          ⚠ {d.component} is offline — {d.reason}
+          {d.lost ? `. Without it: ${d.lost}` : ""}
+          {d.remedy ? `. Try: ${d.remedy}` : ""}
         </div>
-      )}
+      ))}
       {s.indexing && (
         // Quieter than the banners above it, and deliberately: nothing is wrong. This is
         // the machine doing background work the user did not ask for at this moment, and

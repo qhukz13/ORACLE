@@ -238,12 +238,12 @@ The boot health phase's result, emitted once per boot and mirrored on `/api/v1/s
 
 ```json
 {"complete": true, "ok": false, "elapsed_ms": 376,
- "lost": ["reasoning — the deterministic router still answers, and slash commands, the palette, pipelines and search all still work"],
+ "lost": ["the deterministic router still answers, and slash commands, the palette, pipelines and search all still work"],
  "probes": [
    {"component": "policy", "ok": true, "detail": "armed, 3 scopes (notes, projects, scratch)",
     "lost": "", "remedy": "", "unknown": false, "elapsed_ms": 0},
    {"component": "reasoning", "ok": false, "detail": "Ollama is not reachable",
-    "lost": "reasoning — the deterministic router still answers, …",
+    "lost": "the deterministic router still answers, …",
     "remedy": "start Ollama and pull the router model", "unknown": false, "elapsed_ms": 0}
  ]}
 ```
@@ -259,7 +259,10 @@ Three fields need reading carefully, because each has an obvious wrong interpret
   Such a probe still appears in `lost`, because a hung dependency is as actionable as a dead one.
 - **`lost` is the point of the whole event.** It is [ARCHITECTURE §8](ARCHITECTURE.md#8-degradation--what-happens-when-a-piece-is-missing)'s
   table rendered as the sentence a person needs. A client that shows the component name and drops
-  `lost` has thrown away the only part that says whether to keep working.
+  `lost` has thrown away the only part that says whether to keep working. It is phrased to
+  complete *"Without it: …"*, which is how the desktop banner renders it — the first cut had each
+  string re-announce its own component and read `reasoning is offline … Without it: reasoning —
+  the deterministic router still answers`.
 
 ---
 

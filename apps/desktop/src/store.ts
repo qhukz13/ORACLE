@@ -24,6 +24,7 @@ import type {
   ToolCall,
 } from "./protocol";
 import { asRecord, num, str } from "./protocol";
+import type { BootHealthWire } from "./degradation";
 
 export interface TermChunk {
   seq: number;
@@ -61,6 +62,16 @@ interface State {
    * never something that blocks the composer.
    */
   degraded: { component: string; reason: string; remedy: string } | null;
+  /**
+   * Set by `system.health` — the boot health phase (docs/API.md). Held beside `degraded`
+   * rather than folded into it because the two answer different questions: this is every
+   * subsystem checked once at boot, that is one subsystem failing later. `degradations()`
+   * in `degradation.ts` merges them for display, and the live event wins.
+   *
+   * `null` means the daemon has not reported one yet, which is NOT the same as healthy —
+   * see `complete` on the payload.
+   */
+  health: BootHealthWire | null;
   /**
    * Set by `knowledge.state`. Indexing is background work the user did not ask for at
    * the moment it happens, and the machine getting busy without explanation is the
@@ -153,6 +164,7 @@ export const useStore = create<State>((set) => ({
   decided: [],
   gapWarning: null,
   degraded: null,
+  health: null,
   indexing: null,
   delegations: [],
   graphs: [],
@@ -175,6 +187,7 @@ export const useStore = create<State>((set) => ({
       terminal: { ptyId: null, cwd: "" },
       gapWarning: null,
       degraded: null,
+      health: null,
       indexing: null,
       delegations: [],
       graphs: [],
@@ -207,6 +220,27 @@ export const useStore = create<State>((set) => ({
           // reaches this event in order, so anything requested before the boot is cleared and
           // anything after it survives.
           next.approvals = [];
+          break;
+
+        case "system.health":
+          next.health = {
+            complete: ev.payload["complete"] === true,
+            ok: ev.payload["ok"] === true,
+            elapsedMs: num(ev.payload["elapsed_ms"]),
+            probes: (Array.isArray(ev.payload["probes"]) ? ev.payload["probes"] : []).map(
+              (raw) => {
+                const p = asRecord(raw);
+                return {
+                  component: str(p["component"]),
+                  ok: p["ok"] === true,
+                  detail: str(p["detail"]),
+                  lost: str(p["lost"]),
+                  remedy: str(p["remedy"]),
+                  unknown: p["unknown"] === true,
+                };
+              },
+            ),
+          };
           break;
 
         case "system.degraded":

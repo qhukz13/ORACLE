@@ -1020,7 +1020,7 @@ hotkey so it works when the window isn't focused — which is exactly when I'd n
 | **Empty (no results)** | Say what was searched and offer the next action ("nothing in Obsidian for *auth* — search all projects?"). |
 | **Error** | Typed cards: what failed · why (plain language) · what ORACLE tried · what I can do. Never a raw traceback in the primary surface; `[details]` expands it. |
 | **Offline (backend down)** | Full-width banner, reconnect countdown, auto-retry with backoff. Cached view stays readable. |
-| **Degraded (LLM down)** | Banner: "reasoning offline — commands and search still work". Chat input disabled with an explanation; palette stays live. This state must feel *limited*, not *broken*. |
+| **Degraded (LLM down)** | Banner: "reasoning offline — commands and search still work". Chat input disabled with an explanation; palette stays live. This state must feel *limited*, not *broken*. **As built 2026-09-10:** one banner per thing that is missing, merged from the boot health phase and any live `system.degraded` (`src/degradation.ts`), each row carrying the subsystem's own `lost` sentence. It previously ended *every* degradation with "Slash commands and the command palette still work" — the reasoning fallback, and false when the index was what was down. |
 | **Halted** | The whole UI takes a red-tinted border, the core shows `HALTED`, every action control is disabled except Resume. Unmissable by design. |
 
 ---

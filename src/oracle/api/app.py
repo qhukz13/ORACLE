@@ -541,7 +541,8 @@ def _boot_probes(st: AppState) -> dict[str, ProbeFn]:
                 component="policy",
                 ok=False,
                 detail=f"{st.policy.policy.source} declares no scopes",
-                lost="every tool that touches the disk — failing closed, which is correct",
+                lost="every tool that touches the disk is denied — failing closed, "
+                "which is correct",
                 remedy="fix config/policy.yaml; a policy that grants nothing is indistinguishable "
                 "from one that failed to load",
             )
@@ -569,7 +570,8 @@ def _boot_probes(st: AppState) -> dict[str, ProbeFn]:
         from oracle.rag.store import KnowledgeStore, SchemaMismatch
 
         path = st.settings.data_dir / "knowledge.db"
-        lost = "retrieval — lexical file search still works directly against the filesystem"
+        lost = "retrieval returns nothing, but lexical file search still works directly "
+        "against the filesystem"
         if not path.exists():
             return Probe(
                 component="knowledge",
@@ -592,7 +594,9 @@ def _boot_probes(st: AppState) -> dict[str, ProbeFn]:
                 component="knowledge",
                 ok=False,
                 detail=str(exc),
-                lost=lost + ", but every semantic answer would be nonsense until rebuilt",
+                # Not the same loss as a missing index: this one *answers*, wrongly.
+                lost="semantic search answers, and every answer is nonsense until it is "
+                "rebuilt; lexical file search is unaffected",
                 remedy=f"reindex; this build embeds with {DEFAULT.name}",
             )
         return Probe(
@@ -610,8 +614,8 @@ def _boot_probes(st: AppState) -> dict[str, ProbeFn]:
                 component="reasoning",
                 ok=False,
                 detail=st.agent.degraded or "no model provider configured",
-                lost="reasoning — the deterministic router still answers, and slash commands, "
-                "the palette, pipelines and search all still work",
+                lost="the deterministic router still answers, and slash commands, the "
+                "palette, pipelines and search all still work",
                 remedy="start Ollama and pull the router model",
             )
         return Probe(component="reasoning", ok=True, detail=str(st.provider.model))
@@ -624,8 +628,7 @@ def _boot_probes(st: AppState) -> dict[str, ProbeFn]:
                 component=f"delegation/{adapter.id}",
                 ok=False,
                 detail=pre.reason or "unavailable",
-                lost="delegation to an external agent — it degrades to a Handoff Packet "
-                "written to disk",
+                lost="delegation falls back to a Handoff Packet written to disk",
                 remedy=pre.remedy or "",
             )
         return Probe(

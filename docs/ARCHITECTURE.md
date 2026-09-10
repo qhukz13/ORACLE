@@ -326,9 +326,9 @@ The last row is the important one. A security control that fails open is not a s
 `src/oracle/core/health.py` probes what this daemon can observe at startup — policy, the event log,
 `knowledge.db`, the router model, and each delegation adapter — and reports each one as a `Probe`
 carrying `ok`, what is **lost** when it is not ok, and the **remedy**. The table above is where the
-`lost` strings come from, in the words a person needs: not `ollama: false` but *"reasoning — the
-deterministic router still answers, and slash commands, the palette, pipelines and search all still
-work"*. `ok: false` on its own is a shrug; a reader who cannot see which fallback they are in cannot
+`lost` strings come from, in the words a person needs: not `ollama: false` but *"the deterministic
+router still answers, and slash commands, the palette, pipelines and search all still work"*. Each
+is phrased to complete *"Without it: …"*, because that is the sentence the desktop banner builds. `ok: false` on its own is a shrug; a reader who cannot see which fallback they are in cannot
 tell a degraded ORACLE from a broken one.
 
 Three properties, each because the obvious implementation gets it wrong:
