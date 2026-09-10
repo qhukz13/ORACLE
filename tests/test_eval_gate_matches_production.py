@@ -56,6 +56,14 @@ def test_the_gate_constants_match_production(evalmod: ModuleType) -> None:
     assert evalmod._CYRILLIC.pattern == retrieval._CYRILLIC.pattern
 
 
+def test_the_lexical_weight_matches_production(evalmod: ModuleType) -> None:
+    """The `gated_w2` arm exists to verify ADR-0027, which it can only do if it weights the way
+    production weights. Two copies of 0.5 is one number that will eventually be two."""
+    from oracle.rag import retrieval
+
+    assert evalmod.LEXICAL_WEIGHT == retrieval.LEXICAL_WEIGHT
+
+
 def test_a_minority_script_query_does_not_open_the_gate(evalmod: ModuleType) -> None:
     """Rule 2, and the specific failure that made the drift visible.
 

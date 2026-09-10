@@ -756,6 +756,8 @@ CHECKPOINT_CHUNKS = 256
 #: them equal — an eval whose gate has drifted from production's measures nothing anybody uses.
 MIN_DF_CEILING = 5
 MIN_QUESTION_COVERAGE = 0.40
+#: Mirrored from `rag.retrieval` too, for the `gated_w2` arm — see ADR-0027.
+LEXICAL_WEIGHT = 0.5
 _CYRILLIC = re.compile(r"[Ѐ-ӿ]")
 
 
@@ -860,7 +862,17 @@ def rrf(*rankings: list[int], k: int = 60, weights: tuple[float, ...] | None = N
 #: terms to the script rule and runs `dense` (or `dense_mt`, if translation is on), while
 #: an English one runs `gated`. The composition is done in the dev log from the miss
 #: lists, which is why every arm prints its misses rather than only its score.
-STRATEGIES = ("dense", "rrf", "rrf_w2", "gated", "dense_xl", "rrf_xl", "dense_mt", "rrf_mt")
+STRATEGIES = (
+    "dense",
+    "rrf",
+    "rrf_w2",
+    "gated",
+    "gated_w2",
+    "dense_xl",
+    "rrf_xl",
+    "dense_mt",
+    "rrf_mt",
+)
 
 
 def fusions(dense: list[int], lexical: list[int], bm25: BM25, query: str) -> dict[str, list[int]]:
@@ -880,6 +892,13 @@ def fusions(dense: list[int], lexical: list[int], bm25: BM25, query: str) -> dic
         "rrf": rrf(dense, lexical),
         "rrf_w2": rrf(dense, lexical, weights=(2.0, 1.0)),
         "gated": rrf(dense, lexical) if bm25.answerable(query) else dense,
+        # What actually ships since ADR-0027: the gate decides whether BM25 is admitted at all,
+        # and the weight decides how much it counts once it is. Neither of the arms above is that
+        # combination -- `rrf_w2` is weighted but ungated, `gated` is gated but unweighted -- so
+        # the change was accepted on a ceiling estimate. This arm is what verifies it.
+        "gated_w2": (
+            rrf(dense, lexical, weights=(1.0, LEXICAL_WEIGHT)) if bm25.answerable(query) else dense
+        ),
     }
 
 
@@ -1316,7 +1335,7 @@ def main() -> int:
     # the widths here are the row's, field for field.
     hdr = (
         f"  {'model':<14}{'dim':>5}{'dense@5':>7}{'rrf@5':>7}{'rrf_w2':>8}"
-        f"{'gated':>7}{'RU@5':>7}{'chunks/s':>10}{'idx MB':>8}"
+        f"{'gated':>7}{'gated_w2':>10}{'RU@5':>7}{'chunks/s':>10}{'idx MB':>8}"
     )
     print(hdr)
     print("  " + "-" * (len(hdr) - 2))
@@ -1326,7 +1345,7 @@ def main() -> int:
         print(
             f"  {r.name:<14}{r.dim:>5}{mark}{r.fusion.get('dense', 0):>7.0%}"
             f"{r.fusion.get('rrf', 0):>7.0%}{r.fusion.get('rrf_w2', 0):>8.0%}"
-            f"{r.fusion.get('gated', 0):>7.0%}{X}"
+            f"{r.fusion.get('gated', 0):>7.0%}{r.fusion.get('gated_w2', 0):>10.0%}{X}"
             f"{r.hybrid.get('r@5/crosslang', 0):>7.0%}"
             f"{r.chunks_per_s:>10.1f}{r.index_mb:>8.0f}"
         )
