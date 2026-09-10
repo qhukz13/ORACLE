@@ -517,9 +517,11 @@ state · `since_seq`, already global and gap-free · the global HALT hotkey, alr
 window-independent.
 
 **New work.** `oracled` installed as a Windows service or scheduled task, starting
-**degraded-capable** rather than eagerly · a boot health phase over Ollama, both databases, the
-index, agent CLIs and policy · the shell attaches to a running daemon instead of supervising a
-sidecar.
+**degraded-capable** rather than eagerly · ~~a boot health phase over Ollama, both databases, the
+index, agent CLIs and policy~~ **done 2026-09-10** (`core/health.py`, reported on
+`/api/v1/status` and as a `system.health` event; see
+[ARCHITECTURE §8 — as built](ARCHITECTURE.md#8-degradation--what-happens-when-a-piece-is-missing)) ·
+the shell attaches to a running daemon instead of supervising a sidecar.
 
 **Already done in P12-T3, and this phase's main risk is already mitigated:** the briefing, and
 the `system.boot` / `system.shutdown` pair that lets it say *"ORACLE stopped unexpectedly at
@@ -537,6 +539,10 @@ daemon that died overnight being the first line of the next briefing, are both t
 **Acceptance criteria.**
 
 - [ ] Reboot the machine; ORACLE is online without anyone starting it.
+- [x] **Boot with Ollama down reaches ONLINE and says which capability is missing.** `2026-09-10` —
+      run, not asserted: Ollama stopped, daemon restarted, `/api/v1/status` reported
+      `reasoning: Ollama is not reachable` with the fallback named and the whole phase costing
+      376 ms.
 - [ ] Within 3–5 seconds of the window opening: what ran, what finished, what failed, what is
       waiting, what is next.
 - [ ] The briefing does not clear itself on render.

@@ -166,6 +166,17 @@ class DelegationService:
     def get(self, task_id: str) -> ActiveDelegation | None:
         return self._active.get(task_id)
 
+    @property
+    def adapter(self) -> ExternalAgentAdapter:
+        """The external agent this service delegates to.
+
+        Exposed for the boot health phase, which asks it for a `preflight()` — the same call
+        `_dispatch` makes before building a packet. Reaching through to `_adapter` from outside
+        would have worked and would have made the health report depend on a private name; this
+        says the dependency out loud instead.
+        """
+        return self._adapter
+
     async def run(
         self,
         packet: HandoffPacket,

@@ -23,6 +23,7 @@ from oracle.core import briefing as briefing_mod
 from oracle.core.approvals import ApprovalStore
 from oracle.core.eventlog import EventLog
 from oracle.core.events import PROTOCOL_VERSION, ClientCommand, Event, new_id
+from oracle.core.health import HealthPhase, Probe, ProbeFn
 from oracle.core.project_state import ProjectStore, effective_status, observe
 from oracle.core.projects import discover_projects
 from oracle.core.sessions import SessionStore
@@ -119,6 +120,9 @@ class AppState:
     #: Delegation capabilities and the inbound MCP call path (INTEGRATIONS.md §4).
     tokens: TokenStore
     mcp: McpCallHandler
+    #: What the boot health phase found (ROADMAP P13). Filled in the background, so it reads
+    #: `complete: false` for the first second or two of a daemon's life.
+    health: HealthPhase = field(default_factory=HealthPhase)
     schema_version: int = 0
     projects: list[str] = field(default_factory=list)
     indexer: Any = None
@@ -516,6 +520,148 @@ async def _announce_boot(st: AppState) -> None:
         log.warning("oracled.unclean_previous_run", last_event=last_event, last_seen=last_seen)
 
 
+def _boot_probes(st: AppState) -> dict[str, ProbeFn]:
+    """What the boot health phase checks, and what each failure costs.
+
+    One entry per row of ARCHITECTURE §8 ("Degradation — what happens when a piece is missing")
+    that this daemon can observe at startup. The `lost` strings are that table in the words a
+    person needs: not "ollama: false" but "reasoning — the deterministic router still answers",
+    because only the second one tells you whether to keep working.
+    """
+
+    async def policy() -> Probe:
+        # First, and the only one whose failure mode is a security property rather than a
+        # capability. §8: "A security control that fails open is not a security control." The
+        # engine already denies everything but read-only tools when the file will not parse;
+        # this probe exists so that state is *visible* rather than merely correct.
+        scopes = sorted({sc.name for sc in st.policy.policy.scopes})
+        halted = st.policy.halted
+        if not scopes:
+            return Probe(
+                component="policy",
+                ok=False,
+                detail=f"{st.policy.policy.source} declares no scopes",
+                lost="every tool that touches the disk — failing closed, which is correct",
+                remedy="fix config/policy.yaml; a policy that grants nothing is indistinguishable "
+                "from one that failed to load",
+            )
+        state = "halted" if halted else "armed"
+        return Probe(
+            component="policy",
+            ok=True,
+            detail=f"{state}, {len(scopes)} scopes ({', '.join(scopes)})",
+        )
+
+    async def events() -> Probe:
+        async with st.conn.execute("SELECT count(*) AS n FROM events") as cur:
+            row = await cur.fetchone()
+        count = int(row["n"]) if row is not None else 0
+        return Probe(
+            component="events",
+            ok=True,
+            detail=f"{count} events, last seq {st.eventlog.last_seq}",
+        )
+
+    async def knowledge() -> Probe:
+        # Opened per probe rather than held, for the reason the knowledge endpoint gives: the
+        # file is disposable and a stale handle reports a corpus that is no longer there.
+        from oracle.rag.embedding import DEFAULT
+        from oracle.rag.store import KnowledgeStore, SchemaMismatch
+
+        path = st.settings.data_dir / "knowledge.db"
+        lost = "retrieval — lexical file search still works directly against the filesystem"
+        if not path.exists():
+            return Probe(
+                component="knowledge",
+                ok=False,
+                detail=f"no index at {path}",
+                lost=lost,
+                remedy="run a reindex from the Knowledge view",
+            )
+        try:
+            store = KnowledgeStore(path, DEFAULT.out_dim)
+            try:
+                store.bind(DEFAULT.name, DEFAULT.out_dim)
+                stats = store.stats()
+            finally:
+                store.close()
+        except SchemaMismatch as exc:
+            # A model mismatch is the worst kind of healthy-looking index: every query
+            # returns something and all of it is wrong.
+            return Probe(
+                component="knowledge",
+                ok=False,
+                detail=str(exc),
+                lost=lost + ", but every semantic answer would be nonsense until rebuilt",
+                remedy=f"reindex; this build embeds with {DEFAULT.name}",
+            )
+        return Probe(
+            component="knowledge",
+            ok=True,
+            detail=f"{DEFAULT.name}, {stats.get('chunks', 0)} chunks, "
+            f"{stats.get('vectors', 0)} vectors",
+        )
+
+    async def reasoning() -> Probe:
+        # `st.agent.degraded` is set during startup by the same probe the turn pipeline uses,
+        # so this reports the runtime's own view rather than asking Ollama a second question.
+        if st.provider is None or st.agent.degraded:
+            return Probe(
+                component="reasoning",
+                ok=False,
+                detail=st.agent.degraded or "no model provider configured",
+                lost="reasoning — the deterministic router still answers, and slash commands, "
+                "the palette, pipelines and search all still work",
+                remedy="start Ollama and pull the router model",
+            )
+        return Probe(component="reasoning", ok=True, detail=str(st.provider.model))
+
+    async def delegation() -> Probe:
+        adapter = st.delegations.adapter
+        pre = await adapter.preflight()
+        if not pre.ok:
+            return Probe(
+                component=f"delegation/{adapter.id}",
+                ok=False,
+                detail=pre.reason or "unavailable",
+                lost="delegation to an external agent — it degrades to a Handoff Packet "
+                "written to disk",
+                remedy=pre.remedy or "",
+            )
+        return Probe(
+            component=f"delegation/{adapter.id}",
+            ok=True,
+            detail=pre.version or "available",
+        )
+
+    return {
+        "policy": policy,
+        "events": events,
+        "knowledge": knowledge,
+        "reasoning": reasoning,
+        "delegation": delegation,
+    }
+
+
+async def _boot_health(st: AppState) -> None:
+    """Probe, record, and say so on the event log — once, in the background.
+
+    Spawned rather than awaited. P13 budgets ~400 ms to a usable window and `claude --version`
+    spawns a process; a boot that waits for the slowest thing on the machine is the eager start
+    ADR-0025 rejected. Until this lands, `/api/v1/status` reports `complete: false`, which is a
+    different claim from "healthy" and has to look different.
+    """
+    result = await st.health.run(_boot_probes(st))
+    await st.eventlog.append(
+        Event(
+            type="system.health",
+            trace_id=bind_trace(),
+            actor="system",
+            payload=result.wire(),
+        )
+    )
+
+
 async def _prewarm(st: AppState) -> None:
     """Start the toolhost ahead of first use. Failure is logged, never fatal."""
     try:
@@ -581,6 +727,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await st.project_store.recount_all()
         if gone:
             log.warning("projects.presence_changed", projects=[p.name for p in gone])
+        # Spawned, never awaited — see `_boot_health`. Off in tests: the delegation probe
+        # spawns `claude --version`, and a hermetic suite does not run the developer's CLIs.
+        if settings.boot_health:
+            st.spawn(_boot_health(st))
         if settings.prewarm_toolhost:
             st.spawn(_prewarm(st))
         _start_indexing(st)
@@ -678,6 +828,9 @@ def _register_routes(app: FastAPI) -> None:
             "tools": [
                 {"id": c.id, "risk": c.risk.label, "summary": c.summary} for c in st.registry.all()
             ],
+            # The boot health phase (ROADMAP P13). `complete: false` means "not checked yet",
+            # which a naive health endpoint renders identically to "fine" — they are opposites.
+            "health": st.health.latest.wire(),
             "audit": {"seq": st.audit.seq, "path": str(st.audit.path)},
             "toolhost": {"running": st.host.running, **st.host.stats.snapshot()},
             "undo": {"available": len(st.undo.latest(50))},

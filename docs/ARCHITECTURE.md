@@ -321,6 +321,33 @@ An agent that becomes useless when one dependency is down is a bad agent. Explic
 
 The last row is the important one. A security control that fails open is not a security control.
 
+### As built  `P13, 2026-09-10` — the boot health phase
+
+`src/oracle/core/health.py` probes what this daemon can observe at startup — policy, the event log,
+`knowledge.db`, the router model, and each delegation adapter — and reports each one as a `Probe`
+carrying `ok`, what is **lost** when it is not ok, and the **remedy**. The table above is where the
+`lost` strings come from, in the words a person needs: not `ollama: false` but *"reasoning — the
+deterministic router still answers, and slash commands, the palette, pipelines and search all still
+work"*. `ok: false` on its own is a shrug; a reader who cannot see which fallback they are in cannot
+tell a degraded ORACLE from a broken one.
+
+Three properties, each because the obvious implementation gets it wrong:
+
+- **A probe never fails the boot.** One that raises is caught and reported as a probe bug rather
+  than a component outage; one that hangs is `unknown`, not `false`, because *"I could not tell"*
+  and *"it is down"* have different remedies. `await gather(...)` without this loses the whole
+  report to one bad probe, which is worse than the outage it was describing.
+- **It is spawned, not awaited.** Probing a CLI spawns a process; a boot that waits for the slowest
+  thing on the machine is the eager start [ADR-0025](DECISIONS.md#adr-0025--oracle-is-a-resident-service-the-window-is-a-client)
+  rejected. `/api/v1/status` carries `health.complete: false` until it lands.
+- **"Not checked yet" is not "healthy."** `all([])` is `True`, so a bare `ok` bool renders an
+  unprobed daemon as a clean bill of health. `complete` is the field that separates them.
+
+Measured on this machine: the whole phase is **376 ms** with the router down and **996 ms** warm
+(probes run concurrently, so it is the slowest probe plus overhead, not their sum). With Ollama
+stopped the daemon still reached ONLINE and the report named the loss — P13's acceptance criterion,
+run rather than asserted.
+
 ---
 
 ## 9. Component inventory

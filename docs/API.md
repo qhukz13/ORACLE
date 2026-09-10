@@ -63,6 +63,7 @@ never produces duplicates or holes. If `since_seq` is older than retention, the 
 | `index.progress` | collection, files done/total |
 | `system.metrics` | cpu, ram, gpu, vram — throttled to 1 Hz |
 | `system.degraded` | `{component, reason}` — drives the UI banner |
+| `system.health` | the boot health phase's result — see below |
 | `log.entry` | structured log line (level-filtered per client) |
 | `error` | typed error |
 
@@ -227,6 +228,38 @@ to mean anything about.
 > receives `system.boot` as its **first** event, where it previously received
 > `session.created`. Clients already MUST ignore unknown types and MUST NOT depend on the
 > type at a given index; this is the first change that makes the second rule bite.
+
+---
+
+### `system.health`  `BUILT 2026-09-10`
+
+The boot health phase's result, emitted once per boot and mirrored on `/api/v1/status` under
+`health` (ROADMAP P13, [ARCHITECTURE §8](ARCHITECTURE.md#8-degradation--what-happens-when-a-piece-is-missing)).
+
+```json
+{"complete": true, "ok": false, "elapsed_ms": 376,
+ "lost": ["reasoning — the deterministic router still answers, and slash commands, the palette, pipelines and search all still work"],
+ "probes": [
+   {"component": "policy", "ok": true, "detail": "armed, 3 scopes (notes, projects, scratch)",
+    "lost": "", "remedy": "", "unknown": false, "elapsed_ms": 0},
+   {"component": "reasoning", "ok": false, "detail": "Ollama is not reachable",
+    "lost": "reasoning — the deterministic router still answers, …",
+    "remedy": "start Ollama and pull the router model", "unknown": false, "elapsed_ms": 0}
+ ]}
+```
+
+Three fields need reading carefully, because each has an obvious wrong interpretation:
+
+- **`complete: false` does not mean unhealthy, it means not yet checked.** The phase is spawned
+  rather than awaited so boot is not held up by a process spawn, so a status call in the first
+  moments of a daemon's life sees `complete: false` with an empty `probes`. `all([])` is `true`,
+  so `ok` reads `true` there — **a client must gate on `complete` before rendering `ok`.**
+- **`unknown: true` is not `ok: false`.** The probe did not answer inside its budget. *"I could
+  not tell"* and *"it is down"* have different remedies, and collapsing them invents outages.
+  Such a probe still appears in `lost`, because a hung dependency is as actionable as a dead one.
+- **`lost` is the point of the whole event.** It is [ARCHITECTURE §8](ARCHITECTURE.md#8-degradation--what-happens-when-a-piece-is-missing)'s
+  table rendered as the sentence a person needs. A client that shows the component name and drops
+  `lost` has thrown away the only part that says whether to keep working.
 
 ---
 

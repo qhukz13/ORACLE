@@ -30,6 +30,7 @@ def settings(tmp_path: Path) -> Settings:
         llm_enabled=False,
         prewarm_toolhost=False,
         watch_knowledge=False,
+        boot_health=False,
         projects_root=tmp_path / "projects",
     )
 

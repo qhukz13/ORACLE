@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     #: would put real filesystem watches on the developer's projects during a unit run.
     watch_knowledge: bool = True
 
+    #: Probe the subsystems at boot and report what is missing (ROADMAP P13). Off in tests
+    #: for the same reason as `prewarm_toolhost`: the delegation probe runs `claude --version`,
+    #: so leaving it on would spawn a real process for every app fixture in the suite — and
+    #: a unit run's health report would describe the developer's machine, not the test's.
+    boot_health: bool = True
+
     #: Translate a minority-script question into the corpus's language and retrieve with
     #: a second dense probe, **on the Handoff Packet path only** (OQ-18, RAG.md §5).
     #:
