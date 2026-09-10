@@ -72,6 +72,16 @@ ARG_BUILDERS: dict[str, str] = {
     # neither
     "sys.info": "none",
     "sys.processes": "none",
+    # A query and nothing else — the only shape that needs neither a project nor a default.
+    #
+    # Absent from this table until 2026-09-09, which meant `know.search` was never offered and,
+    # because ADR-0017 builds the enum from the candidates, could not even be spelled. For intent
+    # `search` the router was left with exactly one tool, `fs.list`, so "search my notes for X"
+    # returned a directory listing or a request for a project. The whole retrieval stack was
+    # unreachable from a chat turn; its only callers were the global-search endpoint and delegated
+    # agents over MCP. Nothing recorded the exclusion as deliberate, and this file's own rule —
+    # only tools whose arguments can be built honestly — admits a search, which needs one string.
+    "know.search": "query",
 }
 
 #: How much of the tool catalogue may reach the prompt. Measured elsewhere: schemas are
@@ -103,6 +113,10 @@ choose."""
 #:   * status vs diff — "is X clean" wants a verdict, not a patch.
 #:   * "none" appears twice, because a model that never sees a refusal never produces
 #:     one: both misses in the baseline were the model reaching for the nearest tool.
+#:   * search vs list — added 2026-09-09 with `know.search`. These are the two tools now
+#:     competing for a `search` intent, and the failure that made the gap visible was the model
+#:     reaching for `fs.list` because it was the only thing offered. Showing both, adjacent,
+#:     is the same lever as add-vs-commit.
 _EXAMPLES = """Examples:
 
 "commit my changes with message fix the login redirect"
@@ -115,6 +129,9 @@ _EXAMPLES = """Examples:
 "what changed since the last commit" -> {"tool":"git.diff","text":""}
 "run the tests" -> {"tool":"dev.run_tests","text":""}
 "run only the login tests" -> {"tool":"dev.run_tests","text":"login"}
+"what do my notes say about taint tracking"
+  -> {"tool":"know.search","text":"taint tracking"}
+"list the files in the src directory" -> {"tool":"fs.list","text":""}
 "delete all the log files" -> {"tool":"none","text":""}
 "send this to the printer" -> {"tool":"none","text":""}"""
 
@@ -244,6 +261,15 @@ def build_args(tool_id: str, text: str, project_path: Path | None) -> dict[str, 
 
     if shape == "none":
         return {}
+
+    # Before the project check, deliberately: a search of the index is not a search of a
+    # directory, and requiring a project here would refuse the commonest phrasing there is
+    # ("what do my notes say about X"). `know.search` scopes itself by collection, not by path.
+    if shape == "query":
+        query = text.strip()
+        if len(query) < 2:
+            raise SelectionError("a search needs something to search for")
+        return {"query": query}
 
     if project_path is None:
         raise SelectionError(f"{tool_id} needs to know which project")

@@ -54,6 +54,17 @@ CASES: list[tuple[str, str, str | None]] = [
     ("show me the recent commits", "status", "git.log"),
     ("how much RAM is free", "status", "sys.info"),
     ("what is in the Asterim folder", "status", "fs.list"),
+    # knowledge search, added 2026-09-10 with `know.search`. The first two are the exact
+    # phrasings that failed live while no `know.*` tool was offerable: both classified as
+    # intent `search` and then selected `fs.list`, because it was the only candidate. The
+    # `fs.list` pair below them is the point of including these at all — a search of the
+    # index and a listing of a directory are the two tools now competing for that intent,
+    # and an eval that only tested the new one could not see the confusion it introduces.
+    ("search the knowledge index for taint tracking", "search", "know.search"),
+    ("search my indexed notes and projects for taint tracking", "search", "know.search"),
+    ("what do my notes say about backpropagation", "question", "know.search"),
+    ("найди в заметках про обучение с подкреплением", "search", "know.search"),
+    ("list the files in the Asterim src directory", "search", "fs.list"),
     # things no offered tool does — the model must be able to say no
     ("delete all the log files", "modify", None),
     ("send this to the printer", "run", None),
@@ -65,6 +76,11 @@ async def main() -> int:
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--model", default="qwen3.5:0.8b")
     args = parser.parse_args()
+    # `--verbose` prints the case text, and a third of these cases are Russian. On this console
+    # that made the eval die with UnicodeEncodeError partway through its own report — the same
+    # defect `scripts/check.py` carried until 2026-09-09, and the same fix. A measurement that
+    # cannot print its result is not a measurement.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
     provider = OllamaProvider(model=args.model, num_ctx=16384)
     try:

@@ -779,9 +779,13 @@ button.tt-id:hover { text-decoration: underline; border: none; }
   white-space: nowrap;
 }
 .kgraph-list {
-  width: clamp(180px, 34%, 300px);
+  /* Floor raised from 180px when the pin checkboxes landed: checkbox + swatch + the
+     "notes · 23 links" meta are all fixed-width, and at 180px they left the filename about
+     40px — every row rendered as "B…". The name is the only part of a row anyone reads. */
+  width: clamp(220px, 34%, 320px);
   flex: none;
   overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--bg-1);
@@ -825,14 +829,20 @@ button.tt-id:hover { text-decoration: underline; border: none; }
   flex: none;
 }
 .kgraph-name {
-  flex: 1;
+  /* Takes the majority of the row and never yields it: the meta truncates first. */
+  flex: 1 1 60%;
+  min-width: 5ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .kgraph-item .muted {
   font-size: 11px;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .kgraph-sel {
   display: flex;

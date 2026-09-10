@@ -161,6 +161,29 @@ describe("KnowledgeGraph", () => {
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ rel_path: "a.md" }));
   });
 
+  it("pans from the point the gesture started, not from wherever the ref is now", () => {
+    /* The observable half of a crash found live: `setCamera`'s updater ran after `onPointerUp`
+       had nulled the drag ref, `drag.current!.cx` threw, and the whole stage went blank.
+       The fix is to copy the ref into a local before the updater closes over it.
+
+       **This does not reproduce the original timing** — React flushes updates synchronously
+       under `fireEvent`, and with the old code a move arriving after release hit the
+       `if (drag.current)` guard and returned early. What it does pin is the property that made
+       the fix correct: each move is computed from the gesture's *start* point, so two moves in
+       one gesture do not accumulate, which is only true because the value is captured. */
+    const { container } = render(<KnowledgeGraph data={data()} />);
+    const stage = container.querySelector(".kgraph-canvas") as HTMLElement;
+    fireEvent.pointerDown(stage, { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(stage, { clientX: 40, clientY: 40, pointerId: 1 });
+    // Two moves in one gesture. If the handler read the ref inside the updater and accumulated,
+    // the second would compound the first instead of replacing it.
+    fireEvent.pointerMove(stage, { clientX: 70, clientY: 70, pointerId: 1 });
+    fireEvent.pointerUp(stage, { clientX: 70, clientY: 70, pointerId: 1 });
+    // And a stray move after release must not throw.
+    fireEvent.pointerMove(stage, { clientX: 90, clientY: 90, pointerId: 1 });
+    expect(screen.getByRole("img")).toBeTruthy();
+  });
+
   describe("the use question — what was retrieved, and from where", () => {
     const trace = (over: Partial<RetrievalTrace> = {}): RetrievalTrace => ({
       id: "42",

@@ -519,21 +519,24 @@ export function KnowledgeGraph({
   };
   const onPointerMove = (e: React.PointerEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    if (drag.current) {
+    // Captured before `setCamera`, never dereferenced inside it. React runs the updater
+    // asynchronously, so a `drag.current!` in there reads whatever the ref holds *then* — and
+    // `onPointerUp` sets it to null. Releasing the mouse mid-pan crashed the whole view with
+    // "Cannot read properties of null (reading 'cx')", which took the stage down to a blank
+    // panel rather than degrading. A ref is not a value until you copy it out.
+    const from = drag.current;
+    if (from) {
       const s = fit * camera.zoom;
-      setCamera((c) => ({
-        ...c,
-        cx: drag.current!.cx - (e.clientX - drag.current!.x) / s,
-        cy: drag.current!.cy - (e.clientY - drag.current!.y) / s,
-      }));
+      const dx = (e.clientX - from.x) / s;
+      const dy = (e.clientY - from.y) / s;
+      setCamera((c) => ({ ...c, cx: from.cx - dx, cy: from.cy - dy }));
       return;
     }
     setHovered(pick(e.clientX - rect.left, e.clientY - rect.top));
   };
   const onPointerUp = (e: React.PointerEvent) => {
-    const moved =
-      drag.current &&
-      Math.hypot(e.clientX - drag.current.x, e.clientY - drag.current.y) > 3;
+    const from = drag.current;
+    const moved = from !== null && Math.hypot(e.clientX - from.x, e.clientY - from.y) > 3;
     drag.current = null;
     if (moved) return;
     const rect = e.currentTarget.getBoundingClientRect();
