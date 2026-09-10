@@ -38,6 +38,7 @@ doc, delete the marker.
 | [OQ-24](#oq-24) | Does observing every project fit the glance budget? | **RESOLVED 2026-08-28** — no: 1.7–2.7 s warm for 8 rows; the sidebar observes lazily, per selected row | — | measured by `scripts/measure_observation.py` |
 | [OQ-25](#oq-25) | Did adding the `continue` label move intent accuracy? | **RESOLVED 2026-08-28** — 97.1% at eleven labels (was 93.3% at ten); the slot fails only for the name `ORACLE`, which the deterministic fallback carries | — | eval re-run with 4 `continue` cases |
 | [OQ-26](#oq-26) | What does indexing ourselves cost the measurement? | `EXPERIMENT NEEDED` | — | **48% of top-5 lexical slots go to ORACLE's own writing about the eval, and it grows with every dev log** |
+| [OQ-27](#oq-27) | Should a graph-dispatched egress approval expire? | `EXPERIMENT NEEDED` | P12 DoD | **A gated graph decays into a failed one in 180 s; you cannot walk away** |
 
 ---
 
@@ -1172,3 +1173,38 @@ prose. **182 of 1,738 documents** are config, and 9,285 of 27,967 chunks are lex
 not a rounding error. Whether some config kinds should be embeddable costs a reindex to answer and
 should not be attempted before the contamination question above is settled — otherwise the two
 changes land together and neither is attributable.
+
+---
+
+### OQ-27
+**Should a graph-dispatched egress approval expire like an interactive one?**
+`EXPERIMENT NEEDED` · **opened 2026-09-10 by P12-T5's first real run** · blocks P12's Definition of
+Done as written
+
+P12 says a person *"says 'continue Asterim', **walks away**, and comes back to a completed or gated
+task graph"*. Measured on the first real run: **you cannot walk away.** A five-task graph raised two
+T3 egress cards within minutes of dispatch; both expired at 180 s (`resolution: expired, by:
+timeout`), both tasks failed, and all three dependents were skipped. A ten-task plan would raise ten.
+
+**A gated graph does not wait — it decays into a failed one**, in about the time it takes to make
+coffee.
+
+The 180 s expiry is *correct* for an interactive approval, where a stale card is a stale question
+and silently holding one open is how a person approves something they have forgotten the context of.
+It is wrong for a dispatched one, where the person deliberately started long-running work and the
+entire premise is that they are not watching.
+
+**Do not resolve this by enlarging the number until a demo passes.** Candidates, each with a real
+cost:
+
+1. **A longer expiry for graph-dispatched egresses only.** Cheapest, and it only moves the cliff.
+2. **A queue that holds cards until answered**, failing only on explicit refusal. Matches the
+   "walks away" promise exactly, and means a graph can sit half-run indefinitely — which is a new
+   state the UI, the scheduler and crash recovery all have to represent honestly.
+3. **Pre-authorise a graph's egresses at the graph-approval card.** One decision about ten known
+   delegations instead of ten decisions about one each. Arguably what the graph card already
+   *implies* to the person clicking it — and arguably a weakening of SECURITY.md's rule that
+   nothing leaves the machine without a human pricing *that* egress. The preview would have to show
+   what all ten will send, which may be the honest version of the card anyway.
+
+**Whichever is chosen needs an ADR**, because it changes what an approval means.

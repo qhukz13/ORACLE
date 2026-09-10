@@ -114,3 +114,66 @@ nobody being there, and somebody was.
 **What is no longer blocked by 0 rows:** [OQ-14](../../docs/OPEN_QUESTIONS.md#oq-14) can finally be
 judged against real data, the execution tree's acceptance can be assessed, `TaskTree`'s fixture can
 be re-recorded from the wire, and the agent queue has something to render.
+
+
+---
+
+## Addendum: the graph was approved and run, and it exposed a hole in the Definition of Done
+
+The owner then said *"approve the graph and let it run."* That is their call and it was made
+plainly, so the graph was re-planned and approved (`ai.graph … resolution: approved, by: user`).
+
+**The second plan was better aimed than the first**, because it read a ledger updated an hour
+earlier and picked exactly what that ledger said was newly unblocked:
+
+| task | objective | outcome |
+|---|---|---|
+| a | read OQ-14 in full and gather real evidence | **failed** |
+| b | re-record `TaskTree`'s fixture from a fresh real graph | **failed** |
+| c, d | verify the suite; review task b's diff | skipped |
+| e | report from task a's findings | skipped |
+
+`tasks` is now **11 rows** — 6 succeeded, 2 failed, 3 skipped.
+
+**Both delegations failed for one reason: their egress approvals expired at 180 s.** Not refused —
+`resolution: expired, by: timeout`. Every delegation the graph dispatches raises its *own* T3 card,
+because nothing leaves this machine without a human pricing it, and each card has three minutes.
+
+### The hole
+
+P12's Definition of Done reads:
+
+> *A person says "continue Asterim", **walks away**, and comes back to a completed or gated task
+> graph whose every number came from the machine rather than from a fixture.*
+
+**You cannot walk away.** A five-task graph raised two egress cards within a few minutes of
+dispatch, and a ten-task one would raise ten. Each expires in 180 s, and an expired card fails its
+task, which skips everything downstream. So a "gated" graph does not *wait* — it **decays into a
+failed one** in the time it takes to make coffee.
+
+"Completed **or gated**" is the right intent, and the timeout is what breaks it. The three-minute
+expiry is correct for an *interactive* approval, where a stale card is a stale question. It is wrong
+for a *dispatched* one, where the person deliberately started a long-running graph and the whole
+point is that they are not watching.
+
+That is a real design tension and it should not be resolved by lengthening a number until the demo
+passes. The options are at least: a longer expiry for graph-dispatched egresses; a queue that holds
+cards until answered and fails only on explicit refusal; or pre-authorising a graph's egresses at
+the graph-approval card, which is one decision about ten known delegations rather than ten decisions
+about one each — and which is arguably what the graph card *already implies* to the person clicking
+it.
+
+**Two of the expiries were my own fault** and are worth separating from the design finding: one
+polling loop used a shell glob whose pattern order could never match, and one in-page wait ran
+longer than the tool's own timeout. Even without those, the arithmetic does not work — ten cards,
+three minutes each, and a human required at every one.
+
+### What the run bought anyway
+
+* `tasks` holds **11 rows with real statuses including failures and skips**, which is *better*
+  material for the execution tree than an all-green run: it can now be asked "what failed, why" and
+  have a true answer.
+* The planner demonstrably plans from **current** state — it picked up a ledger edit made an hour
+  before and turned it into two correctly-scoped tasks.
+* The per-task egress gate is confirmed to fire on every delegation, which is SECURITY.md's promise
+  holding under a graph rather than a single call.

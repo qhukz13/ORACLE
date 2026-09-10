@@ -7,9 +7,10 @@
 
 ## Task
 
-**`tasks` is no longer 0 rows and the continue loop runs end to end. Next up: judge
-[OQ-14](OPEN_QUESTIONS.md#oq-14) against real data (the orbit's go/no-go), re-record `TaskTree`'s
-fixture from the wire, and the two decisions still waiting on the owner.**
+**`tasks` is 11 rows and the continue loop runs end to end — but it cannot be walked away from
+([OQ-27](OPEN_QUESTIONS.md#oq-27)). Next up: settle OQ-27, then judge
+[OQ-14](OPEN_QUESTIONS.md#oq-14) against real data and re-record `TaskTree`'s fixture from the
+wire.**
 
 **Phase:** [11 — execution visualisation & advanced UI](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc) · **Scope:** Capability arc
 **Status:** `READY` · **Set:** 2026-09-09 · **Blocked on:** nothing
@@ -57,9 +58,20 @@ verified against the real corpus at 1,564 documents / 3,465 edges.
   decisions escalated to the owner an hour earlier (RRF weighting; eval self-indexing). A blanket
   "approve everything" is approval to *run the loop*, not licence to let ten delegations settle
   questions that were just argued to belong to a human.
+  **Then the owner said run it.** Re-planned, approved, dispatched — and the second plan was better
+  aimed than the first, picking exactly what this ledger had listed as newly unblocked (read OQ-14
+  for real evidence; re-record `TaskTree`'s fixture). **Both delegations then failed because their
+  egress approvals expired at 180 s** — `resolution: expired, by: timeout` — and the three
+  dependents were skipped. `tasks` is now **11 rows: 6 succeeded, 2 failed, 3 skipped**.
   **Acceptance now:** plan-from-real-state ✓ · sidebar ✓ · gate green ✓ · *"one end-to-end run
-  writes rows to `tasks`"* — 6 rows from the pipeline, none from the continue graph, so this is one
-  product decision away · *"observed state is never persisted"* still needs its test.
+  writes rows to `tasks`"* — 11 rows now exist with real failures, which is better material for the
+  execution tree than an all-green run · *"observed state is never persisted"* still needs its test.
+- **⚠ [OQ-27](OPEN_QUESTIONS.md#oq-27) — P12's Definition of Done says "walks away", and you
+  cannot.** Every delegation a graph dispatches raises its own T3 egress card with a 180 s expiry,
+  so **a gated graph decays into a failed one** in about the time it takes to make coffee. The
+  timeout is right for an interactive approval and wrong for a dispatched one. Three candidate
+  fixes, each with a real cost, are in the question; whichever is chosen **needs an ADR**, because
+  it changes what an approval means. Do not fix it by enlarging the number until a demo passes.
 - **Now unblocked by `tasks` being non-zero:** [OQ-14](OPEN_QUESTIONS.md#oq-14) can be judged
   against real data (the orbit's go/no-go) · the execution tree's acceptance can be assessed — it
   already renders the real graph with the `dagColumns` longest-path ranking working (`audit` at
