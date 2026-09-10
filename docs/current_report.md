@@ -3,145 +3,119 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** find the state, find the next task, build it — then continue.
-**Status:** **OQ-22 resolved, ADR-0023 confirmed, and P11-T3 (the knowledge graph) built and
-running against the real corpus** — including retrieval traces and collection hulls. Six commits on
-`main`, gate green on all seven steps each time. One piece of §11b remains: select-as-context.
-**Date:** 2026-09-09
-**Dev log:** [canvas vs SVG, answered](../logs/development/2026-09-09-oq22-canvas-vs-svg.md) ·
-data in `logs/measurements/oq22-render.json`
+**Task:** find the state, find the next task, build it — then keep going.
+**Status:** **OQ-22 and OQ-18 both resolved. Phase 11's knowledge graph (§11b) is built in full.
+Retrieval now reaches a chat turn, which it never did before.** Fourteen commits on `main`, gate
+green each time.
+**Date:** 2026-09-09 → 2026-09-10
+**Dev logs:** [canvas vs SVG](../logs/development/2026-09-09-oq22-canvas-vs-svg.md) ·
+[OQ-18 resolved](../logs/development/2026-09-10-oq18-resolved.md) ·
+[the sleep that was not a sleep guard](../logs/development/2026-09-09-oq18-the-wrong-thing-hardened-twice.md)
 
 ---
 
-## The eleven-day gap contained nothing, and OQ-18 is still unmeasured
+## 1 · OQ-22 resolved — ADR-0023 confirmed
 
-The 04:00 OQ-18 run **died four minutes in** on 2026-08-29 — exit `1073807364`
-(`DBG_TERMINATE_PROCESS`) at 04:05, 256 of 16,717 chunks. `WakeToRun` woke the machine and
-something put it back to sleep; the sleep guard did not hold. The task is still registered, has not
-fired since, and the checkpoint is 256 chunks — so a re-fire is effectively a cold 2.5–3 h run, and
-whatever stopped it wants diagnosing first.
+Canvas holds **p50 6.1 ms — the vsync interval exactly** on this **163.9 Hz** panel; SVG holds
+12.2 ms, exactly twice it, missing 96% of frame budgets. Idle 1.09% of one core, first paint 10.1 ms.
 
-## 1 · OQ-22 measurement 2 — canvas vs SVG, answered
+**The verdict is narrower than "canvas won".** Against OQ-22's *written* gate — 60 fps — every
+renderer passes; SVG turns in 82. They separate only against the measured refresh rate. On a 60 Hz
+panel the canvas complexity would be unjustified at this node count, exactly as OQ-22 suspected.
+What carries it past this panel is the ceiling: 10k documents is ~32,000 SVG elements against 4,523.
 
-Run in the **real Tauri/WebView2 window** at the scene measurement 3 chose (1,420 nodes,
-3,103 edges, rebuilt from the frozen artifacts).
+Two of my own hypotheses were wrong: the SVG variants came out **identical** (the cost is
+compositing elements, not the 1,420 per-frame attribute writes), and canvas hit-testing beat
+`elementFromPoint` by **4–9×**.
 
-| renderer | fps | p50 | over budget | first paint | pick |
-|---|---|---|---|---|---|
-| **canvas** | **163.9** | **6.1 ms** | **2.6%** | 10.1 ms | **0.0 ms** |
-| svg-group | 82.0 | 12.2 ms | 96% | 26.5 ms | 0.4 ms |
-| svg-constant | 82.0 | 12.2 ms | 97% | 24.0 ms | 0.3 ms |
+## 2 · OQ-18 resolved — the mechanism reaches the ceiling, the gate does not
 
-Idle with the graph mounted: **1.09% of one core**.
+| arm | r@5 | RU-only |
+|---|---|---|
+| dense | 61% | 56% |
+| **rrf_w2** | **68%** | — |
+| dense_xl — *human translation, the ceiling* | 66% | 64% |
+| **dense_mt — *0.8b translation, the mechanism*** | **66%** | **64%** |
+| rrf_mt | 58% | — |
 
-**The verdict is narrower than "canvas won".** Against OQ-22's written gate — 60 fps — *every*
-renderer passes; SVG turns in 82. They separate only against the display's **measured 163.9 Hz**,
-where canvas sits at exactly one vsync interval and SVG at exactly two. On a 60 Hz panel SVG would
-pass on merit and the canvas complexity would be unjustified at this node count, which is what
-OQ-22 suspected when it demanded the control. What carries the decision past this panel is the
-ceiling: 10k documents is ~32,000 SVG elements against today's 4,523.
+`dense_mt` and `dense_xl` are **identical**. An 0.8b model's translation is as good as a human's for
+retrieval, so **there is no headroom left in a better translator** — a closed direction.
+`Settings.translate_queries` stays `True` on evidence: 61% → 66%, and 56% → 64% on Russian.
 
-Two results contradicted the reasoning going in. The SVG variants came out **identical**, so the
-cost is compositing 4,523 elements rather than the 1,420 per-frame attribute writes — constant-size
-nodes are free. And canvas hit-testing, written as a naive O(n) scan *specifically* to keep its cost
-visible, beat `elementFromPoint` by **4–9×**; ADR-0023's accessibility debt stands in full, the
-performance cost it implied does not exist.
+**The 80% gate is still missed at 68%.** Phase 5's recall criterion remains unmet, said plainly
+rather than moved.
 
-**The trap, which is the more transferable result.** The first attempt ran in a hidden pane where
-`visibilityState` reported `"visible"`, `document.hidden` was `false`, `setTimeout` fired normally —
-and `requestAnimationFrame` delivered **zero callbacks in 1,500 ms**. Every guard anyone would reach
-for passes there. The harness now checks the frame loop itself and refuses rather than reporting.
+**Two cheap follow-ups, both seconds because the forward pass is cached:** the winning arm
+(`rrf_w2`, no translation) has never been composed with translation — there is no `rrf_w2_mt`; and
+`gated`, which exists to be language-aware fusion, scores identically to plain `rrf`, so **the gate
+is not doing its job**. BM25 scores **0.00** on cross-language queries and dilutes a good dense
+ranking, which is why naive `rrf_mt` (58%) is worse than not translating at all.
 
-## 2 · P11-T3 — the knowledge graph, built
+`en-relay-dockerfile` misses in all eight arms because `Dockerfile.relay` is `CONFIG` (never
+embedded) *and* because a filename is not searchable at all — `rel_path` is `UNINDEXED`. Kept as a
+true negative; the generalisation is **[OQ-26](OPEN_QUESTIONS.md#oq-26)**.
 
-`rag/graph.py` + `GET /api/v1/knowledge/graph` + `KnowledgeGraph.tsx` on **Ctrl+5**. Verified
-against the real corpus rather than a fixture:
+## 3 · Phase 11's knowledge graph, built in full
 
-**1,564 documents · 988 wikilinks · 2,477 inferred edges · 195 orphans**, response 154 ms / 496 KB.
-`Learning Path.md` answers the reach question with *126 direct, 34 at two hops*. The map also
-*shows* measurement 3b's finding instead of merely citing it: the vault and the projects render as
-two populations that visibly barely touch.
+`rag/graph.py` + two endpoints + `KnowledgeGraph.tsx` on **Ctrl+5**, against the real corpus:
+**1,565 documents · 988 wikilinks · 2,480 inferred edges · 195 orphans**. All of §11b now exists —
+the map, retrieval traces, collection hulls, the labelled legend, and select-as-context.
 
-Two tables were added and neither bumps `_SCHEMA_VERSION` — the disposable-index contract exists so
-a schema change cannot leave *stale* rows, and a table that did not exist has none. Bumping would
-have charged every existing index a ~1 h rebuild to add two empty tables.
+Select-as-context fills **band 6**, which was empty because *search* on the answer path costs
+seconds. A pin has no query, so the argument does not apply. Provenance rides on each pinned
+document: choosing a file by hand does not launder its taint.
 
-The layout is the measured one ported whole, **including the hash seeding**, which is the part that
-matters: array-order seeding makes every position depend on how many documents exist and in what
-order they arrived, so indexing one file moves the entire map. It still renders and cannot be
-learned. There is a test pinning it.
+**Defects only real use found** — none of which the suite could see, because none of those tests lay
+anything out or run a browser: the canvas sized itself **166 × 11280**; a horizontal scrollbar sat
+under a pannable map; `unplaced` counted 106 documents that can *never* be placed, producing a
+permanent banner offering an action that could not change the number; list rows rendered as `"B…"`;
+and the pan handler dereferenced a ref inside an async state updater, blanking the whole stage on
+mouse-release.
 
-### Three defects only a real window found
+## 4 · ORACLE could not retrieve from a chat turn — fixed
 
-Every one of these passed the test suite, because none of those tests lay anything out.
+The largest single finding of the session, and it was not a model-quality problem.
 
-1. **The canvas was 166 × 11280** — a tall thin strip, off screen, with a 1.9-megapixel backing
-   store. The stage panel is a plain block with no definite height, so `height: 100%` resolved to
-   `auto` and the 400-row list drove the panel to 11,662 px.
-2. **A horizontal scrollbar under a pannable map** — the filter row measured 554 px against a
-   523 px stage. That is the one place a reader cannot tell which surface their trackpad will move.
-3. **`unplaced` counted documents that can never be placed.** Config has no vector by policy, so on
-   the real corpus 106 of 1,561 documents produced a permanent *"106 documents have no settled
-   position — Re-layout"* banner offering a 30-second action that could not change the number. A
-   prompt that can never be satisfied trains the reader to ignore the one that matters. Now 3, and
-   the 3 are real — the watcher had indexed the files this session wrote.
+`router/selection.py` filters candidates through `ARG_BUILDERS`, and **no `know.*` tool was in it**.
+For intent `search` the router was offered **exactly one tool, `fs.list`** — and ADR-0017 builds the
+enum from the candidates, so the decoder could not spell `know.search`. The whole retrieval stack
+was unreachable from chat; its only callers were the global-search endpoint and MCP delegates.
 
-**The re-layout's cost is now measured, not claimed:** 34 s for the layout plus a one-time 88 s
-vector backfill. The docstring said 28 s and the button said "~30 s"; the first run anyone makes is
-~2 minutes, so both say so now and the API returns the two numbers separately.
+Fixed with a `"query"` shape that needs no project. `eval_selection.py` re-run as the discipline
+requires — **25/25**, up from 20/20, with five new cases. Verified end to end: a live turn now emits
+`tool.started know.search` → `tool.finished`, and **the knowledge map's retrieval trace lit up for
+the first time**.
 
-## 3 · The graph's remaining pieces — two of three
+⚠ **What that immediately revealed:** the top hits for *"taint tracking"* were ML notes about
+*experiment tracking* and a `budget.py`, not `SECURITY.md §6`. The plumbing is right; the ranking is
+the 68% OQ-18 measured, now visible on a real query.
 
-**Retrieval traces** (`toTraces`) read the *use* question out of the event log rather than storing
-it: every `tool.finished` for a `know.*` call already carries citations, and a citation's
-`collection` + `path` reconstruct exactly the node id the graph addresses. A table for this would be
-a second copy of a fact the log owns. Co-cited documents are ringed and joined with a dashed loop —
-not more graph edges, because co-citation is a fact about one turn, not a property of the corpus.
-A cited document that has left the index is named, not silently dropped.
+## 5 · Things found in passing, all fixed
 
-**⚠ Never verified live.** The 0.8b router classified *"search the knowledge index for taint
-tracking"* as intent `search` — correct — and then selected **`fs.list`**, replying *"I don't have a
-tool for that yet."* `know.search` was never called, so no real retrieval could light the map up.
-qwen2.5:7b does not fit this GPU (the turn stalled with no runner loaded). The derivation is tested
-against the exact payload `to_citation` emits, field names and all; the end-to-end path is not.
-**This is a tool-selection finding in its own right** — intent routing works, selection does not —
-and `scripts/eval_selection.py` is the harness that should be pointed at it.
+- **ADR-0023 spent two weeks contradicting its own measurement** ("semantic edges default off",
+  disproved 2026-08-26).
+- **`check.py` crashed while *printing* a failing step** — the gate died exactly when it had
+  something to say. `eval_selection.py --verbose` carried the identical defect on its Russian cases.
+- **A security test raced its own startup**, launching a process that exits in milliseconds and then
+  asserting it was alive — ~1 run in 3, blaming the Job Object.
+- **A retrieval fixture pointed at a moved file**, an automatic miss for every arm.
+- **Vite's watcher killed the dev server** by opening the Rust binary mid-link.
 
-**Collection hulls, and an honest correction.** The first version hulled each collection whole and
-was useless: orphans sit on an outer ring *by design*, so the convex hull of a collection is the
-convex hull of the ring — a polygon covering the whole map that says only "these exist". §11b asks
-for a region behind each *cluster*, and with orphans on the rim a collection is not one. Outliers
-are dropped before hulling now, so the hull traces the core and orphans fall visibly outside it.
+## 6 · One retraction
 
-**The hull is still the weakest carrier and is flagged as on probation.** What actually stops
-collection being colour-alone is the **labelled legend** and the collection name written into every
-list row — both verified live (`projects 1,397 · notes 167`).
+I diagnosed an OQ-18 run as a thread-pool deadlock — 0% CPU samples, 71 threads in `Wait`, a py-spy
+stack inside `session.run()`. **All real, and the conclusion was wrong.** It was running at 0.20
+chunks/s because two full `check.py` runs were executing in the same window; each batch took ~81 s,
+so a stack sample landed inside `run()` essentially always. **The starvation was mine** — I had
+written "don't run the test suite while it runs" into the ledger hours earlier.
 
-## 4 · Four defects found in passing, all fixed
+Kept in the script rather than deleted: *a stack in native code proves where a thread is, not that
+it is stuck*, and `Win32_Processor LoadPercentage` is a stale counter that was trusted over the
+eval's own instrumentation.
 
-- **ADR-0023 had spent two weeks telling readers the opposite of its own measurement** — its
-  consequences still said semantic edges "default off", which measurement 3 disproved on
-  2026-08-26. UI.md's table said it too, three paragraphs below a note saying it was backwards.
-- **`tauri dev` and Vite could not coexist**: Vite's watcher opened the Rust binary mid-link, died
-  with `EBUSY`, and left the Tauri window pointed at nothing — presenting as "the harness didn't
-  run". Fixed with `server.watch.ignored`.
-- **`check.py` crashed while *printing* a failing step's output** (`UnicodeEncodeError`, cp1252), so
-  the gate died exactly when it had something to say and the failure was lost. It read as a broken
-  script rather than a broken build.
-- **A security-suite test was racing its own startup.** The app-detachment test launched
-  `python.exe` with no arguments and no stdin — which exits in milliseconds — then asserted it was
-  still alive, failing about one run in three and blaming the Job Object. It now launches something
-  that sleeps: five for five, and faster.
+## Gate
 
-## 5 · Global search still misses its budget
-
-Measured for the first time (the previous session could not — `know.*` was returning refusals):
-warm **504–1,467 ms**, cold **7,932 ms**, against TESTING.md's **p95 < 300 ms**. Not a regression —
-the first time the number could be taken. It wants its own task.
-
-## 6 · Gate
-
-`scripts/check.py` — all seven steps green on an unloaded machine (ruff format, ruff lint, mypy,
-tsc, pytest, security, vitest). The CPU-starvation flake was seen once more under real load and is
-now on its **fourth** sighting across two distinct tests, which is past the point where those
-wall-clock assumptions should stay implicit.
+All seven steps green. The wall-clock flake family now spans **three** tests
+(`test_a_long_burst_arrives_complete`, `test_a_burst_becomes_one_group`, and a WebSocket timeout);
+a fourth — the app-detachment race — turned out to be a real defect and is fixed. The rest still
+carry implicit timing assumptions and should become explicit perf tests.

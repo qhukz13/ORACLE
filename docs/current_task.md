@@ -7,8 +7,8 @@
 
 ## Task
 
-**OQ-18 is resolved and P11-T3 is done. Next up: the tool-selection defect — ORACLE cannot
-retrieve from a chat turn — then OQ-18's two cheap follow-ups.**
+**OQ-18 resolved, P11-T3 done, and retrieval reaches chat. Next up: OQ-18's two cheap
+follow-ups (compose the levers; fix the `gated` arm), then OQ-26's free half.**
 
 **Phase:** [11 — execution visualisation & advanced UI](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc) · **Scope:** Capability arc
 **Status:** `READY` · **Set:** 2026-09-09 · **Blocked on:** nothing
@@ -70,28 +70,16 @@ verified against the real corpus at 1,564 documents / 3,465 edges.
 - **The reindex is still unfired** — 57% of live rows exceed the 1200-char cap. `POST
   /api/v1/knowledge/reindex` is verified live. Full rebuild ~1 h synchronous. Note it will also
   repopulate `document_vectors` as it goes, which makes the graph's one-time 88 s backfill free.
-- **⚠ ORACLE cannot retrieve from a chat turn — root cause found 2026-09-09, patch staged.**
-  Not a model-quality problem, which is where two sessions' suspicion went.
-  `router/selection.py` filters candidates through `ARG_BUILDERS`, a hand-maintained whitelist, and
-  **no `know.*` tool is in it**. For intent `search` the router is offered **exactly one tool:
-  `fs.list`** — and per ADR-0017 the enum is built from the candidates, so the decoder cannot even
-  spell `know.search`. The whole RAG stack is unreachable from chat; its only runtime callers are
-  the `Ctrl+Shift+F` search endpoint and delegated agents over MCP. `selection.py`'s own rule
-  ("only tools whose arguments can be built honestly are offered") *admits* a search, which needs
-  one string, so this is an omission and nothing in `docs/` records it. The exact patch — plus the
-  warning not to add all three `know.*` tools at once (`MAX_CANDIDATES` is 8 and the file records
-  that near-duplicates degrade small-model selection, so `scripts/eval_selection.py` must be
-  re-run) — is staged in the session scratchpad as `STAGED-selection-fix.md`.
-  **This also blocks the knowledge map's retrieval-trace view**, which has never been seen lighting
-  up on a real retrieval.
-- ~~Tool selection picks the wrong tool for a search-intent turn.~~ *Superseded by the entry above:
-  the model was choosing the only tool on the menu.* Measured 2026-09-09: the 0.8b
-  router classified *"search the knowledge index for taint tracking"* as intent `search` — correct —
-  and then selected **`fs.list`**, answering *"I don't have a tool for that yet — fs.list needs to
-  know which project."* `know.search` was never called. Intent routing is fine; selection is not.
-  `scripts/eval_selection.py` is the harness that should be pointed at this. It also means no
-  `know.*` call has run in the live system recently, so the retrieval-trace view is unproven
-  end-to-end. (qwen2.5:7b does not fit this GPU — the turn stalled with no runner loaded.)
+- ~~ORACLE cannot retrieve from a chat turn.~~ **FIXED 2026-09-10.** `know.search` was never in
+  `ARG_BUILDERS`, so for intent `search` the router had exactly one candidate (`fs.list`) and — per
+  ADR-0017, which builds the enum from candidates — could not spell `know.search`. Added with a new
+  `"query"` shape that needs no project. `eval_selection.py` **25/25** (was 20/20) with five new
+  cases including both live failures and the `fs.list` confusable pair.
+  **Verified end to end:** a live turn emits `tool.started know.search` → `tool.finished`, and the
+  knowledge map's retrieval trace lit up for the first time.
+  ⚠ **What it revealed:** the top hits for *"taint tracking"* were ML notes about *experiment
+  tracking* and a `budget.py` — not `SECURITY.md §6`. The plumbing is right and the *ranking* is
+  the 68% OQ-18 measured, now visible on a real query. Worth a look once the fusion follow-ups land.
 - **Palette results are not discoverable to assistive tech** — `<li role="option">` with `onClick`,
   no `role="combobox"`, no `aria-activedescendant`. The rest of the a11y audit is 15/15.
 - **`DATABASE.md`'s `facts`/`attempts`/`devices` blocks are still the pre-build sketch.**
