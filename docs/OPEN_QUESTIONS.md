@@ -29,7 +29,7 @@ doc, delete the marker.
 | [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | `EXPERIMENT NEEDED` | UX quality, not a phase | open |
 | [OQ-16](#oq-16) | Does `connect_read_pipe` work anywhere on Windows? | `UNKNOWN` | none — worked around | monitoring |
 | [OQ-17](#oq-17) | Is a ~43 min **cold** reindex acceptable? | `ASSUMPTION` | Phase 5 tuning | narrowed 2026-08-22 — warm rebuilds are 37 s |
-| [OQ-18](#oq-18) | Can Russian questions reach an English corpus at all? | measured 2026-08-26 | Phase 5 gate | **both levers measured — 78.9% against an 80% gate, one fixture short; gate NOT moved** |
+| [OQ-18](#oq-18) | Can a Russian question reach an English codebase? | **measured 2026-09-10** | Phase 5 gate | **Translation works and the 0.8b mechanism equals the human ceiling (66%); the 80% gate is still missed at 68%** |
 | [OQ-19](#oq-19) | Should the Claude integration move to the Claude Agent SDK? | `TO VERIFY` (on trigger) | none — trigger-based | open |
 | [OQ-20](#oq-20) | Can `agy --json-schema` reliably return a valid ExecutionPlan? | measured 2026-08-24 | P6-T5 / Phase 8 | **answered NO — 75% vs a 90% gate; the ladder promoted Claude** |
 | [OQ-21](#oq-21) | When does ORACLE's MCP server need the 2026-07-28 spec? | `UNKNOWN` | none — watch item | monitoring |
@@ -37,6 +37,7 @@ doc, delete the marker.
 | [OQ-23](#oq-23) | Does a failure-carrying prompt produce a *different* plan? | `EXPERIMENT NEEDED` | nothing — replanning ships bounded | opened 2026-08-25 |
 | [OQ-24](#oq-24) | Does observing every project fit the glance budget? | **RESOLVED 2026-08-28** — no: 1.7–2.7 s warm for 8 rows; the sidebar observes lazily, per selected row | — | measured by `scripts/measure_observation.py` |
 | [OQ-25](#oq-25) | Did adding the `continue` label move intent accuracy? | **RESOLVED 2026-08-28** — 97.1% at eleven labels (was 93.3% at ten); the slot fails only for the name `ORACLE`, which the deterministic fallback carries | — | eval re-run with 4 `continue` cases |
+| [OQ-26](#oq-26) | Should a document be findable by its filename? | `EXPERIMENT NEEDED` | — | **Opened by OQ-18: config is never embedded and `rel_path` is UNINDEXED, so no document can be found by name** |
 
 ---
 
@@ -528,7 +529,9 @@ adapter streaming stdout.
 
 ### OQ-18
 **Can a Russian question reach an English codebase well enough to meet the 80% gate?**
-`EXPERIMENT NEEDED` · Phase 5 gate · **opened 2026-08-24 by [OQ-02](#oq-02)'s resolution**
+**MEASURED 2026-09-10 — the answer is "better, and still no."** Translation works and the cheap
+mechanism matches the expensive one; the gate is still missed at 68% against 80%.
+[Result](#measured--2026-09-10) · Phase 5 gate · **opened 2026-08-24 by [OQ-02](#oq-02)'s resolution**
 
 OQ-02 asked which embedding model, got a decisive answer, and the answer is not enough.
 The best configuration this system has produced — `bge-m3` with the fixed fusion gate —
@@ -557,6 +560,64 @@ building anything, and it would change what the first experiment means.
 
 **Until this resolves, the Phase 5 recall criterion is not met**, and saying so is more
 useful than moving the gate to where the numbers already are.
+
+#### Measured  `2026-09-10`
+
+`scripts/eval_embeddings.py`, 5.9 h over 18,682 embeddable chunks,
+[dev log](../logs/development/2026-09-10-oq18-resolved.md), data in
+`logs/measurements/oq18-translated.{json,txt}`. 38 fixtures, 25 Russian. Gate: recall@5 ≥ 80%.
+
+| arm | r@1 | r@5 | r@10 | RU-only r@5 |
+|---|---|---|---|---|
+| lexical only | 18% | 26% | 32% | — |
+| dense | 34% | 61% | 76% | 56% |
+| rrf | 34% | 61% | 68% | 48% |
+| **rrf_w2** | 34% | **68%** | 79% | — |
+| gated | 34% | 61% | 68% | — |
+| dense_xl — *human translation, the ceiling* | 42% | 66% | 76% | 64% |
+| rrf_xl | 39% | 63% | 79% | — |
+| **dense_mt — *router-model translation, the mechanism*** | 37% | **66%** | 79% | **64%** |
+| rrf_mt | 34% | 58% | 74% | — |
+
+**1 · The mechanism reaches the ceiling.** `dense_mt` and `dense_xl` are identical at 66% overall
+and 64% RU-only. An 0.8b model's translation is as good as a human's *for retrieval*, so there is
+**no headroom left in a better translator** — a closed direction, not a new one. P9-T2 had only the
+ceiling; this is the first number a running system can actually produce.
+**`Settings.translate_queries` stays `True`**, now on evidence: 61% → 66% overall, and **56% → 64%
+on Russian**, which is where it was aimed.
+
+**2 · The gate is still missed.** Best arm 68% against 80%. The 2026-08-24 baseline was 61%, so the
+gap narrowed from 19 points to 12. **The Phase 5 recall criterion remains unmet.**
+
+**3 · The winning arm is not the lever this question opened, and the two have never been composed.**
+`rrf_w2` — weighted RRF, *no translation* — takes 68%, beating both translation arms. **There is no
+`rrf_w2_mt` arm.** Composing them is the obvious next experiment and it is nearly free: the forward
+pass is cached in `D:/ORACLE/scratch/oq18-vectors-bge-m3.npz`, so a re-score is seconds, not hours.
+
+**4 · Naive fusion hurts translation, and the gate that should prevent that does nothing.**
+`rrf_mt` (58%) is worse than `dense_mt` (66%) *and* than plain `dense` (61%). The breakdown says
+why — **BM25 scores 0.00 on cross-language queries**, so fusing it into a good dense ranking only
+dilutes it, while it buys a lot on semantic ones (0.60 → 0.80):
+
+| arm | crosslang r@5 | semantic r@5 | lexical r@5 |
+|---|---|---|---|
+| dense | 0.56 | 0.60 | 1.00 |
+| hybrid | 0.48 | **0.80** | 1.00 |
+| lexical | **0.00** | 0.70 | 1.00 |
+
+That argues for language-aware fusion — which the `gated` arm was supposed to be, and it scores 61%,
+identical to plain `rrf`. **The gate is not doing its job**, and that is worth fixing before another
+fusion variant is added.
+
+**5 · `en-relay-dockerfile` is unanswerable by construction — see [OQ-26](#oq-26).** It misses in
+every arm because `Dockerfile.relay` classifies as `CONFIG` (never embedded, RAG.md §2) *and*
+because a filename is not searchable. **Kept as a true negative rather than reclassified**: marking
+it `kind: lexical` would move the failure into a currently-clean bucket without making it findable.
+
+**Not comparable to earlier runs.** `chunks_per_s` was 0.88 against 2.52 on 2026-08-29 because the
+machine was in use (the eval got 13.65 of 24 cores while ORT was configured for 24); recall is
+unaffected by that. The corpus also grew from 18,153 to 27,967 chunks since the 2026-08-26 baseline.
+Arm-vs-arm within this run is sound; absolute recall against older runs is not.
 
 #### Lever 2, measured  `2026-08-25, P9-T1`
 
@@ -1025,3 +1086,43 @@ architecture's own rule: the most common correct action is not to call the LLM a
 second self-colliding name ever appears, the options recorded here are (a) a deterministic
 `continue <registered-name>` pre-route, which also removes ~2.6 s of model latency, or (b)
 renaming the row — not more prompt work.
+
+---
+
+### OQ-26
+**Should a document be findable by its filename — and should config be findable at all?**
+`EXPERIMENT NEEDED` · **opened 2026-09-10 by [OQ-18](#oq-18)'s resolution** · blocks nothing today,
+but it is a whole class of question the product currently cannot answer
+
+`en-relay-dockerfile` — *"where do we configure the relay Dockerfile"* — misses in **every one of
+OQ-18's eight arms**, and the file is present and indexed. Two independent structural reasons, and
+neither is a ranking problem:
+
+1. **Config is never embedded.** `classify()` maps anything starting with `Dockerfile` to
+   `ContentKind.CONFIG`, and `CONFIG.embeddable` is `False`. The reasoning in
+   [RAG.md §2](RAG.md#2-what-gets-indexed) is sound — an embedding of a `tsconfig.json` matches
+   everything and means nothing — but it is applied by *suffix class*, and a Dockerfile is much
+   closer to a script than to a key-value file. This one opens with four lines of English prose
+   explaining what the relay is.
+2. **A filename is not searchable.** `chunks_fts` declares `rel_path UNINDEXED`, and
+   `identifiers()` explodes identifiers out of the chunk **text**, never the path. So no query can
+   match a document by what it is called.
+
+Together they mean **ORACLE cannot answer "where is X configured" for any config file, and cannot
+find any document by name.** A person asking "where's the dockerfile" is asking the most ordinary
+question there is about a repository.
+
+**What to measure, cheaply, before changing anything:**
+
+* How many documents are `CONFIG` — measured 2026-09-10 on the eval corpus: **182 of 1,738**, and
+  9,285 of 27,967 chunks are lexical-only. That is not a rounding error.
+* Whether adding `rel_path` to the FTS index (or feeding path components into `ident`) fixes
+  `en-relay-dockerfile` without degrading the lexical bucket, which currently scores a clean 1.00.
+  This is the cheap half and it needs no re-embedding.
+* Whether *some* config kinds should be embeddable — Dockerfile, `.env.example`, CI YAML — and
+  whether that reopens the "an embedding of a tsconfig matches everything" problem RAG.md §2 was
+  protecting against. This half costs a reindex and should not be attempted first.
+
+The order matters: the filename fix is free and testable against the existing cached vectors; the
+embedding-policy change is an ADR and a rebuild. **Do the free one, re-score, and see whether the
+second is still needed.**

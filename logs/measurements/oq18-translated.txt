@@ -70,3 +70,116 @@
 [34mbge-m3[0m (1024d, cls pooling)
 [33m  no saved vectors at D:/ORACLE/scratch/oq18-vectors-bge-m3.npz; embedding from scratch[0m
 [2m  256/18679 chunks  0.20 chunks/s  elapsed 1297s  eta 93341s[0m
+ 
+=== OQ-18 corpus run, attempt started Wed 09/09/2026 20:51:40.01 === 
+[34mcorpus[0m
+[2m  skipped: {'type': 918, 'deny': 2, 'untracked': 10, 'exclude': 5, 'unreadable': 1}[0m
+  1738 docs {'projects': 1542, 'notes': 196} {'markdown': 638, 'config': 182, 'code': 906, 'text': 12}
+  27967 chunks (18682 semantic, 9285 lexical-only) in 4.1s
+  chars/chunk: mean 999 p50 1151 p95 1200 max 1303
+[34mtranslations[0m  qwen3.5:0.8b: 20 of 25 usable, 5 failed
+[32m  all 38 fixture sources present in the corpus[0m
+
+[34mlexical index[0m
+  BM25 over 27967 chunks, 152413 terms, 12.4s
+  recall@5 26%   misses: ['ru-token-refresh', 'ru-jwt-secret-storage', 'ru-own-yaml-parser', 'ru-two-users-one-agent', 'ru-feature-entitlement', 'ru-relay-encryption', 'ru-vector-search', 'ru-finetuning', 'en-relay-dockerfile', 'en-access-token-lifetime', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-event-retention', 'ru-shutdown-order', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-migrations', 'ru-command-approval', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-bias-variance', 'ru-cross-validation', 'ru-learning-rate', 'ru-nonlinearity', 'ru-model-degrades']
+[2m  answer-key documents in the lexical candidates of 38/38 queries[0m
+
+[34mbge-m3[0m (1024d, cls pooling)
+[33m  no saved vectors at D:/ORACLE/scratch/oq18-vectors-bge-m3.npz; embedding from scratch[0m
+[2m  256/18682 chunks  0.91 chunks/s  elapsed 280s  eta 20150s[0m
+[2m  512/18682 chunks  0.87 chunks/s  elapsed 589s  eta 20891s[0m
+[2m  768/18682 chunks  0.82 chunks/s  elapsed 934s  eta 21792s[0m
+[2m  1024/18682 chunks  0.85 chunks/s  elapsed 1212s  eta 20892s[0m
+[2m  1280/18682 chunks  0.81 chunks/s  elapsed 1589s  eta 21605s[0m
+[2m  1536/18682 chunks  0.77 chunks/s  elapsed 1996s  eta 22282s[0m
+[2m  1792/18682 chunks  0.75 chunks/s  elapsed 2390s  eta 22526s[0m
+[2m  2048/18682 chunks  0.74 chunks/s  elapsed 2769s  eta 22487s[0m
+[2m  2304/18682 chunks  0.75 chunks/s  elapsed 3090s  eta 21965s[0m
+[2m  2560/18682 chunks  0.75 chunks/s  elapsed 3396s  eta 21387s[0m
+[2m  2816/18682 chunks  0.77 chunks/s  elapsed 3668s  eta 20667s[0m
+[2m  3072/18682 chunks  0.78 chunks/s  elapsed 3940s  eta 20022s[0m
+[2m  3328/18682 chunks  0.79 chunks/s  elapsed 4219s  eta 19465s[0m
+[2m  3584/18682 chunks  0.78 chunks/s  elapsed 4602s  eta 19385s[0m
+[2m  3840/18682 chunks  0.79 chunks/s  elapsed 4874s  eta 18840s[0m
+[2m  4096/18682 chunks  0.80 chunks/s  elapsed 5137s  eta 18293s[0m
+[2m  4352/18682 chunks  0.80 chunks/s  elapsed 5434s  eta 17891s[0m
+[2m  4608/18682 chunks  0.81 chunks/s  elapsed 5707s  eta 17429s[0m
+[2m  4864/18682 chunks  0.82 chunks/s  elapsed 5962s  eta 16936s[0m
+[2m  5120/18682 chunks  0.82 chunks/s  elapsed 6231s  eta 16504s[0m
+[2m  5376/18682 chunks  0.83 chunks/s  elapsed 6452s  eta 15969s[0m
+[2m  5632/18682 chunks  0.84 chunks/s  elapsed 6706s  eta 15538s[0m
+[2m  5888/18682 chunks  0.84 chunks/s  elapsed 6982s  eta 15172s[0m
+[2m  6144/18682 chunks  0.84 chunks/s  elapsed 7296s  eta 14889s[0m
+[2m  6400/18682 chunks  0.85 chunks/s  elapsed 7551s  eta 14491s[0m
+[2m  6656/18682 chunks  0.85 chunks/s  elapsed 7801s  eta 14095s[0m
+[2m  6912/18682 chunks  0.86 chunks/s  elapsed 8041s  eta 13692s[0m
+[2m  7168/18682 chunks  0.86 chunks/s  elapsed 8300s  eta 13333s[0m
+[2m  7424/18682 chunks  0.87 chunks/s  elapsed 8546s  eta 12960s[0m
+[2m  7680/18682 chunks  0.87 chunks/s  elapsed 8818s  eta 12633s[0m
+[2m  7936/18682 chunks  0.88 chunks/s  elapsed 9063s  eta 12272s[0m
+[2m  8192/18682 chunks  0.88 chunks/s  elapsed 9294s  eta 11901s[0m
+[2m  8448/18682 chunks  0.89 chunks/s  elapsed 9496s  eta 11504s[0m
+[2m  8704/18682 chunks  0.89 chunks/s  elapsed 9730s  eta 11155s[0m
+[2m  8960/18682 chunks  0.90 chunks/s  elapsed 9964s  eta 10812s[0m
+[2m  9216/18682 chunks  0.90 chunks/s  elapsed 10255s  eta 10533s[0m
+[2m  9472/18682 chunks  0.89 chunks/s  elapsed 10587s  eta 10294s[0m
+[2m  9728/18682 chunks  0.89 chunks/s  elapsed 10921s  eta 10052s[0m
+[2m  9984/18682 chunks  0.89 chunks/s  elapsed 11241s  eta 9793s[0m
+[2m  10240/18682 chunks  0.89 chunks/s  elapsed 11534s  eta 9509s[0m
+[2m  10496/18682 chunks  0.89 chunks/s  elapsed 11809s  eta 9210s[0m
+[2m  10752/18682 chunks  0.89 chunks/s  elapsed 12095s  eta 8920s[0m
+[2m  11008/18682 chunks  0.89 chunks/s  elapsed 12383s  eta 8633s[0m
+[2m  11264/18682 chunks  0.89 chunks/s  elapsed 12671s  eta 8345s[0m
+[2m  11520/18682 chunks  0.88 chunks/s  elapsed 13081s  eta 8133s[0m
+[2m  11776/18682 chunks  0.87 chunks/s  elapsed 13483s  eta 7907s[0m
+[2m  12032/18682 chunks  0.87 chunks/s  elapsed 13843s  eta 7651s[0m
+[2m  12288/18682 chunks  0.86 chunks/s  elapsed 14237s  eta 7408s[0m
+[2m  12544/18682 chunks  0.86 chunks/s  elapsed 14577s  eta 7133s[0m
+[2m  12800/18682 chunks  0.86 chunks/s  elapsed 14900s  eta 6847s[0m
+[2m  13056/18682 chunks  0.86 chunks/s  elapsed 15195s  eta 6548s[0m
+[2m  13312/18682 chunks  0.86 chunks/s  elapsed 15464s  eta 6238s[0m
+[2m  13568/18682 chunks  0.86 chunks/s  elapsed 15718s  eta 5924s[0m
+[2m  13824/18682 chunks  0.87 chunks/s  elapsed 15971s  eta 5613s[0m
+[2m  14080/18682 chunks  0.87 chunks/s  elapsed 16228s  eta 5304s[0m
+[2m  14336/18682 chunks  0.87 chunks/s  elapsed 16471s  eta 4993s[0m
+[2m  14592/18682 chunks  0.87 chunks/s  elapsed 16703s  eta 4682s[0m
+[2m  14848/18682 chunks  0.87 chunks/s  elapsed 16972s  eta 4382s[0m
+[2m  15104/18682 chunks  0.88 chunks/s  elapsed 17210s  eta 4077s[0m
+[2m  15360/18682 chunks  0.88 chunks/s  elapsed 17457s  eta 3776s[0m
+[2m  15616/18682 chunks  0.88 chunks/s  elapsed 17705s  eta 3476s[0m
+[2m  15872/18682 chunks  0.88 chunks/s  elapsed 18033s  eta 3193s[0m
+[2m  16128/18682 chunks  0.88 chunks/s  elapsed 18332s  eta 2903s[0m
+[2m  16384/18682 chunks  0.88 chunks/s  elapsed 18618s  eta 2611s[0m
+[2m  16640/18682 chunks  0.88 chunks/s  elapsed 18928s  eta 2323s[0m
+[2m  16896/18682 chunks  0.88 chunks/s  elapsed 19238s  eta 2034s[0m
+[2m  17152/18682 chunks  0.88 chunks/s  elapsed 19554s  eta 1744s[0m
+[2m  17408/18682 chunks  0.88 chunks/s  elapsed 19857s  eta 1453s[0m
+[2m  17664/18682 chunks  0.88 chunks/s  elapsed 20176s  eta 1163s[0m
+[2m  17920/18682 chunks  0.88 chunks/s  elapsed 20475s  eta 871s[0m
+[2m  18176/18682 chunks  0.88 chunks/s  elapsed 20743s  eta 577s[0m
+[2m  18432/18682 chunks  0.88 chunks/s  elapsed 21004s  eta 285s[0m
+[2m  18682/18682 chunks  0.88 chunks/s  elapsed 21276s  eta 0s[0m
+  embedded 18682 chunks in 21275.9s → [32m0.9 chunks/s[0m (load 3.0s, model 2268 MB)
+[2m  saved the forward pass to D:/ORACLE/scratch/oq18-vectors-bge-m3.npz[0m
+  dense   r@1 34%  r@5 61%  r@10 76%   misses: ['ru-feature-entitlement', 'en-relay-dockerfile', 'en-yaml-billion-laughs', 'en-access-token-lifetime', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  rrf     r@1 34%  r@5 61%  r@10 68%   misses: ['ru-token-refresh', 'ru-feature-entitlement', 'en-relay-dockerfile', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  rrf_w2  r@1 34%  [32mr@5 68%[0m  r@10 79%   misses: ['ru-feature-entitlement', 'en-relay-dockerfile', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  gated   r@1 34%  r@5 61%  r@10 68%   misses: ['ru-token-refresh', 'ru-feature-entitlement', 'en-relay-dockerfile', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  dense_xlr@1 42%  r@5 66%  r@10 76%   misses: ['en-relay-dockerfile', 'en-yaml-billion-laughs', 'en-access-token-lifetime', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  rrf_xl  r@1 39%  r@5 63%  r@10 79%   misses: ['ru-token-refresh', 'en-relay-dockerfile', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  dense_mtr@1 37%  r@5 66%  r@10 79%   misses: ['en-relay-dockerfile', 'en-yaml-billion-laughs', 'en-access-token-lifetime', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-event-retention', 'ru-terminal-reattach', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  rrf_mt  r@1 34%  r@5 58%  r@10 74%   misses: ['ru-token-refresh', 'ru-feature-entitlement', 'en-relay-dockerfile', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-event-retention', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  RU-only dense  r@5 56%  r@10 72%   misses: ['ru-feature-entitlement', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  RU-only rrf    r@5 48%  r@10 56%   misses: ['ru-token-refresh', 'ru-feature-entitlement', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  RU-only dense_xlr@5 64%  r@10 72%   misses: ['ru-pairing-bruteforce', 'ru-air-gap', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+  RU-only dense_mtr@5 64%  r@10 76%   misses: ['ru-pairing-bruteforce', 'ru-air-gap', 'ru-event-retention', 'ru-terminal-reattach', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-cross-validation', 'ru-nonlinearity', 'ru-model-degrades']
+[2m  with the answer key eligible (pre-2026-08-26 scoring): dense 61%  rrf 58%  rrf_w2 68%  gated 58%  dense_xl 66%  rrf_xl 61%  dense_mt 66%  rrf_mt 55%  → moved: ['rrf', 'gated', 'rrf_xl', 'rrf_mt'][0m
+  query 312 ms p50 / 635 ms p95, index 77 MB
+
+[34msummary[0m  (dense-only → hybrid with BM25+RRF; gate is recall@5 ≥ 80%)
+  model           dimdense@5  rrf@5  rrf_w2  gated   RU@5  chunks/s  idx MB
+  -------------------------------------------------------------------------
+  bge-m3         1024[31m    61%    61%     68%    61%[0m    48%       0.9      77
+
+[2m  wrote logs/measurements/oq18-translated.json[0m

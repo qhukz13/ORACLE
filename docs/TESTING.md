@@ -107,7 +107,8 @@ Regressions here are silent and cumulative, so they are asserted:
 |---|---|
 | TTFT (router, resident) | p50 < 1.5 s · p95 < 3 s |
 | Tool dispatch overhead (IPC + policy) | < 50 ms |
-| Retrieval, full corpus | p95 < 400 ms |
+| Retrieval, full corpus | p95 < 400 ms — **measured 635 ms** (2026-09-10, 27,967 chunks) |
+| Retrieval recall@5, mixed RU/EN fixtures | **≥ 80% — measured 68%** ([OQ-18](OPEN_QUESTIONS.md#oq-18)); Phase 5's recall criterion is **not met** |
 | Full index, all collections | < 10 min |
 | Incremental index, one file | < 5 s |
 | WS event fan-out | < 20 ms |

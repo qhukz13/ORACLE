@@ -7,7 +7,8 @@
 
 ## Task
 
-**P11-T3 is done — §11b is built. Next up: collect OQ-18, then the tool-selection defect.**
+**OQ-18 is resolved and P11-T3 is done. Next up: the tool-selection defect — ORACLE cannot
+retrieve from a chat turn — then OQ-18's two cheap follow-ups.**
 
 **Phase:** [11 — execution visualisation & advanced UI](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc) · **Scope:** Capability arc
 **Status:** `READY` · **Set:** 2026-09-09 · **Blocked on:** nothing
@@ -50,43 +51,41 @@ verified against the real corpus at 1,564 documents / 3,465 edges.
   go/no-go), the execution tree's acceptance criteria, `TaskTree`'s fixture, and the sidebar
   counters. Start the daemon and UI, type `continue ORACLE` in the command bar, approve the T3
   `confirm_strong` card. `oracle-selfcheck` is the cheaper first fill — local, no egress, ~5 min.
-- **OQ-18 restarted 2026-09-09 ~20:10 on a stabilised tree, and three runs' worth of causes are
-  now understood.** It was never the idle timer: `STANDBYIDLE` on AC is already `0` (Never), and
-  **21 of the last 21 sleeps are `Sleep Reason: Application API`** — another process explicitly
-  calls `SetSuspendState`, which `SetThreadExecutionState` cannot veto, so the 2026-08-28
-  `keep_system_awake()` hardening was aimed at a timer that was already disabled.
-  [Dev log](../logs/development/2026-09-09-oq18-the-wrong-thing-hardened-twice.md).
-  **The fix is to survive the sleep:** the task repeats every 30 min, each firing resumes from the
-  last 256-chunk checkpoint, `StopOnIdleEnd` is off, and the wrapper exits once
-  `oq18-translated.json` exists. The log **appends** now — truncating it is what hid the evidence.
-  **Two corpus findings from the 2026-09-09 attempt, both acted on:**
-  (a) a retrieval fixture pointed at `Asterim/docs/operations-runbook.md`, which Asterim moved into
-  `docs/archive/2026-08-pipeline-era/` — an automatic miss for every arm, depressing absolute recall
-  across all of them. **Repointed.** (b) The corpus has grown from 18,153 to 27,920 chunks since the
-  2026-08-26 baseline, so **this run's absolute numbers are not comparable to the earlier ones.**
-  OQ-18's actual question is a *within-run* comparison of arms, which corpus drift does not
-  invalidate — but do not quote the new recall figures against the old ones.
-  ⚠ **A 2026-09-09 20:00 "hang" was a misdiagnosis** — 0% CPU samples, 71 threads in Wait and a
-  py-spy stack inside `session.run()` were all real, but the pass was merely running at
-  **0.20 chunks/s against 2.52**, because two full `check.py` runs were executing in the same
-  window. `Win32_Processor` `LoadPercentage` is a stale counter and was trusted over the eval's own
-  progress line. A stack in native code proves where a thread *is*, not that it is stuck.
-  ⚠ **Do not run the test suite while it runs** — the eval measures `chunks_per_s` and query
-  latency, and concurrent work both slows it and corrupts those numbers. **Repo edits are worse than
-  slow:** ORACLE indexes itself, so any edit moves the corpus fingerprint and a retry after an edit
-  restarts the pass from zero. Leave the tree alone until it lands.
-  **On collection:** compose `dense_mt` against `dense_xl`, confirm or flip
-  `Settings.translate_queries`, decide `en-relay-dockerfile`, resolve
-  [OQ-18](OPEN_QUESTIONS.md#oq-18), then `Unregister-ScheduledTask -TaskName ORACLE-OQ18-eval`.
-  The 2026-08-28 answer-key correction still applies: **38/38 queries carry an answer-key chunk in
-  their top-12 lexical candidates**, and the old "0/38" diagnostic was broken from birth.
+- ~~OQ-18~~ **RESOLVED 2026-09-10.** Translation works and the 0.8b mechanism *equals* the human
+  ceiling (66% r@5, 64% RU); `Settings.translate_queries` confirmed `True` on evidence. **The 80%
+  gate is still missed at 68%**, so Phase 5's recall criterion stays unmet — said plainly rather
+  than moved. [OQ-18](OPEN_QUESTIONS.md#oq-18) ·
+  [dev log](../logs/development/2026-09-10-oq18-resolved.md). Scheduled task unregistered.
+  **Two cheap follow-ups it handed us, both nearly free because the forward pass is cached in
+  `D:/ORACLE/scratch/oq18-vectors-bge-m3.npz` — a re-score is seconds, not six hours:**
+  1. **Compose the two levers.** `rrf_w2` (68%, no translation) beats both translation arms (66%),
+     and **there is no `rrf_w2_mt` arm** — the two things that each help have never been measured
+     together. Add the arm and re-score.
+  2. **The `gated` arm does nothing.** It scores 61%, identical to plain `rrf`, though it exists to
+     be the language-aware fusion that the breakdown says is needed (BM25 scores **0.00** on
+     cross-language queries and dilutes a good dense ranking). Fix the gate before adding variants.
 - **Global search misses its budget, measured for the first time on 2026-09-09**: warm 504–1,467 ms
   against **p95 < 300 ms**, cold 7,932 ms. The previous session could not measure it (`know.*` was
   refusing). Wants its own task — profile before optimising; the cold number smells like model load.
 - **The reindex is still unfired** — 57% of live rows exceed the 1200-char cap. `POST
   /api/v1/knowledge/reindex` is verified live. Full rebuild ~1 h synchronous. Note it will also
   repopulate `document_vectors` as it goes, which makes the graph's one-time 88 s backfill free.
-- **Tool selection picks the wrong tool for a search-intent turn.** Measured 2026-09-09: the 0.8b
+- **⚠ ORACLE cannot retrieve from a chat turn — root cause found 2026-09-09, patch staged.**
+  Not a model-quality problem, which is where two sessions' suspicion went.
+  `router/selection.py` filters candidates through `ARG_BUILDERS`, a hand-maintained whitelist, and
+  **no `know.*` tool is in it**. For intent `search` the router is offered **exactly one tool:
+  `fs.list`** — and per ADR-0017 the enum is built from the candidates, so the decoder cannot even
+  spell `know.search`. The whole RAG stack is unreachable from chat; its only runtime callers are
+  the `Ctrl+Shift+F` search endpoint and delegated agents over MCP. `selection.py`'s own rule
+  ("only tools whose arguments can be built honestly are offered") *admits* a search, which needs
+  one string, so this is an omission and nothing in `docs/` records it. The exact patch — plus the
+  warning not to add all three `know.*` tools at once (`MAX_CANDIDATES` is 8 and the file records
+  that near-duplicates degrade small-model selection, so `scripts/eval_selection.py` must be
+  re-run) — is staged in the session scratchpad as `STAGED-selection-fix.md`.
+  **This also blocks the knowledge map's retrieval-trace view**, which has never been seen lighting
+  up on a real retrieval.
+- ~~Tool selection picks the wrong tool for a search-intent turn.~~ *Superseded by the entry above:
+  the model was choosing the only tool on the menu.* Measured 2026-09-09: the 0.8b
   router classified *"search the knowledge index for taint tracking"* as intent `search` — correct —
   and then selected **`fs.list`**, answering *"I don't have a tool for that yet — fs.list needs to
   know which project."* `know.search` was never called. Intent routing is fine; selection is not.

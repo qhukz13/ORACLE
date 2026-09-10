@@ -77,6 +77,18 @@ class Settings(BaseSettings):
     #: depends on it. It is also the honest place to put a mechanism whose benefit was
     #: measured on this corpus and this router model — somebody with a different corpus
     #: should be able to turn it off without editing code.
+    #:
+    #: **Confirmed ON by measurement, 2026-09-10 ([OQ-18](../../docs/OPEN_QUESTIONS.md#oq-18)).**
+    #: Translating the query lifts dense recall@5 from 61% to 66%, and from **56% to 64% on the
+    #: Russian fixtures**, which is what it was aimed at. The finding that settles it is that the
+    #: resident 0.8b router's translations score *identically* to the human translations in the
+    #: fixture file (66% / 64% either way) — so this is not a cheap approximation of a better
+    #: mechanism, it is the whole mechanism, and a larger translator would buy nothing.
+    #:
+    #: One caveat it does not fix: fusing a translated dense probe with BM25 the naive way is
+    #: *worse* than not translating at all (`rrf_mt` 58% vs `dense` 61%), because BM25 scores zero
+    #: on cross-language queries and dilutes a good dense ranking. This switch governs the dense
+    #: probe; it does not make fusion language-aware, and nothing yet does.
     translate_queries: bool = True
 
     @property
