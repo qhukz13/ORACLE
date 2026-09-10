@@ -88,8 +88,27 @@ verified against the real corpus at 1,564 documents / 3,465 edges.
   ⚠ **What it revealed:** the top hits for *"taint tracking"* were ML notes about *experiment
   tracking* and a `budget.py` — not `SECURITY.md §6`. The plumbing is right and the *ranking* is
   the 68% OQ-18 measured, now visible on a real query. Worth a look once the fusion follow-ups land.
-- **Palette results are not discoverable to assistive tech** — `<li role="option">` with `onClick`,
-  no `role="combobox"`, no `aria-activedescendant`. The rest of the a11y audit is 15/15.
+- ~~Palette results are not discoverable to assistive tech.~~ **Already fixed 2026-08-28** and
+  carried stale on this list since. `CommandPalette.tsx` implements the full APG combobox pattern
+  (`role="combobox"`, `aria-controls`, `aria-activedescendant`, a real listbox) and
+  `CommandPalette.test.tsx`'s "the combobox contract" block pins it, including that the
+  activedescendant never dangles. Verified 2026-09-10.
+- **Global search's 300 ms budget cannot be met, and now there is a profile.**
+  `MEASURED 2026-09-10`, warm, live index (17,329 chunks): **query embedding p50 282 ms / p95
+  461 ms** and **`vec0` dense scan p50 260 ms / p95 316 ms**. Either alone exceeds the
+  whole-endpoint budget, and they are strictly sequential — the scan needs the vector — so the dense
+  floor is ~540 ms p50 before BM25 or the other four groups. Neither is reducible by ordinary means:
+  the query encoder must be the model that built the index, and `sqlite-vec` is brute force with no
+  ANN. Running the endpoint's five groups concurrently saves only the SQL ones, single-digit ms
+  against this.
+  **The decision is the owner's, not a code change:** revise the budget against the profile, or keep
+  a row that stays red forever and gets ignored. A query-vector cache would help repeat searches but
+  not p95, which is dominated by first-time queries.
+- **The reindex is still unfired** — 57% of live rows exceed the 1200-char cap, and the live index is
+  17,329 chunks against the eval corpus's 28,369, so it is well behind. `POST
+  /api/v1/knowledge/reindex` is verified live; the full rebuild is ~1 h synchronous. It will also
+  populate `document_vectors` as it goes, which makes the knowledge graph's one-time 88 s backfill
+  free.
 - **`DATABASE.md`'s `facts`/`attempts`/`devices` blocks are still the pre-build sketch.**
 - **Tests with implicit wall-clock assumptions, now on a fourth sighting across two tests.**
   `test_a_long_burst_arrives_complete` fails under CPU starvation and passed immediately after on an

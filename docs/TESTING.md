@@ -112,7 +112,7 @@ Regressions here are silent and cumulative, so they are asserted:
 | Full index, all collections | < 10 min |
 | Incremental index, one file | < 5 s |
 | WS event fan-out | < 20 ms |
-| Global search | p95 < 300 ms |
+| Global search | ~~p95 < 300 ms~~ — **not reachable as written; measured 504–1,467 ms warm.** See the note below |
 | Orbit view, idle | < 5% CPU |
 | Knowledge-graph layout, cold (1.4k docs) | < 10 min — **measured 27.8 s** offline, **34 s** in the daemon (1,455 docs / 3,737 edges, 2026-09-09) |
 | Knowledge-graph document-vector backfill, one-time | no budget — **measured 88 s** (1,455 docs); paid once, then `store.put()` maintains it |
@@ -133,6 +133,28 @@ passes on a different machine tells us nothing about the machine ORACLE runs on.
 ([dev log](../logs/development/2026-09-09-oq22-canvas-vs-svg.md)) and **cannot** move into a headless
 runner — the same page in a non-compositing window reports `visibilityState: "visible"` and zero
 frames.
+
+**The global-search budget cannot be met on this hardware, and the profile says why.**
+`MEASURED 2026-09-10`, warm, against the live index (17,329 chunks), after warm-up:
+
+| phase | p50 | p95 |
+|---|---|---|
+| query embedding (`bge-m3`, 568M params, CPU) | **282 ms** | 461 ms |
+| `vec0` dense scan | **260 ms** | 316 ms |
+
+**Either phase alone exceeds the 300 ms budget for the whole endpoint**, and they are strictly
+sequential — the scan needs the vector. The floor for the dense path is therefore ~540 ms p50 before
+BM25, fusion, or the other four result groups are counted at all.
+
+Neither is reducible by ordinary means: the query encoder must be the model that built the index, and
+`sqlite-vec` is a brute-force scan with no ANN option. Running the endpoint's five groups
+concurrently — the obvious structural fix — saves only the SQL groups, which are single-digit
+milliseconds against this.
+
+So the number in that row was written before anyone measured it, and it describes hardware this
+project does not have. **It needs revising against the profile rather than chased**, and that is a
+decision for the owner: a budget nothing can meet stops being a gate and becomes a permanently red
+row that people learn to ignore.
 
 **⚠ The 16.7 ms in the pan/zoom row is a 60 Hz assumption, and this machine's display is 163.9 Hz.**
 Read against the panel, the budget is **6.1 ms**, and the SVG control that passes the written row at
