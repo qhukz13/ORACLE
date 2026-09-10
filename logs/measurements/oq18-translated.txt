@@ -222,3 +222,22 @@
 [2m  5120/19212 chunks  0.83 chunks/s  elapsed 6174s  eta 16993s[0m
 [2m  5376/19212 chunks  0.84 chunks/s  elapsed 6371s  eta 16398s[0m
 [2m  5632/19212 chunks  0.85 chunks/s  elapsed 6593s  eta 15897s[0m
+ 
+=== OQ-18 corpus run, attempt started Thu 09/10/2026 23:00:00.33 === 
+[34mcorpus[0m
+[32m  corpus frozen 2026-09-10T16:57:20 — 1766 docs, 28590 chunks[0m
+  1766 docs {'projects': 1570, 'notes': 196} {'markdown': 664, 'config': 184, 'code': 906, 'text': 12}
+  28590 chunks (19257 semantic, 9333 lexical-only) in 1.1s
+  chars/chunk: mean 997 p50 1149 p95 1200 max 1303
+[34mtranslations[0m  qwen3.5:0.8b: 20 of 25 usable, 5 failed
+[31m  fixtures whose expected source is not in the corpus: ['lex-entitlement-guard', 'ru-workspace-permissions'][0m
+[33m  scoring 36 reachable fixtures; the 2 above are not[0m
+[2m    recall is over 36, so this run is not comparable to a 38-case one[0m
+
+[34mlexical index[0m
+  BM25 over 28590 chunks, 155311 terms, 17.7s
+  recall@5 25%   misses: ['ru-token-refresh', 'ru-jwt-secret-storage', 'ru-own-yaml-parser', 'ru-two-users-one-agent', 'ru-feature-entitlement', 'ru-relay-encryption', 'ru-vector-search', 'ru-finetuning', 'en-relay-dockerfile', 'en-access-token-lifetime', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-event-retention', 'ru-shutdown-order', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-migrations', 'ru-command-approval', 'ru-terminal-reattach', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-bias-variance', 'ru-cross-validation', 'ru-learning-rate', 'ru-nonlinearity', 'ru-model-degrades']
+[2m  answer-key documents in the lexical candidates of 36/36 queries[0m
+
+[34mbge-m3[0m (1024d, cls pooling)
+[33m  no saved vectors at D:/ORACLE/scratch/oq18-vectors-bge-m3.npz; embedding from scratch[0m

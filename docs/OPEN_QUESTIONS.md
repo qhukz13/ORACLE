@@ -30,7 +30,7 @@ doc, delete the marker.
 | [OQ-16](#oq-16) | Does `connect_read_pipe` work anywhere on Windows? | `UNKNOWN` | none — worked around | monitoring |
 | [OQ-17](#oq-17) | Is a ~43 min **cold** reindex acceptable? | `ASSUMPTION` | Phase 5 tuning | narrowed 2026-08-22 — warm rebuilds are 37 s |
 | [OQ-18](#oq-18) | Can a Russian question reach an English codebase? | **measured 2026-09-10** | Phase 5 gate | **Translation works and the 0.8b mechanism equals the human ceiling; the shipped path composes to 71% and the 80% gate is still missed** |
-| [OQ-19](#oq-19) | Should the Claude integration move to the Claude Agent SDK? | `TO VERIFY` (on trigger) | none — trigger-based | open |
+| [OQ-19](#oq-19) | Should the Claude integration move to the Claude Agent SDK? | `TO VERIFY` (on trigger) | none — trigger-based | open — **trigger checked 2026-09-10 and not fired**: flags survive v2.1.251; the *stream* half is still only covered by fixtures |
 | [OQ-20](#oq-20) | Can `agy --json-schema` reliably return a valid ExecutionPlan? | measured 2026-08-24 | P6-T5 / Phase 8 | **answered NO — 75% vs a 90% gate; the ladder promoted Claude** |
 | [OQ-21](#oq-21) | When does ORACLE's MCP server need the 2026-07-28 spec? | `UNKNOWN` | none — watch item | monitoring |
 | [OQ-22](#oq-22) | Does the knowledge graph hold its budgets at corpus scale? | **resolved 2026-09-09** | Phase 11 (graph view only) | **All four answered. Build it on canvas, narrower — SVG runs at exactly half the panel's rate; ADR-0023 confirmed** |
@@ -890,6 +890,26 @@ contract (quarterly re-verification will catch it) — at that point the migrati
 either way, and the SDK should win. Check then: SDK maturity (out of 0.x?), whether hooks can
 express the gate's decisions, dependency weight, and whether `--setting-sources`/scrub isolation
 survives the SDK path.
+
+#### Trigger check `2026-09-10` — not fired
+
+The installed CLI moved **v2.1.238 → v2.1.251** since the contract was pinned on 2026-08-23. Every
+flag [`ClaudeCodeAdapter.command()`](../src/oracle/integrations/claude.py) passes is still present
+in that build, so the flag surface has not drifted and the trigger has not fired. The migration
+stays deferred.
+
+**What this check did not cover, stated because the trigger names it specifically.** The trigger is
+the *stream* contract — the shape of the `stream-json` events the adapter parses — and this was a
+check of the **flag** surface only. Verifying the stream live requires a real delegation, which
+spends the owner's subscription and produces egress; no agent should do that unprompted to satisfy
+a watch item. The stream contract's current protection is the recorded fixtures and the contract
+tests over them ([TESTING.md §7](TESTING.md#7-what-is-not-tested-automatically), which already
+records that **the fixtures can go stale**).
+
+So the honest status is: **half the trigger is checked and half is inferred from fixtures that
+nobody re-recorded today.** The drift this check *did* find was in the documentation rather than
+the CLI — §3 listed a flag the adapter never passed — and is fixed, with
+`tests/test_claude_invocation_matches_docs.py` now failing if it recurs.
 
 ---
 
