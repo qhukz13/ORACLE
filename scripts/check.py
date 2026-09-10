@@ -32,10 +32,17 @@ STEPS: list[Step] = [
     ("ruff lint", [UV, "run", "ruff", "check", "src", "tests"], ROOT),
     ("mypy", [UV, "run", "mypy"], ROOT),
     ("tsc", [NPM, "run", "--silent", "typecheck"], UI),
-    ("pytest", [UV, "run", "pytest", "-q", "--ignore=tests/security"], ROOT),
+    # `-v`, not `-q`, and the reason is a failure mode this repo has hit three times
+    # (2026-08-26, twice on 2026-09-10): under a CPU-starved gate run a test hangs, and
+    # `timeout_method=thread` kills the process before pytest prints a summary. With `-q`
+    # what is captured is a stack dump that **names no test**, which is exactly what
+    # pyproject's timeout comment means by "expensive to bisect". Verbose prints each
+    # nodeid as it starts, so the hung one is the last line before the dump. Output is
+    # captured and shown only on failure, so a green run costs nothing for this.
+    ("pytest", [UV, "run", "pytest", "-v", "--ignore=tests/security"], ROOT),
     # Merge gate from Phase 2 on (docs/TESTING.md#3). Run as its own step so a
     # security regression is never buried in a wall of ordinary test output.
-    ("security", [UV, "run", "pytest", "-q", "tests/security"], ROOT),
+    ("security", [UV, "run", "pytest", "-v", "tests/security"], ROOT),
     ("vitest", [NPM, "run", "--silent", "test"], UI),
 ]
 
@@ -64,6 +71,24 @@ def run(step: Step, verbose: bool) -> tuple[bool, float, str]:
     elapsed = time.monotonic() - start
     output = "" if verbose else ((proc.stdout or "") + (proc.stderr or ""))
     return proc.returncode == 0, elapsed, output
+
+
+#: How much of a failing step's output to show. The tail carries the summary for an
+#: ordinary failure; the head carries the killed test's name when a hang is what failed.
+#: Showing only the tail lost that twice on 2026-09-10.
+REPORT_TAIL = 6000
+REPORT_HEAD = 1500
+
+
+def report(output: str) -> str:
+    """A failing step's output: the end, plus the beginning when they differ."""
+    text = output.strip()
+    if len(text) <= REPORT_TAIL + REPORT_HEAD:
+        return text
+    elided = len(text) - REPORT_HEAD - REPORT_TAIL
+    head, tail = text[:REPORT_HEAD], text[-REPORT_TAIL:]
+    middle = f"{DIM}   ... {elided} characters elided ...{RESET}"
+    return chr(10).join([head, middle, tail])
 
 
 def main() -> int:
@@ -101,7 +126,7 @@ def main() -> int:
 
     if failures:
         for name, output in failures:
-            print(f"\n{RED}--- {name} ---{RESET}\n{output.strip()[-4000:]}")
+            print(f"\n{RED}--- {name} ---{RESET}\n{report(output)}")
         print(f"\n{RED}check: {len(failures)} step(s) failed{RESET}")
         return 1
 

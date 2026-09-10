@@ -1,0 +1,17 @@
+raw HTTP to the same daemon      p50    4.2 ms
+
+                                   p50      p95   prompt_tok  load  p_eval   eval  unaccounted
+chat, 2-token prompt, 1 token out  731.0  2935.6         13   672    55.2    0.0         4.1
+generate raw, same, 1 token out   769.3   872.4          1   732    32.0    0.0         5.3
+chat, 0-shot prompt, 20 out      1179.7  1240.3         39   606    48.4  514.6        10.2
+generate raw, 0-shot, 20 out     1281.4  1304.8         27   705    48.9  509.9        17.3
+chat, 4-shot prompt, 20 out      1175.5  1347.6        159   606    47.6  506.7        15.5
+generate raw, 4-shot, 20 out     1293.6  1433.6        147   723    49.2  509.5        11.7
+chat, 8-shot prompt, 20 out      1193.1  1468.2        279   612    49.8  507.5        23.6
+generate raw, 8-shot, 20 out     1267.8  1471.7        267   701    46.1  496.2        24.4
+chat, 16-shot prompt, 20 out     1151.6  1589.1        519   583    47.6  508.6        12.7
+generate raw, 16-shot, 20 out    1225.5  1635.1        507   672    47.4  502.2         3.7
+chat, 32-shot prompt, 20 out     1131.2  1927.9        999   583    47.5  486.8        14.0
+generate raw, 32-shot, 20 out    1196.5  1941.2        987   668    44.6  476.7         7.3
+
+wrote logs/measurements/oq15-turn-latency.json

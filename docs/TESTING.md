@@ -105,7 +105,9 @@ Regressions here are silent and cumulative, so they are asserted:
 
 | Metric | Budget |
 |---|---|
-| TTFT (router, resident) | p50 < 1.5 s · p95 < 3 s |
+| TTFT (router, resident) | p50 < 1.5 s · p95 < 3 s — **both met: 1.16 s p50, 1.24 s p95** over 60 reps ([OQ-15](OPEN_QUESTIONS.md#oq-15)) |
+| Routed turn, irreducible floor | no budget — **measured ~585 ms**, Ollama's `load_duration` on a model already resident, paid every request. Nothing reachable through its HTTP API goes below it |
+| Router prompt size | no budget, and none needed — **999 prompt tokens cost 47 ms**, the same as 13. The few-shot block's +30 accuracy points are free ([OQ-15](OPEN_QUESTIONS.md#oq-15)) |
 | Tool dispatch overhead (IPC + policy) | < 50 ms |
 | Retrieval, full corpus | p95 < 400 ms — **measured 635 ms** (2026-09-10, 27,967 chunks) |
 | Retrieval recall@5, mixed RU/EN fixtures | **≥ 80% — measured 68%** ([OQ-18](OPEN_QUESTIONS.md#oq-18)); Phase 5's recall criterion is **not met** |

@@ -18,7 +18,7 @@ doc, delete the marker.
 | [OQ-04](#oq-04) | Does `realpath` resolve Windows junctions? | ~~`TO VERIFY`~~ | Phase 2 | **RESOLVED 2026-08-21 — yes; but `is_symlink()` lies** |
 | [OQ-05](#oq-05) | Does `agy -p` emit stdout when piped? | ~~`EXPERIMENT NEEDED`~~ | Phase 6 (Antigravity only) | **RESOLVED 2026-08-21 — yes, with `--output-format`** |
 | [OQ-06](#oq-06) | Can a PWA install over a self-signed cert? | `TO VERIFY` | Phase 14 (push only) | open |
-| [OQ-07](#oq-07) | Is the memory subsystem dual- or quad-channel? | `UNKNOWN` | CPU-fallback planning | open |
+| [OQ-07](#oq-07) | Is the memory subsystem dual- or quad-channel? | **RESOLVED 2026-09-10** | CPU-fallback planning | **Dual — 2 DIMMs in B1/D1, 2 of 4 channels. The CPU fallback is ~half the bandwidth the design assumed; two slots are free** |
 | [OQ-08](#oq-08) | Does FTS5 `unicode61` handle Russian acceptably? | ~~`TO VERIFY`~~ | Phase 5 | **RESOLVED 2026-08-22 — yes; no stemmer, no camelCase split** |
 | [OQ-09](#oq-09) | `pywinpty` on Python 3.12 + ConPTY behaviour | ~~`TO VERIFY`~~ | Phase 3 | **RESOLVED 2026-08-21 — works; readiness must be measured, not slept** |
 | [OQ-10](#oq-10) | Is there a text-only Qwen3.5 quant? | `TO VERIFY` | Phase 1 | open |
@@ -26,7 +26,7 @@ doc, delete the marker.
 | [OQ-12](#oq-12) | Is taint escalation tolerable in daily use? | `ASSUMPTION` | Phase 5+ tuning | open |
 | [OQ-13](#oq-13) | What approval rate causes prompt fatigue? | `ASSUMPTION` | Phase 3+ tuning | open |
 | [OQ-14](#oq-14) | Does the orbital view earn its place? | `CUT` | [ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut) | resolved |
-| [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | `EXPERIMENT NEEDED` | UX quality, not a phase | open |
+| [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | **RESOLVED 2026-09-10** | UX quality, not a phase | **No — ~585 ms of every turn is an Ollama toll paid warm. Prompt size is free, so the few-shot costs nothing; `/api/generate` is slower** |
 | [OQ-16](#oq-16) | Does `connect_read_pipe` work anywhere on Windows? | `UNKNOWN` | none — worked around | monitoring |
 | [OQ-17](#oq-17) | Is a ~43 min **cold** reindex acceptable? | `ASSUMPTION` | Phase 5 tuning | narrowed 2026-08-22 — warm rebuilds are 37 s |
 | [OQ-18](#oq-18) | Can a Russian question reach an English codebase? | **measured 2026-09-10** | Phase 5 gate | **Translation works and the 0.8b mechanism equals the human ceiling; the shipped path composes to 71% and the 80% gate is still missed** |
@@ -263,7 +263,9 @@ because it ships an older CUDA runner. **When that runner is dropped, this GTX 1
 acceleration in an Ollama update.**
 
 **Not resolvable** — it is a vendor decision. Mitigations, all already in the design: the CPU fallback
-path is tested in Phase 1 rather than discovered in production; `LLMProvider` allows switching to a
+path is tested in Phase 1 rather than discovered in production — though
+[OQ-07](#oq-07) has since measured that fallback at **half** the memory bandwidth this assumed,
+because the board runs dual-channel with two slots empty; `LLMProvider` allows switching to a
 `llama.cpp` build compiled for `sm_61`; and the degradation table
 ([ARCHITECTURE §8](ARCHITECTURE.md#8-degradation--what-happens-when-a-piece-is-missing)) covers it.
 
@@ -342,14 +344,32 @@ achievable later.
 ---
 
 ### OQ-07
-**Is the memory subsystem dual-channel or quad-channel?** `UNKNOWN` · affects CPU-fallback planning
+**Is the memory subsystem dual-channel or quad-channel?**
+**RESOLVED 2026-09-10 — dual-channel, which is the unwelcome answer.**
 
-The Xeon E5-2670 v3 supports quad-channel DDR4, but many X99 boards populate only two channels.
-CPU inference is memory-bandwidth-bound, so this is roughly the difference between ~13 tok/s and
-~6 tok/s for a 3.4 GB model — the difference between a usable and an unusable fallback.
+The Xeon E5-2670 v3 supports quad-channel DDR4. This board is populated with two DIMMs, and the
+slots they are in decide it:
 
-**Check.** Run a memory bandwidth benchmark, or inspect the DIMM population. Record the result; it
-sets realistic expectations for [OQ-03](#oq-03)'s fallback and for the 9B reasoner.
+```
+BankLabel  DeviceLocator   GB   Speed   Manufacturer
+NODE 1     DIMM_B1          8    2133   Hynix
+NODE 2     DIMM_D1          8    2133   Hynix
+```
+
+`DIMM_B1` and `DIMM_D1` are two of the four channels — **16 GB across 2 of 4**, so the memory
+controller runs dual-channel and half the platform's bandwidth is unused. Two slots are free.
+
+**What it costs.** CPU inference is memory-bandwidth-bound, so this is roughly the ~6 tok/s end of
+this question's own estimate rather than the ~13 tok/s end, for a 3.4 GB model. That matters
+because the CPU fallback is the mitigation [OQ-03](#oq-03) leans on for the day Ollama drops the
+CUDA runner this GTX 1050 Ti depends on: **the fallback exists and is roughly half as good as the
+design assumed.** Populating the two empty slots would recover it, and is the cheapest performance
+fix available to this machine.
+
+Recorded by inspection rather than a bandwidth benchmark, which this question explicitly allows —
+and the DIMM population is the less ambiguous of the two, since a bandwidth number measured on a
+busy machine understates and one measured on an idle machine still has to be interpreted against a
+theoretical ceiling.
 
 ---
 
@@ -508,29 +528,82 @@ failed was the premise that a picture of the state beats the sentence next to it
 ---
 
 ### OQ-15
-**Can a routed turn get meaningfully under ~1.5 s?** `EXPERIMENT NEEDED` · quality, not a blocker
+**Can a routed turn get meaningfully under ~1.5 s?** **RESOLVED 2026-09-10 — no, and two of the
+three proposed levers do not exist.** `scripts/measure_turn_latency.py` ·
+[numbers](../logs/measurements/oq15-turn-latency.txt)
 
-Measured decomposition of a routed turn on this stack:
+Measured on `qwen3.5:0.8b`, warm and resident in VRAM, `think=False` as the router sends it, 12
+reps per row:
 
-| component | cost | ours to control? |
+| component | measured | scales with |
 |---|---|---|
-| Ollama fixed per-request overhead | **~600 ms** | no |
-| prompt processing (~900 tok, few-shot) | ~570 ms | yes — but it buys +30 accuracy points |
-| generation (~19 tokens) | ~330 ms | marginally |
+| raw HTTP to the same daemon | **4 ms** | nothing |
+| Ollama `load_duration`, model already loaded | **~585 ms** | **nothing — paid on every request** |
+| prompt evaluation | **~47 ms** | almost nothing (see below) |
+| generation | **~24 ms/token** | tokens out |
 
-The ~600 ms floor is real: a 2-token prompt generating *zero* tokens still costs 638 ms, while raw
-HTTP to the same daemon is 5 ms. It is unaffected by schema/grammar.
+A minimal request — 13-token prompt, one token out — costs **633 ms p50**, which reproduces the
+earlier 638 ms figure exactly. A realistic routed turn costs **~1.15 s**, and **~585 ms of that is
+a fixed toll paid before any work exists to do**.
 
-**The 900 ms p50 gate in ROADMAP Phase 1 was mis-derived** — it came from OQ-01's prompt-eval
-measurements alone and never budgeted for generation or per-request overhead. It is unreachable here
-at any prompt size.
+#### The correction that matters: prompt size is free, so the few-shot block is free
 
-Things worth trying: `/api/generate` with a pre-rendered prompt instead of `/api/chat`; a llama.cpp
-server directly (ADR-0009's documented escape hatch); trimming the few-shot block once the
-modify/delegate boundary moves to a deterministic later step.
+This question's own table said *"prompt processing (~900 tok, few-shot) ~570 ms — ours to control,
+but it buys +30 accuracy points."* **That trade-off does not exist.** Measured across a sweep to
+just past 900 tokens:
 
-**The real mitigation already works:** the pre-router resolves turns in ~5 ms. Every turn it handles
-skips all three costs. That is why ADR-0011 targets >50% of turns.
+| prompt tokens | 13 | 39 | 159 | 279 | 519 | **999** |
+|---|---|---|---|---|---|---|
+| `prompt_eval` | 55 ms | 48 ms | 48 ms | 50 ms | 48 ms | **47 ms** |
+| turn p50 | 731 ms | 1180 ms | 1176 ms | 1193 ms | 1152 ms | **1131 ms** |
+
+A thousand-token few-shot prompt costs the same as a thirteen-token one, and the 999-token row is
+*faster* at p50 than the 39-token row — the difference is noise. The ~570 ms in the old table was
+almost certainly `load_duration` misattributed to prompt processing; nothing in this measurement
+puts 570 ms anywhere near the prompt.
+
+**So: keep the few-shot block, and stop counting it as a cost.** Trimming it is the one lever this
+question proposed that is squarely ours to pull, and pulling it would buy nothing while losing 30
+accuracy points.
+
+#### `/api/generate` with a pre-rendered prompt is slower, not faster
+
+The second proposal, tested at every prompt size with `raw: true` to skip template rendering:
+consistently **90–170 ms worse** than `/api/chat`, with its own `load_duration` running ~680 ms
+against `/api/chat`'s ~585 ms. Dead end.
+
+#### What is left
+
+- **A llama.cpp server directly** ([ADR-0009](DECISIONS.md#adr-0009--ollama-as-default-provider-behind-llmprovider)'s
+  documented escape hatch) — untested, and now the *only* proposal still standing, because the toll
+  is Ollama's and nothing reachable through its HTTP API avoids it.
+- **Fewer output tokens.** At ~24 ms each this is real but small: the router already emits ~19.
+- **The pre-router**, which resolves a turn in ~5 ms and skips all of it. [ADR-0011](DECISIONS.md#adr-0011--deterministic-pre-router-before-the-model)
+  targets >50% of turns, and that remains the mitigation that actually works.
+
+**The 900 ms p50 gate in ROADMAP Phase 1 is unreachable by construction**, now with a stronger
+proof than before: a request with a 13-token prompt generating a single token already costs 633 ms,
+and there is no configuration of Ollama that goes below the ~585 ms toll.
+
+#### A tail that turned out not to exist
+
+The first write-up of this question carried a caveat about "occasional multi-second stalls the
+medians hide", on the strength of a **2.9 s p95 in one 12-rep sample**. It does not reproduce.
+Sixty identical calls:
+
+```
+n=60   p50 1164 ms   p95 1239 ms   max 1350 ms
+```
+
+p95 is 1.06× p50. Re-running the benchmark's exact sequence — warm-up, then twelve reps — gave
+660–717 ms with no outlier at all, and Ollama's own per-call breakdown pinned nothing: across all
+72 further calls `load_duration` stayed within 585–685 ms and no phase spiked.
+
+So there is **one unexplained outlier, not a tail**, and TTFT sits comfortably inside its p95 < 3 s
+budget. The caveat is retracted rather than quietly deleted, because a scary number published off a
+single sample is the kind of thing that gets planned against.
+
+---
 
 ### OQ-16
 **Is `loop.connect_read_pipe` usable at all on Windows' Proactor loop?** `UNKNOWN` · worked around
