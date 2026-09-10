@@ -19,9 +19,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 UI = ROOT / "apps" / "desktop"
+SHELL = UI / "src-tauri"
 
 NPM = shutil.which("npm") or "npm"
 UV = shutil.which("uv") or "uv"
+CARGO = shutil.which("cargo")
 
 Step = tuple[str, list[str], Path]
 
@@ -36,6 +38,19 @@ STEPS: list[Step] = [
     ("security", [UV, "run", "pytest", "-q", "tests/security"], ROOT),
     ("vitest", [NPM, "run", "--silent", "test"], UI),
 ]
+
+# The Tauri shell. Added 2026-09-10 with ADR-0030, which moved real logic into it — the shell
+# now decides whether to attach to a resident daemon or start one it owns, and gets that wrong
+# by attaching to any process that happens to hold the port. Rust was outside the gate until
+# then, which was survivable while `backend.rs` was a `Command::spawn`; it is not survivable for
+# a decision with four tests, because a test no gate runs is a test that rots. `dependsOn` is
+# this repo's own worked example of that.
+#
+# **Skipped loudly, never silently, when cargo is absent.** A gate that quietly drops a step on
+# a machine missing a toolchain reports green for something it did not check, which is the one
+# thing a gate must never do.
+if CARGO is not None:
+    STEPS.append(("cargo test", [CARGO, "test", "--quiet"], SHELL))
 
 GREEN, RED, DIM, RESET = "\033[32m", "\033[31m", "\033[2m", "\033[0m"
 
@@ -64,6 +79,12 @@ def main() -> int:
     # and the failing step's output was lost. A gate that cannot report a failure is worse than a
     # slow one; it looks like a broken script rather than a broken build.
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+
+    if CARGO is None:
+        # Not a failure: `cargo` is not needed to work on the Python or the web UI, and
+        # demanding it would make the gate unrunnable for most of the repo. But the reader has
+        # to know the shell went unchecked, or "check: OK" is a claim about code nobody ran.
+        print(f"  {DIM}cargo not found — the Tauri shell was NOT checked (ADR-0030){RESET}")
 
     failures: list[tuple[str, str]] = []
     for step in STEPS:

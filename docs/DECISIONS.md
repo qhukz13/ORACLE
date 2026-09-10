@@ -19,6 +19,7 @@ Format per record: Decision · Context · Options · Chosen · Why · Trade-offs
 | [0010](#adr-0010--event-sourced-runtime) | Event-sourced runtime | accepted |
 | [0011](#adr-0011--deterministic-pre-router-before-the-model) | Deterministic pre-router before the model | accepted |
 | [0012](#adr-0012--git-worktree-delegation-with-a-vendor-neutral-fallback) | Git-worktree delegation with a vendor-neutral fallback | accepted |
+| [0030](#adr-0030--the-shell-attaches-to-a-resident-daemon-and-only-owns-one-it-started) | The shell attaches to a resident daemon, and only owns one it started | accepted |
 | [0013](#adr-0013--deterministic-svg-orbit-no-force-simulation) | Deterministic SVG orbit, no force simulation | **scoped** — the orbit itself was cut ([0029](#adr-0029--the-orbital-view-is-cut)); the layout rule governs the knowledge map |
 | [0014](#adr-0014--embeddings-on-cpu-gpu-reserved-for-the-router) | Embeddings on CPU, GPU reserved for the router | accepted |
 | [0015](#adr-0015--intent-shaped-tools-no-general-shell) | Intent-shaped tools, no general shell | accepted |
@@ -1128,3 +1129,58 @@ never had one. `d3-scale`/`d3-shape` are now unreferenced by the app. The state 
 part of the work and lives on in the command bar, which is where it was already being read from.
 ADR-0013's stable-angle argument is upheld by the measurement above and still governs the knowledge
 map ([ADR-0023](#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered)).
+
+---
+
+## ADR-0030 — The shell attaches to a resident daemon, and only owns one it started
+
+**Context.** [OQ-11](OPEN_QUESTIONS.md#oq-11) asked whether the Python sidecar dies when the Tauri
+shell is force-quit, and resolved **yes** on 2026-08-21 via a Windows Job Object with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. It was measured, it worked, and it was right for the
+architecture it was asked in: ORACLE was a desktop app with a sidecar, and an orphaned `oracled`
+holding the database and the port was a genuinely bad first-run experience.
+
+[ADR-0025](#adr-0025--oracle-is-a-resident-service-the-window-is-a-client) then changed the
+architecture underneath it. ORACLE became a resident service and the window became a client, and
+P13's acceptance list says *"closing the window does not stop work; reopening it loses nothing."*
+The job object makes that **impossible**, not difficult — it is a kernel-enforced guarantee of the
+opposite.
+
+**Options.** (a) Drop the job object; the shell starts `oracled` and lets it outlive the window.
+(b) Never start a daemon; require the service to be installed first. (c) Attach to a daemon that is
+already serving, and keep the job object only for one this shell started itself.
+
+**Chosen.** (c).
+
+**Why.** The question was never really about *lifetime*, it was about **ownership**, and framing it
+as lifetime is what put those two decisions in conflict:
+
+- **A daemon we found, we do not touch.** It might be the service, or a developer's terminal.
+  Terminating someone else's process because our window closed is the bug, not the feature.
+- **A daemon we started, we still clean up.** Nothing else knows it exists — no service manager, no
+  terminal, no PID file — so an orphan here is exactly the orphan OQ-11 was about. Its mechanism is
+  kept verbatim for exactly that case.
+
+(a) trades one orphan problem for a worse one: a daemon nobody can see and nothing will stop, which
+is the failure ADR-0025 itself names as its main risk. (b) is where this ends up in production and
+is hostile before the installer exists — the first run would be a window that cannot do anything.
+
+**Trade-offs.** The shell now does a network probe on the path to first paint. It is bounded at
+300 ms and `/health` is deliberately state-free (it answers before startup completes), so the cost
+is a loopback round trip; but it is a cost the previous design did not have, and P13 budgets ~400 ms
+to a usable window.
+
+The probe also has to be more than "is something listening". Port 8787 answering could be any
+process, and attaching to a stranger would leave the shell with no daemon and the UI in a reconnect
+loop against a server that will never speak the protocol — a failure that looks like ORACLE being
+broken. So it sends a real `GET /health` and requires ORACLE's own `{"status":"ok"}`. That is
+hand-rolled rather than an HTTP dependency: the shell holds zero business logic
+([ADR-0007](#adr-0007--the-shell-holds-no-business-logic)) and a client here would be the largest
+thing in the crate.
+
+**Consequences.** OQ-11 stays resolved and its measurement stands; what changed is the question,
+and its entry now says so rather than being quietly contradicted by the code it points at. `Backend`
+becomes `Attached | Owned`, and `Drop` does nothing in the first case — which is the entire ADR, in
+one match arm. Four tests cover the probe, including the two that matter: a non-ORACLE listener is
+not attached to, and a non-200 is not either. Once `oracled` is installed as a service, `Owned`
+stops happening in normal use and the shell becomes what ADR-0007 always said it was: a window.

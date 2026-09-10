@@ -22,7 +22,7 @@ doc, delete the marker.
 | [OQ-08](#oq-08) | Does FTS5 `unicode61` handle Russian acceptably? | ~~`TO VERIFY`~~ | Phase 5 | **RESOLVED 2026-08-22 — yes; no stemmer, no camelCase split** |
 | [OQ-09](#oq-09) | `pywinpty` on Python 3.12 + ConPTY behaviour | ~~`TO VERIFY`~~ | Phase 3 | **RESOLVED 2026-08-21 — works; readiness must be measured, not slept** |
 | [OQ-10](#oq-10) | Is there a text-only Qwen3.5 quant? | `TO VERIFY` | Phase 1 | open |
-| [OQ-11](#oq-11) | Does the Tauri sidecar die with the shell? | ~~`TO VERIFY`~~ | Phase 0 | **RESOLVED 2026-08-21 — yes, via Job Object** |
+| [OQ-11](#oq-11) | Does the Tauri sidecar die with the shell? | ~~`TO VERIFY`~~ | Phase 0 | **RESOLVED 2026-08-21 — yes, via Job Object; the *question* superseded 2026-09-10 by [ADR-0030](DECISIONS.md#adr-0030--the-shell-attaches-to-a-resident-daemon-and-only-owns-one-it-started)** |
 | [OQ-12](#oq-12) | Is taint escalation tolerable in daily use? | `ASSUMPTION` | Phase 5+ tuning | open |
 | [OQ-13](#oq-13) | What approval rate causes prompt fatigue? | `ASSUMPTION` | Phase 3+ tuning | open |
 | [OQ-14](#oq-14) | Does the orbital view earn its place? | `CUT` | [ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut) | resolved |
@@ -444,6 +444,18 @@ refuses to continue rather than run a backend it cannot guarantee to clean up.
 The reverse case is also verified: killing the backend leaves the UI showing
 `Backend offline — reconnecting in Ns`, and it recovers on its own with no gap
 ([P0-T1 report](current_report.md)).
+
+> **The question was superseded on 2026-09-10, not the answer.** The measurement above still holds
+> and the mechanism is still in the code. What changed is
+> [ADR-0025](DECISIONS.md#adr-0025--oracle-is-a-resident-service-the-window-is-a-client): ORACLE
+> became a resident service, so P13 requires the opposite behaviour — *"closing the window does not
+> stop work"* — which a kill-on-close job makes impossible by construction.
+>
+> [ADR-0030](DECISIONS.md#adr-0030--the-shell-attaches-to-a-resident-daemon-and-only-owns-one-it-started)
+> resolves the conflict by noticing that this question was about **ownership** rather than lifetime.
+> The shell now attaches to a daemon that is already serving and leaves it alone; a daemon *it*
+> started is still assigned to the job object, because nothing else knows that one exists. OQ-11's
+> mechanism therefore survives for exactly the case OQ-11 was actually about.
 
 ---
 

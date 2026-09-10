@@ -3,119 +3,77 @@
 > Latest report from the working agent. **Overwrite, don't append** — this is a snapshot for whoever
 > picks the project up next.
 
-**Task:** find the state, find the next task, build it — then keep going.
-**Status:** **OQ-22 and OQ-18 both resolved. Phase 11's knowledge graph (§11b) is built in full.
-Retrieval now reaches a chat turn, which it never did before.** Fourteen commits on `main`, gate
-green each time.
-**Date:** 2026-09-09 → 2026-09-10
-**Dev logs:** [canvas vs SVG](../logs/development/2026-09-09-oq22-canvas-vs-svg.md) ·
-[OQ-18 resolved](../logs/development/2026-09-10-oq18-resolved.md) ·
-[the sleep that was not a sleep guard](../logs/development/2026-09-09-oq18-the-wrong-thing-hardened-twice.md)
+**Task:** continue building ORACLE — find the state, find the next task, build it.
+**Status:** **Phase 11's view list is complete, and Phase 13 has everything except the one step that
+changes your machine.** The orbital view was built, tested and cut. Six commits on `main`, gate green
+each time.
+**Date:** 2026-09-10
+**Dev log:** [the centrepiece loses to a sentence](../logs/development/2026-09-10-oq14-the-centrepiece-loses-to-a-sentence.md)
 
 ---
 
-## 1 · OQ-22 resolved — ADR-0023 confirmed
+## What happened
 
-Canvas holds **p50 6.1 ms — the vsync interval exactly** on this **163.9 Hz** panel; SVG holds
-12.2 ms, exactly twice it, missing 96% of frame budgets. Idle 1.09% of one core, first paint 10.1 ms.
+**[OQ-14](OPEN_QUESTIONS.md#oq-14) resolved `CUT`.** The orbital view — the picture on the cover,
+specified before anything else in the UI — was built in the morning and deleted in the afternoon. It
+failed its own pre-committed test: cover every label and it still said three true things, and all
+three were already written in words in the chrome around it. The measurements and the argument are
+in [ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut). ADR-0013's stable-angle layout was
+never what failed and still governs the knowledge map.
 
-**The verdict is narrower than "canvas won".** Against OQ-22's *written* gate — 60 fps — every
-renderer passes; SVG turns in 82. They separate only against the measured refresh rate. On a 60 Hz
-panel the canvas complexity would be unjustified at this node count, exactly as OQ-22 suspected.
-What carries it past this panel is the ceiling: 10k documents is ~32,000 SVG elements against 4,523.
+**[§8's agent queue](UI.md#8-agent-queue)** shipped, which completes P11's view list. It replaced the
+sidebar's `WAITING ON ME` list, because that was its own `BLOCKED` bucket under a second name.
 
-Two of my own hypotheses were wrong: the SVG variants came out **identical** (the cost is
-compositing elements, not the 1,420 per-frame attribute writes), and canvas hit-testing beat
-`elementFromPoint` by **4–9×**.
+**P13's boot health phase** (`src/oracle/core/health.py`) probes policy, the event log,
+`knowledge.db`, the router and each delegation adapter, and reports what each failure *costs*
+rather than that it happened. Its acceptance criterion was run, not asserted: Ollama stopped, daemon
+restarted, ONLINE in 376 ms with the loss named.
 
-## 2 · OQ-18 resolved — the mechanism reaches the ceiling, the gate does not
+**[ADR-0030](DECISIONS.md#adr-0030--the-shell-attaches-to-a-resident-daemon-and-only-owns-one-it-started)**
+had to supersede a *resolved* question. [OQ-11](OPEN_QUESTIONS.md#oq-11) made the daemon die with the
+window via a kill-on-close Job Object — correct for the architecture it was asked in, and the one
+thing making P13's "closing the window does not stop work" impossible by construction. The question
+turned out to be about **ownership**, not lifetime.
 
-| arm | r@5 | RU-only |
-|---|---|---|
-| dense | 61% | 56% |
-| **rrf_w2** | **68%** | — |
-| dense_xl — *human translation, the ceiling* | 66% | 64% |
-| **dense_mt — *0.8b translation, the mechanism*** | **66%** | **64%** |
-| rrf_mt | 58% | — |
+---
 
-`dense_mt` and `dense_xl` are **identical**. An 0.8b model's translation is as good as a human's for
-retrieval, so **there is no headroom left in a better translator** — a closed direction.
-`Settings.translate_queries` stays `True` on evidence: 61% → 66%, and 56% → 64% on Russian.
+## What is waiting for you
 
-**The 80% gate is still missed at 68%.** Phase 5's recall criterion remains unmet, said plainly
-rather than moved.
+1. **The autostart task is written and not installed.** `pwsh -File scripts/install_oracled_task.ps1`
+   registers a logon task; `-Uninstall` removes it. It changes what your machine does at logon, so no
+   agent runs it. All three branches of its guard were tested.
+2. **OQ-18's re-run fires at 23:00** against a corpus frozen at `62355e3`. On completion, compare the
+   new `gated` against **61.1%** — the like-for-like baseline over the 36 still-reachable fixtures.
+   **If it does not move, revert [ADR-0027](DECISIONS.md#adr-0027--rrf-is-weighted-against-the-lexical-list).**
+3. **Two fixtures died in another repo.** `entitlementGuard.ts` and `rbacGuard.ts` are staged
+   deletions in Asterim. Restoring them restores the 38-case set; that is your call.
+4. **UI.md §1/§14/§15 are still `TO VERIFY`** — the visual references were never attached. This
+   mattered less than it looked: OQ-14 was answerable by measurement without them.
 
-**Two cheap follow-ups, both seconds because the forward pass is cached:** the winning arm
-(`rrf_w2`, no translation) has never been composed with translation — there is no `rrf_w2_mt`; and
-`gated`, which exists to be language-aware fusion, scores identically to plain `rrf`, so **the gate
-is not doing its job**. BM25 scores **0.00** on cross-language queries and dilutes a good dense
-ranking, which is why naive `rrf_mt` (58%) is worse than not translating at all.
+---
 
-`en-relay-dockerfile` misses in all eight arms because `Dockerfile.relay` is `CONFIG` (never
-embedded) *and* because a filename is not searchable at all — `rel_path` is `UNINDEXED`. Kept as a
-true negative; the generalisation is **[OQ-26](OPEN_QUESTIONS.md#oq-26)**.
+## What I got wrong, and what it cost
 
-## 3 · Phase 11's knowledge graph, built in full
+- **I let a commit kill a 2-hour eval run.** `corpus_fingerprint()` hashes every embedded chunk and
+  ORACLE indexes itself, so the OQ-14 commit moved the corpus under a run already 28% through. The
+  checkpoint was dead before anyone asked to stop it. Fixed by freezing the corpus (`--corpus-cache`),
+  which also makes runs weeks apart comparable — they never were.
+- **I predicted the orbit's label layer would collapse at realistic density.** Measured: 14 of 91
+  pairs overlap. Degradation, not collapse. The number is in the ADR instead of the adjective.
+- **My first health phase spawned `claude --version` on every app startup**, including several
+  hundred times per test run.
+- **I wrote the autostart guard in batch.** Testing only the happy path would have shipped it: the
+  stranger branch died with `else was unexpected at this time` because batch expands `%BODY%` inside
+  an `if`, and every JSON body contains quotes. Rewritten in PowerShell, then found three more
+  defects that only appear on Windows PowerShell 5.1 — no BOM means em dashes break parsing, the
+  response body arrives as a `byte[]`, and `Add-Content -Encoding UTF8` writes a BOM per append.
+  **Every one of those would have failed silently at logon on your machine and nowhere else.**
 
-`rag/graph.py` + two endpoints + `KnowledgeGraph.tsx` on **Ctrl+5**, against the real corpus:
-**1,565 documents · 988 wikilinks · 2,480 inferred edges · 195 orphans**. All of §11b now exists —
-the map, retrieval traces, collection hulls, the labelled legend, and select-as-context.
+---
 
-Select-as-context fills **band 6**, which was empty because *search* on the answer path costs
-seconds. A pin has no query, so the argument does not apply. Provenance rides on each pinned
-document: choosing a file by hand does not launder its taint.
+## Gaps worth knowing about
 
-**Defects only real use found** — none of which the suite could see, because none of those tests lay
-anything out or run a browser: the canvas sized itself **166 × 11280**; a horizontal scrollbar sat
-under a pannable map; `unplaced` counted 106 documents that can *never* be placed, producing a
-permanent banner offering an action that could not change the number; list rows rendered as `"B…"`;
-and the pan handler dereferenced a ref inside an async state updater, blanking the whole stage on
-mouse-release.
-
-## 4 · ORACLE could not retrieve from a chat turn — fixed
-
-The largest single finding of the session, and it was not a model-quality problem.
-
-`router/selection.py` filters candidates through `ARG_BUILDERS`, and **no `know.*` tool was in it**.
-For intent `search` the router was offered **exactly one tool, `fs.list`** — and ADR-0017 builds the
-enum from the candidates, so the decoder could not spell `know.search`. The whole retrieval stack
-was unreachable from chat; its only callers were the global-search endpoint and MCP delegates.
-
-Fixed with a `"query"` shape that needs no project. `eval_selection.py` re-run as the discipline
-requires — **25/25**, up from 20/20, with five new cases. Verified end to end: a live turn now emits
-`tool.started know.search` → `tool.finished`, and **the knowledge map's retrieval trace lit up for
-the first time**.
-
-⚠ **What that immediately revealed:** the top hits for *"taint tracking"* were ML notes about
-*experiment tracking* and a `budget.py`, not `SECURITY.md §6`. The plumbing is right; the ranking is
-the 68% OQ-18 measured, now visible on a real query.
-
-## 5 · Things found in passing, all fixed
-
-- **ADR-0023 spent two weeks contradicting its own measurement** ("semantic edges default off",
-  disproved 2026-08-26).
-- **`check.py` crashed while *printing* a failing step** — the gate died exactly when it had
-  something to say. `eval_selection.py --verbose` carried the identical defect on its Russian cases.
-- **A security test raced its own startup**, launching a process that exits in milliseconds and then
-  asserting it was alive — ~1 run in 3, blaming the Job Object.
-- **A retrieval fixture pointed at a moved file**, an automatic miss for every arm.
-- **Vite's watcher killed the dev server** by opening the Rust binary mid-link.
-
-## 6 · One retraction
-
-I diagnosed an OQ-18 run as a thread-pool deadlock — 0% CPU samples, 71 threads in `Wait`, a py-spy
-stack inside `session.run()`. **All real, and the conclusion was wrong.** It was running at 0.20
-chunks/s because two full `check.py` runs were executing in the same window; each batch took ~81 s,
-so a stack sample landed inside `run()` essentially always. **The starvation was mine** — I had
-written "don't run the test suite while it runs" into the ledger hours earlier.
-
-Kept in the script rather than deleted: *a stack in native code proves where a thread is, not that
-it is stuck*, and `Win32_Processor LoadPercentage` is a stale counter that was trusted over the
-eval's own instrumentation.
-
-## Gate
-
-All seven steps green. The wall-clock flake family now spans **three** tests
-(`test_a_long_burst_arrives_complete`, `test_a_burst_becomes_one_group`, and a WebSocket timeout);
-a fourth — the app-detachment race — turned out to be a real defect and is fixed. The rest still
-carry implicit timing assumptions and should become explicit perf tests.
+- **`clippy` and `rustfmt` are not installed** on this toolchain, so the Rust has no linter or
+  formatter. `cargo test` is now in the gate; the other two need `rustup component add`.
+- **Nothing verifies P12's Definition of Done end to end** — "say continue Asterim, walk away, come
+  back to a completed or gated graph". It needs a human approval click, so no agent can close it.

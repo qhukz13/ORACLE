@@ -516,12 +516,20 @@ auto-resume · `ARCHITECTURE.md §8` degradation, already the reason Ollama bein
 state · `since_seq`, already global and gap-free · the global HALT hotkey, already specified as
 window-independent.
 
-**New work.** `oracled` installed as a Windows service or scheduled task, starting
-**degraded-capable** rather than eagerly · ~~a boot health phase over Ollama, both databases, the
+**New work.** ~~`oracled` installed as a Windows service or scheduled task, starting
+**degraded-capable** rather than eagerly~~ — **written 2026-09-10, deliberately not installed**
+(`scripts/install_oracled_task.ps1` + `scripts/run_oracled.ps1`). A logon task, not a service and
+not a boot task: a boot-time service runs as SYSTEM before any user profile exists, with no user
+PATH, no `uv`, no Ollama and no access to `C:\Projects` under the owner's credentials — which is
+not "degraded-capable", it is broken with a green light. Installing it changes what the machine
+does at logon, so it is the owner's decision and no agent runs it. · ~~a boot health phase over Ollama, both databases, the
 index, agent CLIs and policy~~ **done 2026-09-10** (`core/health.py`, reported on
 `/api/v1/status` and as a `system.health` event; see
 [ARCHITECTURE §8 — as built](ARCHITECTURE.md#8-degradation--what-happens-when-a-piece-is-missing)) ·
-the shell attaches to a running daemon instead of supervising a sidecar.
+~~the shell attaches to a running daemon instead of supervising a sidecar~~ **done 2026-09-10**
+([ADR-0030](DECISIONS.md#adr-0030--the-shell-attaches-to-a-resident-daemon-and-only-owns-one-it-started)
+— which had to supersede [OQ-11](OPEN_QUESTIONS.md#oq-11)'s kill-on-close job object, the one thing
+making "closing the window does not stop work" impossible by construction).
 
 **Already done in P12-T3, and this phase's main risk is already mitigated:** the briefing, and
 the `system.boot` / `system.shutdown` pair that lets it say *"ORACLE stopped unexpectedly at
@@ -538,7 +546,11 @@ daemon that died overnight being the first line of the next briefing, are both t
 
 **Acceptance criteria.**
 
-- [ ] Reboot the machine; ORACLE is online without anyone starting it.
+- [ ] Reboot the machine; ORACLE is online without anyone starting it. **The mechanism exists and
+      is tested; the box stays unticked because installing it is the owner's decision, not an
+      agent's** — `pwsh -File scripts/install_oracled_task.ps1`. All three branches of the guard
+      it installs were run: ORACLE already serving (exits, starts nothing), a stranger answering
+      on 8787 (refuses, logs what it saw), and a cold machine (starts the daemon).
 - [x] **Boot with Ollama down reaches ONLINE and says which capability is missing.** `2026-09-10` —
       run, not asserted: Ollama stopped, daemon restarted, `/api/v1/status` reported
       `reasoning: Ollama is not reachable` with the fallback named and the whole phase costing
@@ -547,7 +559,10 @@ daemon that died overnight being the first line of the next briefing, are both t
       waiting, what is next.
 - [ ] The briefing does not clear itself on render.
 - [ ] Boot animation ≤ ~400 ms.
-- [ ] Closing the window does not stop work; reopening it loses nothing.
+- [x] **Closing the window does not stop work; reopening it loses nothing.** `2026-09-10` — the
+      shell attaches to a resident daemon and `Drop` does nothing for one it did not start
+      ([ADR-0030](DECISIONS.md#adr-0030--the-shell-attaches-to-a-resident-daemon-and-only-owns-one-it-started)).
+      Still gated on the service existing for the *reboot* half of the list.
 
 **Risks.** A background service crashing invisibly (mitigated by making it brief itself) · autostart
 holding a GPU-resident model from boot on a 4 GB card (mitigated by degraded-capable start) ·

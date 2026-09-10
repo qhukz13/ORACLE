@@ -7,13 +7,11 @@
 
 ## Task
 
-**[OQ-14](OPEN_QUESTIONS.md#oq-14) is resolved `CUT`. The orbital view was built against real data,
-failed its own test, and was deleted
-([ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)). Next: the P11 agent queue, and
-[ADR-0027](DECISIONS.md#adr-0027--rrf-is-weighted-against-the-lexical-list)'s verification when the
-OQ-18 corpus run lands.**
+**P11's view list is complete and P13's boot health phase is in. Next: P13's remaining new work —
+`oracled` as an autostart service, and the shell attaching to a running daemon instead of
+supervising a sidecar.**
 
-**Phase:** [11 — execution visualisation & advanced UI](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc) · **Scope:** Capability arc
+**Phase:** [13 — residency, boot & the briefing](ROADMAP.md#phase-13--residency-boot--the-briefing-residency-arc) · **Scope:** Residency arc
 **Status:** `READY` · **Set:** 2026-09-10 · **Blocked on:** nothing
 
 ### Done 2026-09-10
@@ -21,32 +19,33 @@ OQ-18 corpus run lands.**
 | | |
 |---|---|
 | [OQ-27](OPEN_QUESTIONS.md#oq-27) | resolved — dispatched approvals do not expire ([ADR-0028](DECISIONS.md#adr-0028--a-dispatched-approval-does-not-expire)) |
-| §11b knowledge graph | complete: canvas map, traces, hulls, select-as-context |
-| §12 notifications | shipped |
-| `TaskTree` fixture | re-recorded off the wire; the assertion with teeth (`kind`) was measured, not assumed |
-| **[OQ-14](OPEN_QUESTIONS.md#oq-14)** | **`CUT`** — [dev log](../logs/development/2026-09-10-oq14-the-centrepiece-loses-to-a-sentence.md) |
+| [OQ-14](OPEN_QUESTIONS.md#oq-14) | **`CUT`** — the orbit failed its own test ([ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut), [dev log](../logs/development/2026-09-10-oq14-the-centrepiece-loses-to-a-sentence.md)) |
+| §11b knowledge graph · §12 notifications | shipped |
+| §8 agent queue | shipped — **P11's view list is now complete** |
+| `TaskTree` fixture | re-recorded off the wire |
+| **P13 boot health phase** | `core/health.py`; P13's acceptance criterion run, not asserted |
+| **The degraded banner** | one row per missing subsystem, each carrying its own `lost` |
 
-**Why OQ-14 came back "no", in one line:** with every label covered the orbit still said three true
-things — a state colour, no pulse, two red dots — and all three were written in words, at that same
-moment, in the chrome around it (`IDLE` · `WAITING ON ME nothing` · `ORACLE ACTIVE ✗2`). It never
-answered the fourth question at all. `Orbit.tsx`, `graph/orbit.ts`, their tests, the styles and the
-stage are deleted; the state vocabulary and ADR-0013's stable angle survive, in the command bar and
-the knowledge map respectively.
+**Two defects the banner work uncovered, both live before today:** every degradation ended with
+*"Slash commands and the command palette still work"* — the *reasoning* fallback, and false when the
+index was what was down — and only one degradation could be shown at a time. Both are gone;
+`src/degradation.ts` merges the boot snapshot with any live `system.degraded`, and the live event
+wins.
 
 ---
 
 ## What remains
 
-### 1. ~~P11's agent queue~~ — **done 2026-09-10**
+### 1. P13 — the rest of residency
 
-`AgentQueue.tsx` + `queue.ts`, in the sidebar, replacing the ad-hoc `WAITING ON ME` list it
-duplicated. Verified against the live daemon: six DONE rows off the real `continue ORACLE` run,
-newest-first, `failed` and `skipped` kept as different words.
-[UI.md §8 — as built](UI.md#8-agent-queue) records three deviations from the sketch (no `skip` verb
-exists; `[review]` navigates rather than decides; two lines, not one) and the two non-obvious
-mappings the tests pin: `TaskStatus.WAITING` is `NEXT`, and a delegated task must not appear twice.
-
-**With this, P11's view list is complete.**
+- **`oracled` as an autostart service or scheduled task**, starting *degraded-capable*. The boot
+  health phase is what makes "degraded-capable" mean something: it measured 139 ms healthy and
+  376 ms with the router down, and never gates the boot.
+  > **This changes the machine's boot behaviour, so the installer gets written but not run.**
+  > Installing it is the owner's call, not an agent's.
+- **The shell attaches to a running daemon** instead of supervising a sidecar.
+- Acceptance still open: reboot → online with nobody starting it · closing the window does not stop
+  work · boot animation ≤ ~400 ms.
 
 ### 2. ADR-0027's verification — **stopped and rescheduled 2026-09-10 16:20**
 
@@ -103,6 +102,11 @@ OQ-14 turned out to be answerable by measurement without them.
 
 ## Definition of done for the phase
 
-P11 closes when the agent queue renders. The orbit's slot in that list is closed by deletion, which
-[ROADMAP](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc) item 2 now
-records as done-and-undone rather than pending.
+P13 closes on its acceptance list: reboot the machine and ORACLE is online without anyone starting
+it · the window shows what ran, finished, failed and is waiting within 3–5 s · the briefing does not
+clear itself on render · boot animation ≤ ~400 ms · closing the window does not stop work.
+
+Three of those are already true and tested (the briefing's persistence and the unclean-restart line
+came with P12-T3; the health phase is what lets a degraded boot still be a boot). The two that are
+not are both about **the daemon outliving the window**, which is the one structural change left in
+this phase.
