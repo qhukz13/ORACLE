@@ -19,10 +19,10 @@
 
 ## Task
 
-**`TaskTree` now tests against a recorded real graph, and P12-T5's last open criterion turned
-out to be already met. Two decisions remain with the owner: [OQ-27](OPEN_QUESTIONS.md#oq-27)
-(a gated graph decays in 180 s) and the RRF-weighting ADR. Next agent-doable:
-[OQ-14](OPEN_QUESTIONS.md#oq-14) needs the owner's eye, so the queue below is the work.**
+**The RRF-weighting decision is taken ([ADR-0027](DECISIONS.md#adr-0027--rrf-is-weighted-against-the-lexical-list))
+and its verification run is scheduled. Waiting on that result before anything else touches
+retrieval. [OQ-27](OPEN_QUESTIONS.md#oq-27) and [OQ-14](OPEN_QUESTIONS.md#oq-14) still want the
+owner — one weakens a safety property, the other is a taste call on a centrepiece.**
 
 **Phase:** [11 — execution visualisation & advanced UI](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc) · **Scope:** Capability arc
 **Status:** `READY` · **Set:** 2026-09-09 · **Blocked on:** nothing
@@ -100,14 +100,18 @@ verified against the real corpus at 1,564 documents / 3,465 edges.
   **The `gated` arm was measuring a gate the product replaced two weeks earlier** — ported, and the
   eval now opens on 13 of 38 fixtures (0 of 25 Russian) instead of 38 of 38, with the constants
   pinned by `tests/test_eval_gate_matches_production.py`.
-- **A +2.6 point retrieval win is available, and it needs an ADR, not a commit.** The best
-  composition is **73.7%** — Russian → `dense_mt`, English → **`rrf_w2`** (RRF weighted 2:1 toward
-  dense) — against today's 71.1%. But [RAG.md §5](RAG.md#5-hybrid-retrieval) refused weight tuning
-  deliberately (*"would have forfeited the property the algorithm was chosen for"*) and gated the
-  input instead, measured at +8/+12. **That decision now has evidence against it and should be
-  reopened properly.** Two caveats: `rrf_w2` was measured *ungated*, so 73.7% is a ceiling; and
-  `rrf_w2_mt` — weighted fusion over the *translated* probe — is still unmeasured and is the one
-  combination the composition cannot derive. Fold it into the next full run.
+- ~~A +2.6 point retrieval win is available.~~ **Taken 2026-09-10:
+  [ADR-0027](DECISIONS.md#adr-0027--rrf-is-weighted-against-the-lexical-list)** weights the lexical
+  list at `LEXICAL_WEIGHT = 0.5` against each dense list. It overturns RAG.md §5's "no tuned
+  weights", which is struck through rather than deleted, with the number that overturned it beside
+  it. The weight is *injected* like `translator`, so `rag/retrieval.py` stays settings-free and the
+  rollback is passing `1.0`.
+  ⚠ **Shipped on a ceiling estimate and not yet verified.** `rrf_w2` was measured ungated;
+  production gates. So a `gated_w2` arm was added — the combination that actually ships — and
+  **the eval is scheduled** (`ORACLE-OQ18-eval`, fires every 15 min, 45-min cap, resumes from
+  checkpoint). **On collection: compare `gated_w2` against `gated`.** If the composed number does
+  not move, revert per the ADR. Do not let this sit unverified — an ADR accepted on an estimate is
+  a decision waiting to be wrong.
 - **[OQ-26](OPEN_QUESTIONS.md#oq-26): the eval indexes our writing about the eval, and it ratchets.**
   `MEASURED 2026-09-10`: **92 of 190 top-5 lexical slots (48%) are ORACLE documents**, for a fixture
   set with **zero** answers in ORACLE — the top two hits for one query were OQ-18 dev logs, one
