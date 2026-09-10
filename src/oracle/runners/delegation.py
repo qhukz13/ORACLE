@@ -78,7 +78,9 @@ def make_delegation_runner(
     async def run(task: Task) -> TaskResult:
         packet = packet_from(task, allowed_tools=allowed_tools)
         inputs = await inputs_for(task) if inputs_for is not None else PacketInputs()
-        active = await service.run(packet, source_repo, inputs)
+        # Dispatched: a graph is running this, so its egress card waits for an answer rather
+        # than expiring in three minutes and failing the task (ADR-0028).
+        active = await service.run(packet, source_repo, inputs, dispatched=True)
         raw: dict[str, Any] = dict(active.result or {})
         claim = str(raw.get("result_text") or "") or None
         evidence = {key: raw[key] for key in EVIDENCE_KEYS if key in raw}

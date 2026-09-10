@@ -161,6 +161,52 @@ describe("approvals", () => {
     ts: new Date().toISOString(),
   });
 
+  it("keeps a dispatched approval that has no clock", () => {
+    /* ADR-0028: a graph raised it, so it waits for an answer. The arrival-time expiry rule
+       must not apply, or the client reintroduces the timeout the server just removed. */
+    useStore.getState().reset();
+    useStore.getState().apply({
+      v: 1,
+      seq: 1,
+      ts: new Date().toISOString(),
+      type: "approval.requested",
+      trace_id: "tr_1",
+      payload: {
+        approval_id: "ap_disp",
+        tool: "ai.delegate",
+        tier: "T3",
+        decision: "confirm_strong",
+        rule: "taint.escalate",
+        expires_in_s: null,
+        waits: true,
+      },
+    } as never);
+
+    const [a] = useStore.getState().approvals;
+    expect(a?.approvalId).toBe("ap_disp");
+    expect(a?.waits).toBe(true);
+    expect(a?.expiresInSec).toBeNull();
+  });
+
+  it("clears pending approvals when the daemon reboots", () => {
+    /* Pending approvals live in the daemon's memory. A dispatched one has no clock to retire
+       itself, so without this a card nothing can answer sits at the head of the queue forever
+       after a crash — hiding the live one behind it, which is the exact failure the
+       arrival-time expiry rule exists to prevent. */
+    useStore.getState().reset();
+    const base = { v: 1, ts: new Date().toISOString(), trace_id: "tr_1" };
+    useStore.getState().apply({
+      ...base,
+      seq: 1,
+      type: "approval.requested",
+      payload: { approval_id: "ap_old", tool: "ai.delegate", expires_in_s: null, waits: true },
+    } as never);
+    expect(useStore.getState().approvals).toHaveLength(1);
+
+    useStore.getState().apply({ ...base, seq: 2, type: "system.boot", payload: {} } as never);
+    expect(useStore.getState().approvals).toHaveLength(0);
+  });
+
   it("queues a request and removes it when resolved", () => {
     const s = useStore.getState();
     s.apply(requested());

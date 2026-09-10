@@ -7,9 +7,14 @@ only a few properties that matter, all of them about not being a rubber stamp:
     from the preview and is checked again at execution; approving a plan does not
     approve a mutated version of it. That check lives in the executor, and this module
     exists to make sure the two see the same digest.
-  * **An unanswered request expires.** A pending approval that waits forever is a
-    turn that never finishes and a lock nobody can clear. Expiry resolves it as
-    *refused*, because "nobody answered" is not consent.
+  * **An unanswered *interactive* request expires.** A pending approval that waits
+    forever is a turn that never finishes and a lock nobody can clear. Expiry resolves
+    it as *refused*, because "nobody answered" is not consent.
+  * **A *dispatched* request does not expire** (ADR-0028). One raised by a running graph
+    has no one at the desk by construction — the person started long work precisely so
+    they need not watch — and a three-minute clock turned a *gated* graph into a failed
+    one. It still resolves only on an explicit answer, HALT, cancellation or restart:
+    nothing here grants by waiting.
   * **Nothing auto-approves.** There is no timeout that grants, no "remember this
     choice", no batching. Prompt fatigue is a security failure
     (docs/SECURITY.md#2), and the answer to it is fewer prompts — via reversibility
@@ -25,6 +30,7 @@ not in the event cannot be part of their decision.
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -37,9 +43,18 @@ from oracle.tools.executor import Approval, ToolExecutor
 
 log = get_logger(__name__)
 
-#: How long a request stays answerable. Long enough to walk back to the desk, short
-#: enough that a forgotten card does not sit live for an afternoon.
+#: How long an **interactive** request stays answerable. Long enough to walk back to the
+#: desk, short enough that a forgotten card does not sit live for an afternoon.
+#:
+#: That reasoning is about a card raised *while you are asking*. It does not transfer to one a
+#: running graph raises — see `ApprovalStore.request(dispatched=...)` and
+#: [ADR-0028](../../../docs/DECISIONS.md#adr-0028--a-dispatched-approval-does-not-expire).
 DEFAULT_TTL_S = 180.0
+
+#: How long the *grant* stays usable once a dispatched request is answered. The grant is consumed
+#: by the coroutine already awaiting it, so this is milliseconds of real use; it is bounded anyway
+#: so that "approved" can never become a standing permission.
+GRANT_TTL_S = 180.0
 
 
 class Resolution:
@@ -61,13 +76,20 @@ class PendingApproval:
     turn_id: str | None
     trace_id: str
     created_at: float = field(default_factory=time.time)
-    ttl_s: float = DEFAULT_TTL_S
+    #: `None` for a dispatched request: it waits for an answer rather than a clock.
+    ttl_s: float | None = DEFAULT_TTL_S
     resolution: str | None = None
     future: asyncio.Future[str] = field(default_factory=asyncio.Future)
 
     @property
+    def waits(self) -> bool:
+        """True when nothing but an answer, a HALT or a restart will resolve this."""
+        return self.ttl_s is None
+
+    @property
     def expires_at(self) -> float:
-        return self.created_at + self.ttl_s
+        """When the clock runs out — `inf` for a dispatched request, which has no clock."""
+        return math.inf if self.ttl_s is None else self.created_at + self.ttl_s
 
     @property
     def open(self) -> bool:
@@ -86,7 +108,12 @@ class PendingApproval:
             "escalated": self.verdict.escalated,
             "args": self.args,
             "preview": self.preview,
-            "expires_in_s": round(max(0.0, self.expires_at - time.time()), 1),
+            # `None`, not a large number: a card that counts down from 99999 is a card that
+            # lies quietly. The UI reads the absence and says "waits for you" instead.
+            "expires_in_s": (
+                None if self.waits else round(max(0.0, self.expires_at - time.time()), 1)
+            ),
+            "waits": self.waits,
         }
 
 
@@ -114,7 +141,16 @@ class ApprovalStore:
         session_id: str | None = None,
         turn_id: str | None = None,
         preview: dict[str, Any] | None = None,
+        dispatched: bool = False,
     ) -> PendingApproval:
+        """Ask, and wait for a human.
+
+        `dispatched` marks a request raised by work already running — a graph's delegation, a
+        replan — rather than by someone at the keyboard. Those do not expire (ADR-0028): the
+        person deliberately started long work, and a clock on the card meant a *gated* graph
+        decayed into a failed one in three minutes. Defaults to `False`, so every existing
+        caller keeps the interactive TTL and the change is opt-in at the call site that knows.
+        """
         pending = PendingApproval(
             id=new_id("ap"),
             tool=tool,
@@ -125,7 +161,7 @@ class ApprovalStore:
             session_id=session_id,
             turn_id=turn_id,
             trace_id=trace_id,
-            ttl_s=self._ttl,
+            ttl_s=None if dispatched else self._ttl,
         )
         self._pending[pending.id] = pending
         await self._log.append(
@@ -146,7 +182,19 @@ class ApprovalStore:
         Expiry resolves as REFUSED-by-another-name rather than as an error: an
         unanswered question is not a yes, and the caller needs a definite outcome to
         report either way.
+
+        A **dispatched** request has no timeout, so this waits indefinitely. That is the point,
+        and it is not a hang: the future is still resolved by an answer, by `refuse_all` on HALT,
+        or by cancellation — and a daemon restart drops it with the rest of the in-memory state,
+        which crash recovery already renders as a gated graph rather than a resumed one.
         """
+        if pending.waits:
+            try:
+                return await asyncio.shield(pending.future)
+            except asyncio.CancelledError:
+                if pending.open:
+                    await self._finish(pending, Resolution.HALTED, by="cancelled")
+                raise
         remaining = pending.expires_at - time.time()
         try:
             return await asyncio.wait_for(
@@ -187,7 +235,10 @@ class ApprovalStore:
                     tool=pending.tool,
                     args_digest=pending.digest,
                     tier=pending.verdict.tier,
-                    expires_at=pending.expires_at,
+                    # A dispatched request has no expiry, but its *grant* must still have one —
+                    # `inf` here would make "approved once" a standing permission. Measured from
+                    # the answer, since that is when the grant starts being usable.
+                    expires_at=(time.time() + GRANT_TTL_S if pending.waits else pending.expires_at),
                 )
             )
         return await self._finish(
@@ -234,7 +285,11 @@ class ApprovalStore:
 
     def _sweep(self) -> None:
         """Drop answered requests once they are well past their TTL, so the dict does
-        not grow for the life of the process."""
+        not grow for the life of the process.
+
+        Only *answered* ones — an open dispatched request is the thing that is supposed to sit
+        there, and sweeping it would reintroduce the expiry through the back door.
+        """
         cutoff = time.time() - self._ttl
         for key in [k for k, p in self._pending.items() if not p.open and p.created_at < cutoff]:
             self._pending.pop(key, None)

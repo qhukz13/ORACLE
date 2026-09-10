@@ -23,6 +23,7 @@ function approval(over: Partial<Approval> = {}): Approval {
     args: { path: "C:\\Projects\\Asterim", remote: "origin", branch: "fix/auth" },
     preview: { summary: "3 commits would be published to origin/fix/auth" },
     expiresInSec: 180,
+    waits: false,
     issuedAt: Date.now(),
     ...over,
   };

@@ -174,9 +174,16 @@ class DelegationService:
         *,
         session_id: str | None = None,
         trace_id: str | None = None,
+        dispatched: bool = False,
     ) -> ActiveDelegation:
         """The whole lifecycle. Designed to be spawned via `AppState.spawn`; returns
-        the (terminal) `ActiveDelegation` for callers that await it directly."""
+        the (terminal) `ActiveDelegation` for callers that await it directly.
+
+        `dispatched` says a task graph started this rather than a person, which changes only one
+        thing: the egress approval below waits for an answer instead of expiring in three minutes
+        (ADR-0028). Defaults to `False`, so the two interactive callers — the `delegate` command
+        and "ask Claude to…" from a turn — keep the clock they should have.
+        """
         inputs = inputs or PacketInputs()
         trace = trace_id or new_id("tr")
         active = ActiveDelegation(task_id=packet.task_id)
@@ -190,7 +197,9 @@ class DelegationService:
             {"tool": TOOL_ID, "task": packet.task, "adapter": self._adapter.id},
         )
         try:
-            await self._run_inner(packet, source_repo, inputs, active, session_id, trace)
+            await self._run_inner(
+                packet, source_repo, inputs, active, session_id, trace, dispatched
+            )
         except asyncio.CancelledError:
             # HALT, shutdown, or a cancelled turn. The child must not outlive the
             # coroutine that was watching it.
@@ -226,6 +235,7 @@ class DelegationService:
         active: ActiveDelegation,
         session_id: str | None,
         trace: str,
+        dispatched: bool = False,
     ) -> None:
         # 1 — render. The packet exists before any question is asked, because the
         # preview shows what was actually rendered, never a promise of it. Rendering,
@@ -296,6 +306,7 @@ class DelegationService:
                 "tainted_sources": list(inputs.tainted_sources),
                 "packet_dir": str(written.directory),
             },
+            dispatched=dispatched,
         )
         resolution = await self._approvals.wait(pending)
         if resolution != Resolution.APPROVED:

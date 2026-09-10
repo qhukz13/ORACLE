@@ -113,6 +113,7 @@ const approval: Approval = {
   args: { path: "C:\\Projects\\Asterim" },
   preview: { summary: "Publishes commits to a remote.", detail: "2 commits" },
   expiresInSec: 180,
+  waits: false,
   issuedAt: Date.now(),
 };
 

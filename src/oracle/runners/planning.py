@@ -517,6 +517,9 @@ async def approve_additions(
                 f"{request.failed_id} stays failed and is not re-run"
             ),
         },
+        # Mid-graph by construction: a replan is raised after a verification failed, which is
+        # precisely when the person is not at the desk (ADR-0028).
+        dispatched=True,
     )
     return await approvals.wait(pending) == Resolution.APPROVED
 

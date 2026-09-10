@@ -38,7 +38,7 @@ doc, delete the marker.
 | [OQ-24](#oq-24) | Does observing every project fit the glance budget? | **RESOLVED 2026-08-28** — no: 1.7–2.7 s warm for 8 rows; the sidebar observes lazily, per selected row | — | measured by `scripts/measure_observation.py` |
 | [OQ-25](#oq-25) | Did adding the `continue` label move intent accuracy? | **RESOLVED 2026-08-28** — 97.1% at eleven labels (was 93.3% at ten); the slot fails only for the name `ORACLE`, which the deterministic fallback carries | — | eval re-run with 4 `continue` cases |
 | [OQ-26](#oq-26) | What does indexing ourselves cost the measurement? | `EXPERIMENT NEEDED` | — | **48% of top-5 lexical slots go to ORACLE's own writing about the eval, and it grows with every dev log** |
-| [OQ-27](#oq-27) | Should a graph-dispatched egress approval expire? | `EXPERIMENT NEEDED` | P12 DoD | **A gated graph decays into a failed one in 180 s; you cannot walk away** |
+| [OQ-27](#oq-27) | Should a graph-dispatched egress approval expire? | **resolved 2026-09-10** | P12 DoD | **No — ADR-0028. Dispatched cards wait for an answer; interactive ones keep the 180 s clock** |
 
 ---
 
@@ -1178,8 +1178,10 @@ changes land together and neither is attributable.
 
 ### OQ-27
 **Should a graph-dispatched egress approval expire like an interactive one?**
-`EXPERIMENT NEEDED` · **opened 2026-09-10 by P12-T5's first real run** · blocks P12's Definition of
-Done as written
+**RESOLVED 2026-09-10: no** —
+[ADR-0028](DECISIONS.md#adr-0028--a-dispatched-approval-does-not-expire) takes option 2. A
+dispatched request resolves only on an explicit answer, HALT, cancellation or restart; the 180 s TTL
+keeps its original meaning for interactive cards. Opened by P12-T5's first real run
 
 P12 says a person *"says 'continue Asterim', **walks away**, and comes back to a completed or gated
 task graph"*. Measured on the first real run: **you cannot walk away.** A five-task graph raised two

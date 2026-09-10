@@ -201,6 +201,14 @@ export const useStore = create<State>((set) => ({
             gapWarning: "resynced from server",
           };
 
+        case "system.boot":
+          // The daemon restarted, so every approval it was holding is gone with its memory —
+          // including dispatched ones, which have no clock of their own to retire them. Replay
+          // reaches this event in order, so anything requested before the boot is cleared and
+          // anything after it survives.
+          next.approvals = [];
+          break;
+
         case "system.degraded":
           next.degraded = {
             component: str(ev.payload["component"], "reasoning"),
@@ -288,7 +296,11 @@ export const useStore = create<State>((set) => ({
             escalated: Boolean(ev.payload["escalated"]),
             args: asRecord(ev.payload["args"]),
             preview: asRecord(ev.payload["preview"]),
-            expiresInSec: num(ev.payload["expires_in_s"], 0),
+            expiresInSec:
+              ev.payload["expires_in_s"] === null || ev.payload["expires_in_s"] === undefined
+                ? null
+                : num(ev.payload["expires_in_s"], 0),
+            waits: ev.payload["waits"] === true,
             // The server's clock, not ours: a replayed approval must look as old as it
             // actually is. `Date.parse` of an ISO-8601 Z stamp is exact.
             issuedAt: Date.parse(ev.ts) || Date.now(),
@@ -299,7 +311,16 @@ export const useStore = create<State>((set) => ({
           // a backend that has since exited arrive looking new — and a dead card at the
           // head of the queue hides the live one behind it. This is the server's own
           // rule, applied on arrival rather than on a timer.
-          if (approval.issuedAt + approval.expiresInSec * 1000 <= Date.now()) break;
+          // A dispatched approval has no clock, so this rule cannot apply to it — dropping it
+          // on arrival would reintroduce the expiry in the client. What kills a stale one is
+          // `system.boot` below: pending approvals live in the daemon's memory, so a restart
+          // clears them, and replaying one issued before that boot would put a card at the head
+          // of the queue that nothing can answer.
+          if (
+            !approval.waits &&
+            approval.issuedAt + (approval.expiresInSec ?? 0) * 1000 <= Date.now()
+          )
+            break;
           next.approvals = [...s.approvals, approval];
           break;
         }

@@ -69,7 +69,12 @@ export interface Approval {
   args: Record<string, unknown>;
   preview: Record<string, unknown>;
   /** Seconds remaining when the event was emitted. */
-  expiresInSec: number;
+  /** Seconds left, or `null` for a dispatched approval that waits for an answer instead of a
+   *  clock (ADR-0028). Null is not "expired" and not "forever" — it is "no timer". */
+  expiresInSec: number | null;
+  /** True when this one waits. Sent explicitly rather than inferred from the null, so a
+   *  client that fails to parse the payload cannot silently decide a card is urgent. */
+  waits: boolean;
   /**
    * When the SERVER issued it, from `ev.ts` — not when this client received it.
    *

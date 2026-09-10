@@ -183,3 +183,24 @@
   bge-m3         1024[31m    61%    61%     68%    61%[0m    48%       0.9      77
 
 [2m  wrote logs/measurements/oq18-translated.json[0m
+ 
+=== OQ-18 corpus run, attempt started Thu 09/10/2026 14:29:53.29 === 
+[34mcorpus[0m
+[2m  skipped: {'type': 918, 'deny': 2, 'untracked': 10, 'exclude': 5, 'unreadable': 1}[0m
+  1770 docs {'projects': 1574, 'notes': 196} {'markdown': 663, 'config': 184, 'code': 911, 'text': 12}
+  28546 chunks (19212 semantic, 9334 lexical-only) in 14.4s
+  chars/chunk: mean 998 p50 1149 p95 1200 max 1303
+[34mtranslations[0m  qwen3.5:0.8b: 20 of 25 usable, 5 failed
+[32m  all 38 fixture sources present in the corpus[0m
+
+[34mlexical index[0m
+  BM25 over 28546 chunks, 155207 terms, 13.7s
+  recall@5 26%   misses: ['ru-token-refresh', 'ru-jwt-secret-storage', 'ru-own-yaml-parser', 'ru-two-users-one-agent', 'ru-feature-entitlement', 'ru-relay-encryption', 'ru-vector-search', 'ru-finetuning', 'en-relay-dockerfile', 'en-access-token-lifetime', 'en-secrets-at-rest', 'ru-pairing-bruteforce', 'ru-air-gap', 'ru-event-retention', 'ru-shutdown-order', 'ru-kill-process-tree', 'ru-local-discovery', 'ru-migrations', 'ru-command-approval', 'ru-terminal-reattach', 'ru-workspace-permissions', 'ru-audit-trail', 'ru-symbol-extraction', 'ru-bias-variance', 'ru-cross-validation', 'ru-learning-rate', 'ru-nonlinearity', 'ru-model-degrades']
+[2m  answer-key documents in the lexical candidates of 38/38 queries[0m
+
+[34mbge-m3[0m (1024d, cls pooling)
+[33m  no saved vectors at D:/ORACLE/scratch/oq18-vectors-bge-m3.npz; embedding from scratch[0m
+[2m  256/19212 chunks  0.90 chunks/s  elapsed 284s  eta 21045s[0m
+[2m  512/19212 chunks  0.89 chunks/s  elapsed 577s  eta 21086s[0m
+[2m  768/19212 chunks  0.86 chunks/s  elapsed 893s  eta 21457s[0m
+[2m  1024/19212 chunks  0.89 chunks/s  elapsed 1154s  eta 20491s[0m

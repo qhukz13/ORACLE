@@ -19,10 +19,10 @@
 
 ## Task
 
-**The RRF-weighting decision is taken ([ADR-0027](DECISIONS.md#adr-0027--rrf-is-weighted-against-the-lexical-list))
-and its verification run is scheduled. Waiting on that result before anything else touches
-retrieval. [OQ-27](OPEN_QUESTIONS.md#oq-27) and [OQ-14](OPEN_QUESTIONS.md#oq-14) still want the
-owner — one weakens a safety property, the other is a taste call on a centrepiece.**
+**Both owner decisions are taken. [OQ-27](OPEN_QUESTIONS.md#oq-27) is resolved by
+[ADR-0028](DECISIONS.md#adr-0028--a-dispatched-approval-does-not-expire) — dispatched approvals
+wait. Next: [OQ-14](OPEN_QUESTIONS.md#oq-14) — build the minimal orbit against real data, run the
+comprehension test, and cut it with an ADR if it fails.**
 
 **Phase:** [11 — execution visualisation & advanced UI](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc) · **Scope:** Capability arc
 **Status:** `READY` · **Set:** 2026-09-09 · **Blocked on:** nothing
@@ -80,8 +80,15 @@ verified against the real corpus at 1,564 documents / 3,465 edges.
   execution tree than an all-green run · *"observed state is never persisted"* — **already met**:
   `test_the_projects_table_stores_nothing_git_owns` has asserted it all along, and the earlier
   ledger entry listing it as outstanding was simply wrong.
-- **⚠ [OQ-27](OPEN_QUESTIONS.md#oq-27) — P12's Definition of Done says "walks away", and you
-  cannot.** Every delegation a graph dispatches raises its own T3 egress card with a 180 s expiry,
+- ~~[OQ-27](OPEN_QUESTIONS.md#oq-27) — P12's DoD says "walks away", and you cannot.~~
+  **RESOLVED 2026-09-10 by [ADR-0028](DECISIONS.md#adr-0028--a-dispatched-approval-does-not-expire)
+  (owner chose option 2).** A dispatched request resolves only on an explicit answer, HALT,
+  cancellation or restart; `system.boot` clears the queue so a clockless card cannot outlive the
+  daemon holding it. The card reads *"waits for you"* instead of a countdown. **Nothing grants by
+  waiting** — asserted, not assumed — and the *grant* is still bounded from the moment of the
+  answer, so "approved once" cannot become a standing permission. Interactive cards keep the
+  180 s TTL, and only two call sites opt in: the graph's delegation runner and the replan approval.
+  **Superseded detail:** Every delegation a graph dispatches raises its own T3 egress card with a 180 s expiry,
   so **a gated graph decays into a failed one** in about the time it takes to make coffee. The
   timeout is right for an interactive approval and wrong for a dispatched one. Three candidate
   fixes, each with a real cost, are in the question; whichever is chosen **needs an ADR**, because

@@ -34,6 +34,7 @@ Format per record: Decision · Context · Options · Chosen · Why · Trade-offs
 | [0025](#adr-0025--oracle-is-a-resident-service-the-window-is-a-client) | ORACLE is a resident service; the window is a client | accepted 2026-08-26 |
 | [0026](#adr-0026--the-local-tier-ladder-is-capability-shaped-and-gpu-conditional) | The local tier ladder is capability-shaped and GPU-conditional | accepted 2026-08-26, **conditions 0004** |
 | [0027](#adr-0027--rrf-is-weighted-against-the-lexical-list) | RRF is weighted against the lexical list | accepted 2026-09-10 |
+| [0028](#adr-0028--a-dispatched-approval-does-not-expire) | A dispatched approval does not expire | accepted 2026-09-10 |
 
 ---
 
@@ -977,3 +978,82 @@ call is exactly the old behaviour. `retrieve()` takes `lexical_weight`, injected
 so `rag/retrieval.py` stays settings-free. RAG.md §5's "no tuned weights" sentence is amended rather
 than deleted — the reasoning was sound and the measurement is what changed, and a reader who finds
 the old sentence should find the number that overturned it beside it.
+
+---
+
+## ADR-0028 — A dispatched approval does not expire
+
+**Context.** `core/approvals.py` gives every request a 180-second TTL, and states its reasoning:
+*"Long enough to walk back to the desk, short enough that a forgotten card does not sit live for an
+afternoon."* That is sound reasoning **about an interactive approval** — you asked, ORACLE asked
+back, you are at the keyboard, and a card you find forty minutes later is one whose context you have
+lost.
+
+[P12](ROADMAP.md#phase-12--project-state--the-continue-loop--residency-arc)'s Definition of Done
+says something the TTL cannot support: *"A person says 'continue Asterim', **walks away**, and comes
+back to a completed or gated task graph."*
+
+Measured on the first real run (2026-09-10): every delegation a graph dispatches raises its **own**
+T3 egress card, because [SECURITY.md §7](SECURITY.md#7-secrets-and-egress) enumerates everything
+leaving the machine and each packet is a separate egress. A five-task graph raised two cards within
+minutes; both expired (`resolution: expired, by: timeout`); both tasks failed; all three dependents
+were skipped. A ten-task plan raises ten. **A gated graph does not wait — it decays into a failed
+one in about the time it takes to make coffee.**
+
+**Options.**
+(a) Leave it; accept that graphs must be watched.
+(b) A longer TTL for dispatched requests.
+(c) **No TTL for dispatched requests** — resolve only on an explicit answer, HALT, cancellation or
+    restart.
+(d) Pre-authorise a graph's egresses at the graph-approval card.
+
+**Chosen.** (c).
+
+**Why.** (b) only moves the cliff — an hour away against a thirty-minute TTL is the same failure at
+a different scale — and it makes the original objection *worse*, because the longer a live T3 card
+sits the more likely someone approves it having lost its context.
+
+(d) is unsound, and concretely: the per-task card shows the **assembled packet**, and for a
+dependent task that packet does not exist at graph-approval time. Task E's packet contains task A's
+*findings*. **You cannot price an egress that has not been assembled yet.** It could work for the
+dependency-free tasks alone, which is a partial fix with a confusing rule.
+
+(c) works because **the objection the TTL exists to serve does not transfer.** An interactive card's
+context is a conversation that has scrolled away; a dispatched card's context is a task graph that
+is still on screen, still inspectable, with its objective and dependencies visible. The thing that
+made a stale card dangerous is the thing a dispatched card still has.
+
+**The state machine.** A dispatched request resolves on exactly four things, and none of them is
+time:
+
+| Resolution | Cause |
+|---|---|
+| `approved` / `refused` | a person answered |
+| `halted` | `refuse_all` — HALT, *"a stop that leaves approvals live is not a stop"* |
+| `halted` | the awaiting coroutine was cancelled (turn cancelled, disconnect) |
+| *gone* | the daemon restarted — pending approvals live in memory, and crash recovery already renders an interrupted graph as **gated**, never resumed |
+
+**Trade-offs.**
+
+* **Nothing grants by waiting**, and that is asserted rather than assumed: a dispatched request left
+  unanswered past any timeout still refuses execution. Removing a clock must not weaken the rule
+  that silence is not consent.
+* **The card has no expiry; the grant still does.** `expires_at = inf` would make "approved once" a
+  standing permission, so the grant is bounded from the moment of the answer (`GRANT_TTL_S`) rather
+  than from the request.
+* **The client had to learn the difference.** `expires_in_s` is now `null` for a dispatched card,
+  with an explicit `waits` flag beside it — a countdown from a large number is a card that lies
+  quietly. The confirmation card reads *"waits for you — a graph raised this, so it does not
+  expire"*.
+* **Replay needed a new rule.** The store drops already-expired approvals on arrival so a dead card
+  cannot hide a live one behind it; a clockless card would have sat at the head of the queue
+  forever after a crash. `system.boot` now clears the queue, which mirrors the server truth.
+* **Opt-in at the call site that knows.** `dispatched` defaults to `False`, so the interactive
+  paths — a routed tool call, the `delegate` command, a pipeline the person just started, the
+  planning egress, the graph card itself — keep the clock they should have. Only the graph's
+  delegation runner and the replan approval pass `True`, and a replan is mid-graph by construction:
+  it is raised after a verification failed, which is precisely when nobody is at the desk.
+
+**Consequences.** P12's Definition of Done becomes achievable as written. The 180-second TTL keeps
+its original meaning for the case it was written for, and `DEFAULT_TTL_S`'s comment now says which
+case that is.

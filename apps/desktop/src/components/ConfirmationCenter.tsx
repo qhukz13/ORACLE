@@ -49,7 +49,7 @@ function useCountdown(approval: Approval | undefined): number {
     const t = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(t);
   }, [approval?.approvalId]);
-  if (!approval) return 0;
+  if (!approval || approval.expiresInSec === null) return Infinity;
   const elapsed = (now - approval.issuedAt) / 1000;
   return Math.max(0, Math.round(approval.expiresInSec - elapsed));
 }
@@ -211,7 +211,11 @@ export function ConfirmationCenter({ approvals, decided, onRespond }: Confirmati
       )}
 
       <p className={`ap-expiry${expired ? " gone" : ""}`} role="timer" aria-live="off">
-        {expired ? "expired — this approval can no longer be used" : `expires in ${remaining}s`}
+        {current.waits
+          ? "waits for you — a graph raised this, so it does not expire"
+          : expired
+            ? "expired — this approval can no longer be used"
+            : `expires in ${remaining}s`}
       </p>
 
       {isT3 && !expired && (

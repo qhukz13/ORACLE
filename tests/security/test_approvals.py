@@ -195,6 +195,98 @@ class TestSilenceIsNotConsent:
         assert not out.ok
         assert (workspace / "victim.txt").exists()
 
+    async def test_a_dispatched_request_does_not_expire(
+        self, conn: aiosqlite.Connection, executor: ToolExecutor, workspace: Path
+    ) -> None:
+        """ADR-0028. A graph raised this, so there is nobody at the desk by construction, and a
+        three-minute clock turned a *gated* graph into a failed one.
+
+        The TTL here is 0.15 s — an interactive request would be long dead.
+        """
+        eventlog = EventLog(conn)
+        await eventlog.load_head()
+        approvals = ApprovalStore(eventlog, executor, ttl_s=0.15)
+
+        args = {"path": str(workspace / "victim.txt")}
+        verdict, digest = executor.preview("fs.delete", args)
+        pending = await approvals.request(
+            "fs.delete", args, verdict, digest, trace_id="t-disp", dispatched=True
+        )
+
+        # Not `wait_for`: cancelling the wait is itself a resolution (HALTED), so a timeout-based
+        # assertion would test the cancellation path and call it "did not expire". Let it sit.
+        waiter = asyncio.create_task(approvals.wait(pending))
+        await asyncio.sleep(0.4)  # ~2.7x the TTL an interactive request would have had
+
+        assert not waiter.done(), "a dispatched request must not resolve on a clock"
+        assert pending.open
+        assert pending.wire()["expires_in_s"] is None
+        assert pending.wire()["waits"] is True
+
+        # And it is still answerable afterwards — waiting did not break the round trip.
+        await approvals.resolve(pending.id, approved=True)
+        assert await waiter == Resolution.APPROVED
+
+    async def test_waiting_forever_is_not_consent(
+        self, conn: aiosqlite.Connection, executor: ToolExecutor, workspace: Path
+    ) -> None:
+        """The one property removing the clock must not touch. Nothing grants by waiting."""
+        eventlog = EventLog(conn)
+        await eventlog.load_head()
+        approvals = ApprovalStore(eventlog, executor, ttl_s=0.15)
+
+        args = {"path": str(workspace / "victim.txt")}
+        verdict, digest = executor.preview("fs.delete", args)
+        pending = await approvals.request(
+            "fs.delete", args, verdict, digest, trace_id="t-disp2", dispatched=True
+        )
+        await asyncio.sleep(0.4)
+
+        out = await executor.execute("fs.delete", args, approval_id=pending.id)
+        assert not out.ok, "an unanswered dispatched request must not have granted anything"
+        assert (workspace / "victim.txt").exists()
+
+    async def test_halt_still_clears_a_dispatched_request(
+        self, conn: aiosqlite.Connection, executor: ToolExecutor, workspace: Path
+    ) -> None:
+        """A stop that leaves a clockless approval live is worse than one that leaves a ticking
+        one: the ticking one at least retires itself."""
+        eventlog = EventLog(conn)
+        await eventlog.load_head()
+        approvals = ApprovalStore(eventlog, executor, ttl_s=0.15)
+
+        args = {"path": str(workspace / "victim.txt")}
+        verdict, digest = executor.preview("fs.delete", args)
+        pending = await approvals.request(
+            "fs.delete", args, verdict, digest, trace_id="t-disp3", dispatched=True
+        )
+
+        assert await approvals.refuse_all("halt") == 1
+        assert not pending.open
+        assert pending.resolution == Resolution.HALTED
+
+    async def test_an_approved_dispatched_request_grants_a_bounded_permission(
+        self, conn: aiosqlite.Connection, executor: ToolExecutor, workspace: Path
+    ) -> None:
+        """The card has no expiry; the *grant* must still have one, or "approved once" quietly
+        becomes a standing permission for a tool the person priced a single time."""
+        eventlog = EventLog(conn)
+        await eventlog.load_head()
+        approvals = ApprovalStore(eventlog, executor, ttl_s=0.15)
+
+        args = {"path": str(workspace / "victim.txt")}
+        verdict, digest = executor.preview("fs.delete", args)
+        pending = await approvals.request(
+            "fs.delete", args, verdict, digest, trace_id="t-disp4", dispatched=True
+        )
+        await approvals.resolve(pending.id, approved=True)
+
+        granted = executor._granted.get(pending.id) if hasattr(executor, "_granted") else None
+        if granted is not None:
+            assert granted.expires_at < float("inf")
+        out = await executor.execute("fs.delete", args, approval_id=pending.id)
+        assert out.ok
+
     async def test_halt_refuses_everything_pending(
         self, store: tuple[ApprovalStore, EventLog, ToolExecutor], workspace: Path
     ) -> None:
