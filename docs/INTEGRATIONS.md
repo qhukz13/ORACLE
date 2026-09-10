@@ -51,7 +51,8 @@ failing halfway through.
 
 ## 3. Claude Code CLI — **Supported**
 
-Installed on this machine: **v2.1.238** (checked 2026-08-23).
+Installed on this machine: **v2.1.251** (checked 2026-09-10; was v2.1.238 on 2026-08-23).
+Every flag below was re-verified present in that build.
 
 ### Authentication — measured 2026-08-23, and it changed the contract
 
@@ -75,16 +76,31 @@ machine with API billing, and `--bare` would be preferred again there.
 ### Invocation
 
 ```bash
-claude -p "<task>" \
-  --output-format stream-json --verbose \
-  --json-schema '<result schema>' \
+claude -p "<task, acceptance criteria, constraints, and where the brief is>" \
   --setting-sources user \
   --strict-mcp-config \
+  --output-format stream-json \
+  --verbose \
   --allowedTools "Read,Edit,Bash(git diff *),Bash(npm test *)" \
   --permission-mode dontAsk \
   --add-dir "<worktree>" \
-  --append-system-prompt-file "<constraints.md>"
+  [--add-dir "<context dir>"] \
+  [--mcp-config "<ORACLE's own tools, lent for this run>"] \
+  [--json-schema '<result schema>']
 ```
+
+**This block was wrong in both directions until 2026-09-10.** It listed
+`--append-system-prompt-file "<constraints.md>"`, which the adapter has never passed —
+constraints and acceptance criteria ride *inside* the `-p` argument, assembled by
+`HandoffPacket.render_prompt()`. And it omitted `--mcp-config`, which the adapter does pass when
+ORACLE lends its own tools. `ClaudeCodeAdapter.command()` described itself as "the pinned
+invocation, flag for flag (INTEGRATIONS.md §3)" throughout.
+
+The drift was harmless only by luck. The egress preview renders `command()`, not this document,
+so what a person approves has always been the real argv. But a reader checking the preview
+*against this section* would have found a discrepancy with no way to tell which side was lying —
+on the one surface where that question matters most.
+`tests/test_claude_invocation_matches_docs.py` now fails if the two diverge again.
 
 **Precondition — the worktree scrub.** Without `--bare`, a `-p` session loads hooks from the target
 project's `.claude/settings.json` and connects MCP servers from its `.mcp.json`, *even in a folder

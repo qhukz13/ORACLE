@@ -106,7 +106,13 @@ class ClaudeCodeAdapter:
 
     def command(self, packet: HandoffPacket, ws: Workspace) -> list[str]:
         """The pinned invocation, flag for flag (INTEGRATIONS.md §3). Public so the
-        egress preview can show the exact command without submitting anything."""
+        egress preview can show the exact command without submitting anything.
+
+        "Flag for flag" was not true between 2026-08-23 and 2026-09-10 — §3 listed a
+        `--append-system-prompt-file` this has never passed, and omitted `--mcp-config`.
+        `tests/test_claude_invocation_matches_docs.py` now fails if they diverge, so the
+        claim in the line above is checked rather than asserted.
+        """
         cmd = [
             *self.argv,
             "-p",
