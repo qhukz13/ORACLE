@@ -1,0 +1,397 @@
+{
+  "_": "Recorded from a real run by scripts/record_graph_fixture.py. Do not hand-edit: the value of this file is that nobody did.",
+  "root_id": "tk_fbd19d086933",
+  "recorded_at": "2026-09-10T09:42:54.986Z",
+  "statuses": [
+    "failed",
+    "running",
+    "skipped"
+  ],
+  "events": [
+    {
+      "v": 1,
+      "seq": 1165,
+      "ts": "2026-09-10T09:39:54.150Z",
+      "type": "task.created",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-a",
+      "trace_id": "tr_4260c13b1ef7",
+      "payload": {
+        "root_id": "tk_fbd19d086933",
+        "source": "graph",
+        "kind": "delegation",
+        "root": "tk_fbd19d086933",
+        "depends_on": [],
+        "objective": "Read OPEN_QUESTIONS.md#oq-14 in full and gather real evidence (from the live/real corpus and any relevant logs, metrics, or code) needed to judge 'the orbit's go/no-go. Produce a findings report: what OQ-14 asks, what the real data shows against its stated criteria, and a recommended go/no-go call with justification.",
+        "role": "researcher",
+        "agent": "claude",
+        "project": "ORACLE",
+        "attempt": 1,
+        "max_attempts": 1,
+        "supersedes": null
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1166,
+      "ts": "2026-09-10T09:39:54.151Z",
+      "type": "task.created",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-b",
+      "trace_id": "tr_4260c13b1ef7",
+      "payload": {
+        "root_id": "tk_fbd19d086933",
+        "source": "graph",
+        "kind": "delegation",
+        "root": "tk_fbd19d086933",
+        "depends_on": [],
+        "objective": "Re-record TaskTree's test fixture by capturing a fresh real wire exchange (the actual request/response TaskTree consumes) and replacing the existing stale fixture file with it, updating any test code that references the old fixture shape if the wire format changed.",
+        "role": "coder",
+        "agent": "claude",
+        "project": "ORACLE",
+        "attempt": 1,
+        "max_attempts": 1,
+        "supersedes": null
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1167,
+      "ts": "2026-09-10T09:39:54.153Z",
+      "type": "task.created",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-c",
+      "trace_id": "tr_4260c13b1ef7",
+      "payload": {
+        "root_id": "tk_fbd19d086933",
+        "source": "graph",
+        "kind": "verify",
+        "root": "tk_fbd19d086933",
+        "depends_on": [
+          "tk_fbd19d086933-b"
+        ],
+        "objective": "Run the full test suite covering TaskTree and any code that consumes its fixture, confirming task B's re-recorded fixture doesn't break existing behavior.",
+        "role": "tester",
+        "agent": "claude",
+        "project": "ORACLE",
+        "attempt": 1,
+        "max_attempts": 2,
+        "supersedes": null
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1168,
+      "ts": "2026-09-10T09:39:54.155Z",
+      "type": "task.created",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-d",
+      "trace_id": "tr_4260c13b1ef7",
+      "payload": {
+        "root_id": "tk_fbd19d086933",
+        "source": "graph",
+        "kind": "verify",
+        "root": "tk_fbd19d086933",
+        "depends_on": [
+          "tk_fbd19d086933-b"
+        ],
+        "objective": "Review task B's diff to confirm it is a clean fixture re-recording: the TaskTree fixture reflects genuine wire data, consumer code changes (if any) are minimal and justified by a real format change, and nothing unrelated was touched.",
+        "role": "reviewer",
+        "agent": "claude",
+        "project": "ORACLE",
+        "attempt": 1,
+        "max_attempts": 2,
+        "supersedes": null
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1169,
+      "ts": "2026-09-10T09:39:54.157Z",
+      "type": "task.created",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-e",
+      "trace_id": "tr_4260c13b1ef7",
+      "payload": {
+        "root_id": "tk_fbd19d086933",
+        "source": "graph",
+        "kind": "report",
+        "root": "tk_fbd19d086933",
+        "depends_on": [
+          "tk_fbd19d086933-a"
+        ],
+        "objective": "Using task A's OQ-14 findings, plus docs/current_task.md and related decision docs, locate the two decisions described as 'still waiting on the owner' and produce a single concise brief for the owner: OQ-14's evidence and recommended go/no-go, and each pending decision stated as a clear question with its options and tradeoffs \u2014 without deciding on the owner's behalf.",
+        "role": "summarizer",
+        "agent": "local",
+        "project": "ORACLE",
+        "attempt": 1,
+        "max_attempts": 2,
+        "supersedes": null
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1170,
+      "ts": "2026-09-10T09:39:54.160Z",
+      "type": "task.updated",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-a",
+      "trace_id": "tr_4260c13b1ef7",
+      "payload": {
+        "root_id": "tk_fbd19d086933",
+        "source": "graph",
+        "status": "running"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1171,
+      "ts": "2026-09-10T09:39:54.162Z",
+      "type": "task.updated",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-b",
+      "trace_id": "tr_4260c13b1ef7",
+      "payload": {
+        "root_id": "tk_fbd19d086933",
+        "source": "graph",
+        "status": "running"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1172,
+      "ts": "2026-09-10T09:39:54.167Z",
+      "type": "task.created",
+      "session_id": null,
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-a",
+      "trace_id": "tr_062f18f419ec",
+      "payload": {
+        "tool": "ai.delegate",
+        "task": "Read OPEN_QUESTIONS.md#oq-14 in full and gather real evidence (from the live/real corpus and any relevant logs, metrics, or code) needed to judge 'the orbit's go/no-go. Produce a findings report: what OQ-14 asks, what the real data shows against its stated criteria, and a recommended go/no-go call with justification.",
+        "adapter": "claude-code"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1173,
+      "ts": "2026-09-10T09:39:54.169Z",
+      "type": "task.updated",
+      "session_id": null,
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-a",
+      "trace_id": "tr_062f18f419ec",
+      "payload": {
+        "state": "rendering"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1174,
+      "ts": "2026-09-10T09:39:54.171Z",
+      "type": "task.created",
+      "session_id": null,
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-b",
+      "trace_id": "tr_9dd5082987d1",
+      "payload": {
+        "tool": "ai.delegate",
+        "task": "Re-record TaskTree's test fixture by capturing a fresh real wire exchange (the actual request/response TaskTree consumes) and replacing the existing stale fixture file with it, updating any test code that references the old fixture shape if the wire format changed.",
+        "adapter": "claude-code"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1175,
+      "ts": "2026-09-10T09:39:54.245Z",
+      "type": "task.updated",
+      "session_id": null,
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-b",
+      "trace_id": "tr_9dd5082987d1",
+      "payload": {
+        "state": "rendering"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1176,
+      "ts": "2026-09-10T09:39:54.623Z",
+      "type": "task.updated",
+      "session_id": null,
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-a",
+      "trace_id": "tr_062f18f419ec",
+      "payload": {
+        "state": "awaiting_egress"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1177,
+      "ts": "2026-09-10T09:39:54.625Z",
+      "type": "task.updated",
+      "session_id": null,
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-b",
+      "trace_id": "tr_9dd5082987d1",
+      "payload": {
+        "state": "awaiting_egress"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1181,
+      "ts": "2026-09-10T09:42:54.676Z",
+      "type": "task.finished",
+      "session_id": null,
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-a",
+      "trace_id": "tr_062f18f419ec",
+      "payload": {
+        "outcome": "expired",
+        "resolution": "expired"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1182,
+      "ts": "2026-09-10T09:42:54.679Z",
+      "type": "task.finished",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-a",
+      "trace_id": "tr_4260c13b1ef7",
+      "payload": {
+        "root_id": "tk_fbd19d086933",
+        "source": "graph",
+        "status": "failed",
+        "ok": false,
+        "summary": "delegation expired",
+        "evidence": {
+          "outcome": "expired"
+        },
+        "claim": null,
+        "cost": null,
+        "attempt": 1,
+        "started_at": "2026-09-10T09:39:54.158Z",
+        "finished_at": "2026-09-10T09:42:54.677Z"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1183,
+      "ts": "2026-09-10T09:42:54.681Z",
+      "type": "task.finished",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-e",
+      "trace_id": "tr_4260c13b1ef7",
+      "payload": {
+        "root_id": "tk_fbd19d086933",
+        "source": "graph",
+        "status": "skipped",
+        "ok": false,
+        "summary": "skipped: tk_fbd19d086933-a failed",
+        "evidence": {},
+        "claim": null,
+        "cost": null,
+        "attempt": 1,
+        "started_at": null,
+        "finished_at": "2026-09-10T09:42:54.679Z"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1185,
+      "ts": "2026-09-10T09:42:54.965Z",
+      "type": "task.finished",
+      "session_id": null,
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-b",
+      "trace_id": "tr_9dd5082987d1",
+      "payload": {
+        "outcome": "expired",
+        "resolution": "expired"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1186,
+      "ts": "2026-09-10T09:42:54.974Z",
+      "type": "task.finished",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-b",
+      "trace_id": "tr_4260c13b1ef7",
+      "payload": {
+        "root_id": "tk_fbd19d086933",
+        "source": "graph",
+        "status": "failed",
+        "ok": false,
+        "summary": "delegation expired",
+        "evidence": {
+          "outcome": "expired"
+        },
+        "claim": null,
+        "cost": null,
+        "attempt": 1,
+        "started_at": "2026-09-10T09:39:54.161Z",
+        "finished_at": "2026-09-10T09:42:54.970Z"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1187,
+      "ts": "2026-09-10T09:42:54.980Z",
+      "type": "task.finished",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-c",
+      "trace_id": "tr_4260c13b1ef7",
+      "payload": {
+        "root_id": "tk_fbd19d086933",
+        "source": "graph",
+        "status": "skipped",
+        "ok": false,
+        "summary": "skipped: tk_fbd19d086933-b failed",
+        "evidence": {},
+        "claim": null,
+        "cost": null,
+        "attempt": 1,
+        "started_at": null,
+        "finished_at": "2026-09-10T09:42:54.976Z"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1188,
+      "ts": "2026-09-10T09:42:54.986Z",
+      "type": "task.finished",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_fbd19d086933-d",
+      "trace_id": "tr_4260c13b1ef7",
+      "payload": {
+        "root_id": "tk_fbd19d086933",
+        "source": "graph",
+        "status": "skipped",
+        "ok": false,
+        "summary": "skipped: tk_fbd19d086933-b failed",
+        "evidence": {},
+        "claim": null,
+        "cost": null,
+        "attempt": 1,
+        "started_at": null,
+        "finished_at": "2026-09-10T09:42:54.983Z"
+      }
+    }
+  ]
+}

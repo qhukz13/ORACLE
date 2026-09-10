@@ -1,3 +1,15 @@
+- ~~`TaskTree`'s fixture can be re-recorded from the wire.~~ **Done 2026-09-10.**
+  `scripts/record_graph_fixture.py` records a real graph off the event log, and
+  `TaskTree.recorded.test.tsx` replays it through the **real store reducer**. The recording
+  contains what no hand-written fixture would: the delegation service emitting its own `task.*`
+  for the *same task ids* without `source: "graph"`, interleaved with the scheduler's.
+  **Which assertion has teeth was measured, not assumed** — folding both ways showed counts,
+  statuses and `dependsOn` all survive without the filter, and `kind` is what breaks. The first
+  draft of that test claimed otherwise and asserted none of it.
+- **Still open from `tasks` being non-zero:** [OQ-14](OPEN_QUESTIONS.md#oq-14) can now be judged
+  against real data — but it is a go/no-go on a *centrepiece* whose visual references were never
+  attached (UI.md §1/§14/§15 remain `TO VERIFY`), so it wants the owner's eye, not an agent's ·
+  the agent queue has something to render.
 # Current Task
 
 > Single active task. **Overwrite this file when the task changes** — it is a snapshot, not a history.
@@ -7,10 +19,10 @@
 
 ## Task
 
-**`tasks` is 11 rows and the continue loop runs end to end — but it cannot be walked away from
-([OQ-27](OPEN_QUESTIONS.md#oq-27)). Next up: settle OQ-27, then judge
-[OQ-14](OPEN_QUESTIONS.md#oq-14) against real data and re-record `TaskTree`'s fixture from the
-wire.**
+**`TaskTree` now tests against a recorded real graph, and P12-T5's last open criterion turned
+out to be already met. Two decisions remain with the owner: [OQ-27](OPEN_QUESTIONS.md#oq-27)
+(a gated graph decays in 180 s) and the RRF-weighting ADR. Next agent-doable:
+[OQ-14](OPEN_QUESTIONS.md#oq-14) needs the owner's eye, so the queue below is the work.**
 
 **Phase:** [11 — execution visualisation & advanced UI](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc) · **Scope:** Capability arc
 **Status:** `READY` · **Set:** 2026-09-09 · **Blocked on:** nothing
@@ -65,7 +77,9 @@ verified against the real corpus at 1,564 documents / 3,465 edges.
   dependents were skipped. `tasks` is now **11 rows: 6 succeeded, 2 failed, 3 skipped**.
   **Acceptance now:** plan-from-real-state ✓ · sidebar ✓ · gate green ✓ · *"one end-to-end run
   writes rows to `tasks`"* — 11 rows now exist with real failures, which is better material for the
-  execution tree than an all-green run · *"observed state is never persisted"* still needs its test.
+  execution tree than an all-green run · *"observed state is never persisted"* — **already met**:
+  `test_the_projects_table_stores_nothing_git_owns` has asserted it all along, and the earlier
+  ledger entry listing it as outstanding was simply wrong.
 - **⚠ [OQ-27](OPEN_QUESTIONS.md#oq-27) — P12's Definition of Done says "walks away", and you
   cannot.** Every delegation a graph dispatches raises its own T3 egress card with a 180 s expiry,
   so **a gated graph decays into a failed one** in about the time it takes to make coffee. The

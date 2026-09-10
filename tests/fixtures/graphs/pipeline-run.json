@@ -1,0 +1,568 @@
+{
+  "_": "Recorded from a real run by scripts/record_graph_fixture.py. Do not hand-edit: the value of this file is that nobody did.",
+  "root_id": "tk_1040994217f6",
+  "recorded_at": "2026-09-10T09:05:58.276Z",
+  "statuses": [
+    "running",
+    "succeeded"
+  ],
+  "events": [
+    {
+      "v": 1,
+      "seq": 1081,
+      "ts": "2026-09-10T08:59:52.272Z",
+      "type": "task.created",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-format",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "kind": "tool",
+        "root": "tk_1040994217f6",
+        "depends_on": [],
+        "objective": "dev.execute (oracle-selfcheck/format)",
+        "role": "operator",
+        "agent": null,
+        "project": "ORACLE",
+        "attempt": 1,
+        "max_attempts": 2,
+        "supersedes": null
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1082,
+      "ts": "2026-09-10T08:59:52.274Z",
+      "type": "task.created",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-lint",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "kind": "tool",
+        "root": "tk_1040994217f6",
+        "depends_on": [],
+        "objective": "dev.lint (oracle-selfcheck/lint)",
+        "role": "operator",
+        "agent": null,
+        "project": "ORACLE",
+        "attempt": 1,
+        "max_attempts": 2,
+        "supersedes": null
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1083,
+      "ts": "2026-09-10T08:59:52.275Z",
+      "type": "task.created",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-types",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "kind": "tool",
+        "root": "tk_1040994217f6",
+        "depends_on": [],
+        "objective": "dev.execute (oracle-selfcheck/types)",
+        "role": "operator",
+        "agent": null,
+        "project": "ORACLE",
+        "attempt": 1,
+        "max_attempts": 2,
+        "supersedes": null
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1084,
+      "ts": "2026-09-10T08:59:52.276Z",
+      "type": "task.created",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-tests",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "kind": "tool",
+        "root": "tk_1040994217f6",
+        "depends_on": [],
+        "objective": "dev.run_tests (oracle-selfcheck/tests)",
+        "role": "operator",
+        "agent": null,
+        "project": "ORACLE",
+        "attempt": 1,
+        "max_attempts": 2,
+        "supersedes": null
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1085,
+      "ts": "2026-09-10T08:59:52.278Z",
+      "type": "task.created",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-security",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "kind": "tool",
+        "root": "tk_1040994217f6",
+        "depends_on": [],
+        "objective": "dev.execute (oracle-selfcheck/security)",
+        "role": "operator",
+        "agent": null,
+        "project": "ORACLE",
+        "attempt": 1,
+        "max_attempts": 2,
+        "supersedes": null
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1086,
+      "ts": "2026-09-10T08:59:52.279Z",
+      "type": "task.created",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-audit",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "kind": "tool",
+        "root": "tk_1040994217f6",
+        "depends_on": [
+          "tk_1040994217f6-security"
+        ],
+        "objective": "dev.execute (oracle-selfcheck/audit)",
+        "role": "operator",
+        "agent": null,
+        "project": "ORACLE",
+        "attempt": 1,
+        "max_attempts": 2,
+        "supersedes": null
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1087,
+      "ts": "2026-09-10T08:59:52.282Z",
+      "type": "task.updated",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-format",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "status": "running"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1088,
+      "ts": "2026-09-10T08:59:52.287Z",
+      "type": "task.updated",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-lint",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "status": "running"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1089,
+      "ts": "2026-09-10T08:59:52.293Z",
+      "type": "task.updated",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-types",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "status": "running"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1090,
+      "ts": "2026-09-10T08:59:52.420Z",
+      "type": "task.updated",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-tests",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "status": "running"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1091,
+      "ts": "2026-09-10T08:59:52.633Z",
+      "type": "task.finished",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-format",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "status": "succeeded",
+        "ok": true,
+        "summary": "dev.execute ok",
+        "evidence": {
+          "tool": "dev.execute",
+          "duration_ms": 226,
+          "rule": "tools.dev.execute.tier",
+          "tier": "2",
+          "result": {
+            "project": "ORACLE",
+            "argv": "uv.exe run ruff format --check src tests",
+            "dry_run": false,
+            "exit_code": 0,
+            "ok": true,
+            "duration_s": 0.21,
+            "output": "201 files already formatted",
+            "truncated": false,
+            "log_path": "D:\\ORACLE\\data\\blobs\\2026-09-10\\ed5e34621c11__ORACLE-execute.log"
+          }
+        },
+        "claim": null,
+        "cost": null,
+        "attempt": 1,
+        "started_at": "2026-09-10T08:59:52.281Z",
+        "finished_at": "2026-09-10T08:59:52.593Z"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1092,
+      "ts": "2026-09-10T08:59:52.765Z",
+      "type": "task.updated",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-security",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "status": "running"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1093,
+      "ts": "2026-09-10T08:59:53.116Z",
+      "type": "task.finished",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-lint",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "status": "succeeded",
+        "ok": true,
+        "summary": "dev.lint ok",
+        "evidence": {
+          "tool": "dev.lint",
+          "duration_ms": 704,
+          "rule": "tools.dev.lint.tier",
+          "tier": "1",
+          "result": {
+            "project": "ORACLE",
+            "command": "uv.exe run ruff check .",
+            "exit_code": 1,
+            "ok": false,
+            "duration_s": 0.36,
+            "diagnostics": [
+              "Found 6 errors."
+            ],
+            "output": "\u001b[1m\u001b[91mRUF100\u001b[0m [\u001b[1m\u001b[96m*\u001b[0m]\u001b[1m Unused `noqa` directive (unused: `E402`)\u001b[0m\n  \u001b[1m\u001b[94m--> \u001b[0mscripts\\eval_selection.py:25:47\n   \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m23\u001b[0m \u001b[1m\u001b[94m|\u001b[0m sys.path.insert(0, str(Path(__file__).resolve().parents[1] / \"src\"))\n\u001b[1m\u001b[94m24\u001b[0m \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m25\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.llm.ollama import OllamaProvider  # noqa: E402\n   \u001b[1m\u001b[94m|\u001b[0m                                               \u001b[1m\u001b[91m^^^^^^^^^^^^\u001b[0m\n\u001b[1m\u001b[94m26\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.llm.types import ProviderUnavailable  # noqa: E402\n\u001b[1m\u001b[94m27\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.router.selection import ToolSelector  # noqa: E402\n   \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[96mhelp\u001b[0m\u001b[1m: Remove unused `noqa` directive\u001b[0m\n\u001b[1m\u001b[94m  \u001b[0m \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m24\u001b[0m \u001b[1m\u001b[94m|\u001b[0m\r\n\u001b[1m\u001b[94m  \u001b[0m \u001b[1m\u001b[31m-\u001b[0m \u001b[31mfrom oracle.llm.ollama import OllamaProvider\u001b[0m\u001b[1m\u001b[31m  # noqa: E402\u001b[0m\u001b[0m\u001b[31m\r\n\u001b[0m\u001b[1m\u001b[94m25\u001b[0m \u001b[1m\u001b[32m+\u001b[0m \u001b[32mfrom oracle.llm.ollama import OllamaProvider\u001b[0m\u001b[32m\r\n\u001b[0m\u001b[1m\u001b[94m26\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.llm.types import ProviderUnavailable  # noqa: E402\r\n\u001b[1m\u001b[94m  \u001b[0m \u001b[1m\u001b[94m|\u001b[0m\n\n\u001b[1m\u001b[91mRUF100\u001b[0m [\u001b[1m\u001b[96m*\u001b[0m]\u001b[1m Unused `noqa` directive (unused: `E402`)\u001b[0m\n  \u001b[1m\u001b[94m--> \u001b[0mscripts\\eval_selection.py:26:51\n   \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m25\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.llm.ollama import OllamaProvider  # noqa: E402\n\u001b[1m\u001b[94m26\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.llm.types import ProviderUnavailable  # noqa: E402\n   \u001b[1m\u001b[94m|\u001b[0m                                                   \u001b[1m\u001b[91m^^^^^^^^^^^^\u001b[0m\n\u001b[1m\u001b[94m27\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.router.selection import ToolSelector  # noqa: E402\n\u001b[1m\u001b[94m28\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.tools import build_registry  # noqa: E402\n   \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[96mhelp\u001b[0m\u001b[1m: Remove unused `noqa` directive\u001b[0m\n\u001b[1m\u001b[94m  \u001b[0m \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m25\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.llm.ollama import OllamaProvider  # noqa: E402\r\n\u001b[1m\u001b[94m  \u001b[0m \u001b[1m\u001b[31m-\u001b[0m \u001b[31mfrom oracle.llm.types import ProviderUnavailable\u001b[0m\u001b[1m\u001b[31m  # noqa: E402\u001b[0m\u001b[0m\u001b[31m\r\n\u001b[0m\u001b[1m\u001b[94m26\u001b[0m \u001b[1m\u001b[32m+\u001b[0m \u001b[32mfrom oracle.llm.types import ProviderUnavailable\u001b[0m\u001b[32m\r\n\u001b[0m\u001b[1m\u001b[94m27\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.router.selection import ToolSelector  # noqa: E402\r\n\u001b[1m\u001b[94m  \u001b[0m \u001b[1m\u001b[94m|\u001b[0m\n\n\u001b[1m\u001b[91mRUF100\u001b[0m [\u001b[1m\u001b[96m*\u001b[0m]\u001b[1m Unused `noqa` directive (unused: `E402`)\u001b[0m\n  \u001b[1m\u001b[94m--> \u001b[0mscripts\\eval_selection.py:27:51\n   \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m25\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.llm.ollama import OllamaProvider  # noqa: E402\n\u001b[1m\u001b[94m26\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.llm.types import ProviderUnavailable  # noqa: E402\n\u001b[1m\u001b[94m27\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.router.selection import ToolSelector  # noqa: E402\n   \u001b[1m\u001b[94m|\u001b[0m                                                   \u001b[1m\u001b[91m^^^^^^^^^^^^\u001b[0m\n\u001b[1m\u001b[94m28\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.tools import build_registry  # noqa: E402\n   \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[96mhelp\u001b[0m\u001b[1m: Remove unused `noqa` directive\u001b[0m\n\u001b[1m\u001b[94m  \u001b[0m \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m26\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.llm.types import ProviderUnavailable  # noqa: E402\r\n\u001b[1m\u001b[94m  \u001b[0m \u001b[1m\u001b[31m-\u001b[0m \u001b[31mfrom oracle.router.selection import ToolSelector\u001b[0m\u001b[1m\u001b[31m  # noqa: E402\u001b[0m\u001b[0m\u001b[31m\r\n\u001b[0m\u001b[1m\u001b[94m27\u001b[0m \u001b[1m\u001b[32m+\u001b[0m \u001b[32mfrom oracle.router.selection import ToolSelector\u001b[0m\u001b[32m\r\n\u001b[0m\u001b[1m\u001b[94m28\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.tools import build_registry  # noqa: E402\r\n\u001b[1m\u001b[94m  \u001b[0m \u001b[1m\u001b[94m|\u001b[0m\n\n\u001b[1m\u001b[91mRUF100\u001b[0m [\u001b[1m\u001b[96m*\u001b[0m]\u001b[1m Unused `noqa` directive (unused: `E402`)\u001b[0m\n  \u001b[1m\u001b[94m--> \u001b[0mscripts\\eval_selection.py:28:42\n   \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m26\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.llm.types import ProviderUnavailable  # noqa: E402\n\u001b[1m\u001b[94m27\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.router.selection import ToolSelector  # noqa: E402\n\u001b[1m\u001b[94m28\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.tools import build_registry  # noqa: E402\n   \u001b[1m\u001b[94m|\u001b[0m                                          \u001b[1m\u001b[91m^^^^^^^^^^^^\u001b[0m\n\u001b[1m\u001b[94m29\u001b[0m \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m30\u001b[0m \u001b[1m\u001b[94m|\u001b[0m PROJECT = Path(\"C:/Projects/Asterim\")\n   \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[96mhelp\u001b[0m\u001b[1m: Remove unused `noqa` directive\u001b[0m\n\u001b[1m\u001b[94m  \u001b[0m \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m27\u001b[0m \u001b[1m\u001b[94m|\u001b[0m from oracle.router.selection import ToolSelector  # noqa: E402\r\n\u001b[1m\u001b[94m  \u001b[0m \u001b[1m\u001b[31m-\u001b[0m \u001b[31mfrom oracle.tools import build_registry\u001b[0m\u001b[1m\u001b[31m  # noqa: E402\u001b[0m\u001b[0m\u001b[31m\r\n\u001b[0m\u001b[1m\u001b[94m28\u001b[0m \u001b[1m\u001b[32m+\u001b[0m \u001b[32mfrom oracle.tools import build_registry\u001b[0m\u001b[32m\r\n\u001b[0m\u001b[1m\u001b[94m29\u001b[0m \u001b[1m\u001b[94m|\u001b[0m\r\n\u001b[1m\u001b[94m  \u001b[0m \u001b[1m\u001b[94m|\u001b[0m\n\n\u001b[1m\u001b[91mRUF001\u001b[0m\u001b[1m String contains ambiguous `\u0441` (CYRILLIC SMALL LETTER ES). Did you mean `c` (LATIN SMALL LETTER C)?\u001b[0m\n  \u001b[1m\u001b[94m--> \u001b[0mscripts\\eval_selection.py:39:31\n   \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m37\u001b[0m \u001b[1m\u001b[94m|\u001b[0m     (\"commit my changes in Asterim with message add the feature\", \"modify\", \"git.commit\"),\n\u001b[1m\u001b[94m38\u001b[0m \u001b[1m\u001b[94m|\u001b[0m     (\"commit what I staged, message: fix the login redirect\", \"modify\", \"git.commit\"),\n\u001b[1m\u001b[94m39\u001b[0m \u001b[1m\u001b[94m|\u001b[0m     (\"\u0437\u0430\u043a\u043e\u043c\u043c\u0438\u0442\u044c \u043c\u043e\u0438 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f \u0441 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435\u043c \u043f\u043e\u0447\u0438\u043d\u0438 \u0440\u0435\u0434\u0438\u0440\u0435\u043a\u0442\", \"modify\", \"git.commit\"),\n   \u001b[1m\u001b[94m|\u001b[0m                               \u001b[1m\u001b[91m^\u001b[0m\n\u001b[1m\u001b[94m40\u001b[0m \u001b[1m\u001b[94m|\u001b[0m     (\"stage everything in Asterim\", \"modify\", \"git.add\"),\n\u001b[1m\u001b[94m41\u001b[0m \u001b[1m\u001b[94m|\u001b[0m     (\"add my files to the index\", \"modify\", \"git.add\"),\n   \u001b[1m\u001b[94m|\u001b[0m\n\n\u001b[1m\u001b[91mRUF001\u001b[0m\u001b[1m String contains ambiguous `\u0441` (CYRILLIC SMALL LETTER ES). Did you mean `c` (LATIN SMALL LETTER C)?\u001b[0m\n  \u001b[1m\u001b[94m--> \u001b[0mscripts\\eval_selection.py:66:37\n   \u001b[1m\u001b[94m|\u001b[0m\n\u001b[1m\u001b[94m64\u001b[0m \u001b[1m\u001b[94m|\u001b[0m     (\"search my indexed notes and projects for taint tracking\", \"search\", \"know.search\"),\n\u001b[1m\u001b[94m65\u001b[0m \u001b[1m\u001b[94m|\u001b[0m     (\"what do my notes say about backpropagation\", \"question\", \"know.search\"),\n\u001b[1m\u001b[94m66\u001b[0m \u001b[1m\u001b[94m|\u001b[0m     (\"\u043d\u0430\u0439\u0434\u0438 \u0432 \u0437\u0430\u043c\u0435\u0442\u043a\u0430\u0445 \u043f\u0440\u043e \u043e\u0431\u0443\u0447\u0435\u043d\u0438\u0435 \u0441 \u043f\u043e\u0434\u043a\u0440\u0435\u043f\u043b\u0435\u043d\u0438\u0435\u043c\", \"search\", \"know.search\"),\n   \u001b[1m\u001b[94m|\u001b[0m                                     \u001b[1m\u001b[91m^\u001b[0m\n\u001b[1m\u001b[94m67\u001b[0m \u001b[1m\u001b[94m|\u001b[0m     (\"list the files in the Asterim src directory\", \"search\", \"fs.list\"),\n\u001b[1m\u001b[94m68\u001b[0m \u001b[1m\u001b[94m|\u001b[0m     # things no offered tool does \u2014 the model must be able to say no\n   \u001b[1m\u001b[94m|\u001b[0m\n\nFound 6 errors.\n[\u001b[36m*\u001b[0m] 4 fixable with the `--fix` option.",
+            "truncated": false,
+            "log_path": "D:\\ORACLE\\data\\blobs\\2026-09-10\\b327e1be627c__ORACLE-lint.log"
+          }
+        },
+        "claim": null,
+        "cost": null,
+        "attempt": 1,
+        "started_at": "2026-09-10T08:59:52.283Z",
+        "finished_at": "2026-09-10T08:59:53.037Z"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1094,
+      "ts": "2026-09-10T08:59:55.629Z",
+      "type": "task.finished",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-types",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "status": "succeeded",
+        "ok": true,
+        "summary": "dev.execute ok",
+        "evidence": {
+          "tool": "dev.execute",
+          "duration_ms": 3211,
+          "rule": "tools.dev.execute.tier",
+          "tier": "2",
+          "result": {
+            "project": "ORACLE",
+            "argv": "uv.exe run mypy",
+            "dry_run": false,
+            "exit_code": 0,
+            "ok": true,
+            "duration_s": 2.54,
+            "output": "Success: no issues found in 118 source files",
+            "truncated": false,
+            "log_path": "D:\\ORACLE\\data\\blobs\\2026-09-10\\ccaeffb7eb31__ORACLE-execute.log"
+          }
+        },
+        "claim": null,
+        "cost": null,
+        "attempt": 1,
+        "started_at": "2026-09-10T08:59:52.288Z",
+        "finished_at": "2026-09-10T08:59:55.627Z"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1095,
+      "ts": "2026-09-10T09:03:58.296Z",
+      "type": "task.finished",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-tests",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "status": "succeeded",
+        "ok": true,
+        "summary": "dev.run_tests ok",
+        "evidence": {
+          "tool": "dev.run_tests",
+          "duration_ms": 245707,
+          "rule": "tools.dev.run_tests.tier",
+          "tier": "1",
+          "result": {
+            "project": "ORACLE",
+            "runner": "pytest",
+            "command": "uv.exe run pytest -q --junit-xml=C:\\Users\\qhukz\\AppData\\Local\\Temp\\oracle-tests-ues24sus.report",
+            "passed": 1176,
+            "failed": 100,
+            "skipped": 19,
+            "total": 1295,
+            "duration_s": 236.96,
+            "failures": [
+              {
+                "name": "tests.security.test_egress_gate::test_refused_approval_prevents_submit",
+                "message": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+              },
+              {
+                "name": "tests.security.test_egress_gate::test_expired_approval_prevents_submit",
+                "message": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+              },
+              {
+                "name": "tests.security.test_egress_gate::test_halted_policy_refuses_before_asking",
+                "message": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+              },
+              {
+                "name": "tests.security.test_egress_gate::test_mutated_packet_after_approval_is_refused",
+                "message": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+              },
+              {
+                "name": "tests.security.test_egress_gate::test_tainted_curation_escalates_the_approval_to_t3",
+                "message": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+              },
+              {
+                "name": "tests.security.test_egress_gate::test_halt_during_awaiting_egress_refuses_the_preview",
+                "message": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+              },
+              {
+                "name": "tests.security.test_orchestration_boundary::test_harvest_commits_with_oracles_identity_not_the_delegates",
+                "message": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+              },
+              {
+                "name": "tests.security.test_orchestration_boundary::test_a_graph_cannot_run_what_a_person_could_not",
+                "message": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+              },
+              {
+                "name": "tests.security.test_orchestration_boundary::test_one_tasks_approval_does_not_authorise_another_task",
+                "message": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+              },
+              {
+                "name": "tests.security.test_pipeline_authority.TestGrantsAreBoundSingleUseAndMortal::test_a_grant_does_not_authorise_a_different_call",
+                "message": "AssertionError: [\"step 'tests' (dev.execute): uv is not installed on this machine\"]\nassert not [\"step 'tests' (dev.execute): uv is not installed on this machine\"]"
+              },
+              {
+                "name": "tests.security.test_pipeline_authority.TestGrantsAreBoundSingleUseAndMortal::test_a_grant_is_single_use",
+                "message": "RuntimeError: coroutine raised StopIteration"
+              },
+              {
+                "name": "tests.security.test_pipeline_authority.TestGrantsAreBoundSingleUseAndMortal::test_a_grant_dies_with_the_run",
+                "message": "RuntimeError: coroutine raised StopIteration"
+              },
+              {
+                "name": "tests.security.test_plan_injection::test_the_card_shows_the_injected_text_rather_than_hiding_it",
+                "message": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+              },
+              {
+                "name": "tests.security.test_plan_injection::test_the_graph_card_is_priced_as_untrusted_input",
+                "message": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+              },
+              {
+                "name": "tests.security.test_plan_injection::test_a_degraded_rung_is_priced_exactly_like_a_planners_plan",
+                "message": "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+              },
+              {
+                "name": "tests.security.test_programs.TestSubcommandRules::test_unlisted_subcommand_is_denied_by_default",
+                "message": "AssertionError: assert 'programs.git.path' == 'programs.git.subcommands'\n  \n  - programs.git.subcommands\n  + programs.git.path"
+              },
+              {
+                "name": "tests.security.test_programs.TestSubcommandRules::test_allowed_subcommand_passes",
+                "message": "oracle.policy.programs.ProgramRejected: git is not installed on this machine"
+              },
+              {
+                "name": "tests.security.test_programs.TestSubcommandRules::test_force_push_is_denied_even_when_the_flag_is_last",
+                "message": "AssertionError: assert 'programs.git.path' == 'programs.git...commands.deny'\n  \n  - programs.git.subcommands.deny\n  + programs.git.path"
+              },
+              {
+                "name": "tests.security.test_programs.TestSubcommandRules::test_deny_beats_confirm",
+                "message": "oracle.policy.programs.ProgramRejected: git is not installed on this machine"
+              },
+              {
+                "name": "tests.security.test_programs.TestSubcommandRules::test_a_denied_bare_subcommand_is_refused",
+                "message": "AssertionError: assert 'programs.git.path' == 'programs.git...commands.deny'\n  \n  - programs.git.subcommands.deny\n  + programs.git.path"
+              }
+            ],
+            "exit_code": 1,
+            "source": "junit-xml",
+            "log_path": "D:\\ORACLE\\data\\blobs\\2026-09-10\\11a50daf54b5__ORACLE-tests.log",
+            "ok": false
+          }
+        },
+        "claim": null,
+        "cost": null,
+        "attempt": 1,
+        "started_at": "2026-09-10T08:59:52.333Z",
+        "finished_at": "2026-09-10T09:03:58.286Z"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1096,
+      "ts": "2026-09-10T09:05:56.257Z",
+      "type": "task.finished",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-security",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "status": "succeeded",
+        "ok": true,
+        "summary": "dev.execute ok",
+        "evidence": {
+          "tool": "dev.execute",
+          "duration_ms": 363322,
+          "rule": "tools.dev.execute.tier",
+          "tier": "2",
+          "result": {
+            "project": "ORACLE",
+            "argv": "uv.exe run pytest -q tests/security",
+            "dry_run": false,
+            "exit_code": 1,
+            "ok": false,
+            "duration_s": 117.89,
+            "output": "........................................................................ [ 17%]\r\n.....................ss.sFFFFFF.............................ssssssssssss [ 34%]\r\nsss..................................................................... [ 52%]\r\n.......FFF..s..................................................FFF...... [ 69%]\r\n.FF....F...............................FFFFFF..F.........FFFFF.FFFFFFF.. [ 87%]\r\nF....................................................                    [100%]\r\n================================== FAILURES ===================================\r\n____________________ test_refused_approval_prevents_submit ____________________\r\n\r\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001BE23218CB0>\r\ntmp_path = WindowsPath('C:/Users/qhukz/AppData/Local/Temp/pytest-of-unknown/pytest-1/test_refused_approval_prevents0')\r\neventlog = <oracle.core.eventlog.EventLog object at 0x000001BE2321A960>\r\n\r\n    async def test_refused_approval_prevents_submit(\r\n        monkeypatch: pytest.MonkeyPatch, tmp_path: Path, eventlog: EventLog\r\n    ) -> None:\r\n        monkeypatch.setenv(\"STUB_FIXTURE\", str(SMOKE))\r\n>       repo = make_repo(tmp_path)\r\n               ^^^^^^^^^^^^^^^^^^^\r\n\r\ntests\\security\\test_egress_gate.py:37: \r\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\r\ntests\\helpers_delegation.py:93: in make_repo\r\n    _git(root, \"init\", \"-b\", \"main\")\r\nsrc\\oracle\\integrations\\workspace.py:44: in _git\r\n    proc = subprocess.run(  # noqa: S603 - argv list, never a shell (AGENTS.md)\r\nC:\\Users\\qhukz\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\subprocess.py:548: in run\r\n    with Popen(*popenargs, **kwargs) as process:\r\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nC:\\Users\\qhukz\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\subprocess.py:1026: in __init__\r\n    self._execute_child(args, executable, preexec_fn, close_fds,\r\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\r\n\r\nself = <Popen: returncode: None args: ['git', '-C', 'C:\\\\Users\\\\qhukz\\\\AppData\\\\Loc...>\r\nargs = 'git -C C:\\\\Users\\\\qhukz\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-unknown\\\\pytest-1\\\\test_refused_approval_prevents0\\\\project init -b main'\r\nexecutable = None, preexec_fn = None, close_fds = False, pass_fds = ()\r\ncwd = None, env = None\r\nstartupinfo = <subprocess.STARTUPINFO object at 0x000001BE2321A300>\r\ncreationflags = 0, shell = False, p2cread = Handle(1912), p2cwrite = -1\r\nc2pread = 12, c2pwrite = Handle(1992), errread = 13, errwrite = Handle(1932)\r\nunused_restore_signals = True, unused_gid = None, unused_gids = None\r\nunused_uid = None, unused_umask = -1, unused_start_new_session = False\r\nunused_process_group = -1\r\n\r\n    def _execute_child(self, args, executable, preexec_fn, close_fds,\r\n                       pass_fds, cwd, env,\r\n                       startupinfo, creationflags, shell,\r\n                       p2cread, p2cwrite,\r\n                       c2pread, c2pwrite,\r\n                       errread, errwrite,\r\n                       unused_restore_signals,\r\n                       unused_gid, unused_gids, unused_uid,\r\n                       unused_umask,\r\n                       unused_start_new_session, unused_process_group):\r\n        \"\"\"Execute program (MS Windows version)\"\"\"\r\n    \r\n        assert not pass_fds, \"pass_fds not supported on Windows.\"\r\n    \r\n        if isinstance(args, str):\r\n            pass\r\n        elif isinstance(args, bytes):\r\n            if shell:\r\n                raise TypeError('bytes args is not allowed on Windows')\r\n            args = list2cmdline([args])\r\n        elif isinstance(args, os.PathLike):\r\n            if shell:\r\n                raise TypeError('path-like args is not allowed when '\r\n                                'shell is true')\r\n            args = list2cmdline([args])\r\n        else:\r\n            args = list2cmdline(args)\r\n    \r\n        if executable is not None:\r\n            executable = os.fsdecode(executable)\r\n    \r\n        # Process startup details\r\n        if startupinfo is None:\r\n            startupinfo = STARTUPINFO()\r\n        else:\r\n            # bpo-34044: Copy STARTUPINFO since it is modified above,\r\n            # so the caller can reuse it multiple times.\r\n            startupinfo = startupinfo.copy()\r\n    \r\n        use_std_handles = -1 not in (p2cread, c2pwrite, errwrite)\r\n        if use_std_handles:\r\n            startupinfo.dwFlags |= _winapi.STARTF_USESTDHANDLES\r\n            startupinfo.hStdInput = p2cread\r\n            startupinfo.hStdOutput = c2pwrite\r\n            startupinfo.hStdError = errwrite\r\n    \r\n        attribute_list = startupinfo.lpAttributeList\r\n        have_handle_list = bool(attribute_list and\r\n                                \"handle_list\" in attribute_list and\r\n                                attribute_list[\"handle_list\"])\r\n    \r\n        # If we were given an handle_list or need to create one\r\n        if have_handle_list or (use_std_handles and close_fds):\r\n            if attribute_list is None:\r\n                attribute_list = startupinfo.lpAttributeList = {}\r\n            handle_list = attribute_list[\"handle_list\"] = \\\r\n                list(attribute_list.get(\"handle_list\", []))\r\n    \r\n            if use_std_handles:\r\n                handle_list += [int(p2cread), int(c2pwrite), int(errwrite)]\r\n    \r\n            handle_list[:] = self._filter_handle_list(handle_list)\r\n    \r\n            if handle_list:\r\n                if not close_fds:\r\n                    warnings.warn(\"startupinfo.lpAttributeList['handle_list'] \"\r\n                                  \"overriding close_fds\", RuntimeWarning)\r\n    \r\n                # When using the handle_list we always request to inherit\r\n                # handles but the only handles that will be inherited are\r\n                # the ones in the handle_list\r\n                close_fds = False\r\n    \r\n        if shell:\r\n            startupinfo.dwFlags |= _winapi.STARTF_USESHOWWINDOW\r\n            startupinfo.wShowWindow = _winapi.SW_HIDE\r\n            if not executable:\r\n                # gh-101283: without a fully-qualified path, before Windows\r\n                # checks the system directories, it first looks in the\r\n                # application directory, and also the current directory if\r\n                # NeedCurrentDirectoryForExePathW(ExeName) is true, so try\r\n                # to avoid executing unqualified \"cmd.exe\".\r\n                comspec = os.environ.get('ComSpec')\r\n                if not comspec:\r\n                    system_root = os.environ.get('SystemRoot', '')\r\n                    comspec = os.path.join(system_root, 'System32', 'cmd.exe')\r\n                    if not os.path.isabs(comspec):\r\n                        raise FileNotFoundError('shell not found: neither %ComSpec% nor %SystemRoot% is set')\r\n                if os.path.isabs(comspec):\r\n                    executable = comspec\r\n            else:\r\n                comspec = executable\r\n    \r\n            args = '{} /c \"{}\"'.format (comspec, args)\r\n    \r\n        if cwd is not None:\r\n            cwd = os.fsdecode(cwd)\r\n    \r\n        sys.audit(\"subprocess.Popen\", executable, args, cwd, env)\r\n    \r\n        # Start the process\r\n        try:\r\n>           hp, ht, pid, tid = _winapi.CreateProcess(executable, args,\r\n                                     # no special security\r\n                                     None, None,\r\n                                     int(not close_fds),\r\n                                     creationflags,\r\n                                     env,\r\n                                     cwd,\r\n                                     startupinfo)\r\nE                                    FileNotFoundError: [WinError 2] The system cannot find the file specified\r\n\r\nC:\\Users\\qhukz\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\subprocess.py:1538: FileNotFoundError\r\n---------------------------- Captured stdout setup ----------------------------\r\n2026-09-10 12:04:15 [info     ] migration.applied              name=0001_init.sql ver\n... [291056 more characters in the log]",
+            "truncated": true,
+            "log_path": "D:\\ORACLE\\data\\blobs\\2026-09-10\\7415d191cc38__ORACLE-execute.log"
+          }
+        },
+        "claim": null,
+        "cost": null,
+        "attempt": 1,
+        "started_at": "2026-09-10T08:59:52.717Z",
+        "finished_at": "2026-09-10T09:05:56.245Z"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1097,
+      "ts": "2026-09-10T09:05:56.263Z",
+      "type": "task.updated",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-audit",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "status": "running"
+      }
+    },
+    {
+      "v": 1,
+      "seq": 1098,
+      "ts": "2026-09-10T09:05:58.276Z",
+      "type": "task.finished",
+      "session_id": "s_9f3ad96b7169",
+      "turn_id": null,
+      "task_id": "tk_1040994217f6-audit",
+      "trace_id": "tr_fef7bc126398",
+      "payload": {
+        "root_id": "tk_1040994217f6",
+        "source": "graph",
+        "status": "succeeded",
+        "ok": true,
+        "summary": "dev.execute ok",
+        "evidence": {
+          "tool": "dev.execute",
+          "duration_ms": 1926,
+          "rule": "tools.dev.execute.tier",
+          "tier": "2",
+          "result": {
+            "project": "ORACLE",
+            "argv": "uv.exe run python scripts/audit.py verify",
+            "dry_run": false,
+            "exit_code": 1,
+            "ok": false,
+            "duration_s": 1.92,
+            "output": "D:\\ORACLE\\logs\\audit\\audit.jsonl  (4531 records)\r\n\u001b[31m  seq 1: sequence gap \u2014 a record was removed\u001b[0m\r\n\u001b[2m    expected 9\u2026  found 1\u2026\u001b[0m\r\n\u001b[31m  seq 1: prev hash does not match\u001b[0m\r\n\u001b[2m    expected 4edec55a7cbce53add1a50d8\u2026  found 000000000000000000000000\u2026\u001b[0m\r\n\r\n\u001b[31mAUDIT CHAIN BROKEN \u2014 2 problem(s)\u001b[0m",
+            "truncated": false,
+            "log_path": "D:\\ORACLE\\data\\blobs\\2026-09-10\\e7cbebc6c59d__ORACLE-execute.log"
+          }
+        },
+        "claim": null,
+        "cost": null,
+        "attempt": 1,
+        "started_at": "2026-09-10T09:05:56.260Z",
+        "finished_at": "2026-09-10T09:05:58.275Z"
+      }
+    }
+  ]
+}
