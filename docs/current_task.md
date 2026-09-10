@@ -7,9 +7,9 @@
 
 ## Task
 
-**OQ-18's follow-ups done, and OQ-26 rewritten on a measured premise. Next up: the two
-decisions this leaves — the RRF-weighting ADR, and what to do about the eval indexing our own
-writing about the eval.**
+**`tasks` is no longer 0 rows and the continue loop runs end to end. Next up: judge
+[OQ-14](OPEN_QUESTIONS.md#oq-14) against real data (the orbit's go/no-go), re-record `TaskTree`'s
+fixture from the wire, and the two decisions still waiting on the owner.**
 
 **Phase:** [11 — execution visualisation & advanced UI](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc) · **Scope:** Capability arc
 **Status:** `READY` · **Set:** 2026-09-09 · **Blocked on:** nothing
@@ -46,12 +46,25 @@ verified against the real corpus at 1,564 documents / 3,465 edges.
 
 ## Still owed, in rough priority order
 
-- **⚠ P12-T5 is still one human click**, and still an owner's task, not an agent's — approvals
-  expire in 180 s, so firing it unattended writes a *refused* run into the table the run exists to
-  populate. `tasks` remains **0 rows**, and with it [OQ-14](OPEN_QUESTIONS.md#oq-14) (the orbit's
-  go/no-go), the execution tree's acceptance criteria, `TaskTree`'s fixture, and the sidebar
-  counters. Start the daemon and UI, type `continue ORACLE` in the command bar, approve the T3
-  `confirm_strong` card. `oracle-selfcheck` is the cheaper first fill — local, no egress, ~5 min.
+- ~~P12-T5 is still one human click.~~ **RUN 2026-09-10, with the owner's explicit approval.**
+  `tasks` went **0 → 6 rows** (`oracle-selfcheck`: 6 tasks, 2 stages, 6 m 6 s, all succeeded), and
+  `memory_attempts` has 6 rows — P9's attempt machinery holding real data for the first time.
+  `continue ORACLE` then ran the whole gated path: `continue.derived` (tainted, quoting
+  `current_task.md` + `ROADMAP.md`) → **`ai.delegate` T3 escalated by the taint rule itself** and
+  approved → Claude returned a coherent **10-task plan** from real state → `ai.graph` T3.
+  [Dev log](../logs/development/2026-09-10-p12t5-the-loop-closes.md).
+  **The graph was deliberately refused**, and that is not a failure: its content was the two
+  decisions escalated to the owner an hour earlier (RRF weighting; eval self-indexing). A blanket
+  "approve everything" is approval to *run the loop*, not licence to let ten delegations settle
+  questions that were just argued to belong to a human.
+  **Acceptance now:** plan-from-real-state ✓ · sidebar ✓ · gate green ✓ · *"one end-to-end run
+  writes rows to `tasks`"* — 6 rows from the pipeline, none from the continue graph, so this is one
+  product decision away · *"observed state is never persisted"* still needs its test.
+- **Now unblocked by `tasks` being non-zero:** [OQ-14](OPEN_QUESTIONS.md#oq-14) can be judged
+  against real data (the orbit's go/no-go) · the execution tree's acceptance can be assessed — it
+  already renders the real graph with the `dagColumns` longest-path ranking working (`audit` at
+  stage 2, *"after …-security"*) · `TaskTree`'s fixture can be re-recorded from the wire · the
+  agent queue has something to render.
 - ~~OQ-18~~ **RESOLVED 2026-09-10, follow-ups done.** Translation works and the 0.8b mechanism
   *equals* the human ceiling; `Settings.translate_queries` confirmed `True` on evidence.
   **The shipped path composes to 71.1%** — no printed arm is the shipped path, which the first
@@ -124,9 +137,9 @@ verified against the real corpus at 1,564 documents / 3,465 edges.
   `TO VERIFY` against them.
 - **P11 remainder beyond the graph:** T2 orbit (blocked on OQ-14 → blocked on the click above) ·
   the agent queue (needs live task data). ~~Notifications~~ **built 2026-09-10** (UI.md §12) —
-  ⚠ not yet seen firing on a real event: task toasts need `tasks` to be non-zero and an approval
-  toast needs a live T2 call. 12 component tests plus the axe audit; the live trigger is
-  outstanding. **With that, Phase 11 has no unblocked work left.**
+  **verified live 2026-09-10**: the approval toast fired on a real `pipe.run` T2 card and vanished
+  the moment it was answered; two completion toasts fired on real `task.finished` events. The gap
+  recorded in UI.md §12 that morning closed the same day.
 - The fossil `phase6-integration` branch can be deleted at leisure.
 
 ## Operational notes

@@ -809,9 +809,10 @@ chat where it can cite) · no second data pipeline — every node, edge and fail
 > asks for — a model being offline is a standing condition, not an event, and does not want a thing
 > that slides in and leaves.
 >
-> ⚠ **Not yet seen firing on a real event.** Task toasts need `tasks` to be non-zero (P12-T5's
-> click) and an approval toast needs a live T2 call. Covered by 12 component tests and the axe
-> audit; the live trigger is outstanding and is recorded rather than assumed.
+> **Verified live 2026-09-10.** The approval toast fired on a real `pipe.run` T2 card and
+> disappeared the moment the approval was answered — not on a timer, which is the behaviour that
+> distinguishes a prompt from a receipt. Two completion toasts fired on real `task.finished` events
+> from the `oracle-selfcheck` graph.
 
 Toasts, bottom-right, max 3 stacked, then a "+N" collapse.
 
