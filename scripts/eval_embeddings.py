@@ -572,19 +572,51 @@ class BM25:
             t: math.log(1 + (self.n - len(p) + 0.5) / (len(p) + 0.5))
             for t, p in self.postings.items()
         }
+        # Which script the corpus is written in, for rule 2 of `answerable`. Counted over
+        # documents rather than terms so one enormous Russian file cannot flip the majority.
+        cyrillic_docs = sum(1 for d in docs if any(_CYRILLIC.search(t) for t in d))
+        self.majority_is_cyrillic = cyrillic_docs * 2 > self.n
 
     def answerable(self, query: str, max_df_ratio: float = 0.10) -> bool:
-        """Whether this query has any lexical purchase on the corpus at all.
+        """Whether this query has lexical purchase on the corpus — **the production rule**.
 
-        True when at least one query term appears in fewer than `max_df_ratio` of the
-        documents. A term in *every* document discriminates nothing, and a term in *no*
-        document is not evidence either — so a query made entirely of those two kinds is
-        one BM25 can only answer with noise.
+        Ported from `rag.retrieval.discriminating_terms` on 2026-09-10, and the port is the
+        point. This used to be `any(term is discriminating)`, which is the gate the product
+        replaced on 2026-08-24. Measured consequence in the 2026-09-10 run: the `gated` arm
+        scored *identically* to plain `rrf` on every column — not the gate working, the gate
+        never closing. A Russian question like "где хранится секрет jwt" opened it on the
+        borrowed Latin `jwt` alone, and then unweighted RRF admitted thirty noisy BM25 results
+        as an equal second opinion. **The eval was measuring a gate that had not shipped for two
+        weeks**, and reading that column as the product's behaviour understated it.
+
+        The three rules, all from RAG.md §5 and all `MEASURED 2026-08-24` there:
+
+        1. The term appears in fewer than `max_df_ratio` of chunks, with a `MIN_DF_CEILING`
+           floor so a small index does not gate everything out.
+        2. **The term is in the script the corpus is written in.** Document frequency measures
+           rarity in the corpus, not uninformativeness in the language, so a rare Russian word
+           in a mostly-English corpus is rare *and* useless. The test is *minority*, not
+           Cyrillic: a Russian-majority corpus gates out Latin instead.
+        3. The survivors cover at least `MIN_QUESTION_COVERAGE` of the question's **answerable**
+           terms. Terms absent from the corpus are excluded from the denominator — a word BM25
+           cannot answer is not a word it declined to answer.
+
+        Together these took production from opening on 38 queries of 38 to 11, worth +8 recall@5
+        and +12 on the cross-language column.
         """
-        return any(
-            0 < len(self.postings.get(term, ())) < self.n * max_df_ratio
-            for term in set(lex_tokens(query))
-        )
+        ceiling = max(MIN_DF_CEILING, self.n * max_df_ratio)
+        kept = 0
+        answerable = 0
+        for term in dict.fromkeys(lex_tokens(query)):
+            df = len(self.postings.get(term, ()))
+            if df == 0:
+                continue
+            answerable += 1
+            if bool(_CYRILLIC.search(term)) is not self.majority_is_cyrillic:
+                continue
+            if df < ceiling:
+                kept += 1
+        return bool(kept) and kept / answerable >= MIN_QUESTION_COVERAGE
 
     def search(self, query: str, k: int) -> list[int]:
         scores = np.zeros(self.n, dtype=np.float32)
@@ -719,6 +751,12 @@ def corpus_fingerprint(
 #: gives back a little of the 1.8x sorted-batch win; the vectors themselves are
 #: unaffected (padding is masked out of the pooling).
 CHECKPOINT_CHUNKS = 256
+
+#: Mirrored from `rag.retrieval` so `BM25.answerable` measures the gate that ships. A test pins
+#: them equal — an eval whose gate has drifted from production's measures nothing anybody uses.
+MIN_DF_CEILING = 5
+MIN_QUESTION_COVERAGE = 0.40
+_CYRILLIC = re.compile(r"[Ѐ-ӿ]")
 
 
 def save_vectors(path: str, raw: np.ndarray, fingerprint: str, complete: bool = True) -> None:

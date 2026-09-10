@@ -29,7 +29,7 @@ doc, delete the marker.
 | [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | `EXPERIMENT NEEDED` | UX quality, not a phase | open |
 | [OQ-16](#oq-16) | Does `connect_read_pipe` work anywhere on Windows? | `UNKNOWN` | none — worked around | monitoring |
 | [OQ-17](#oq-17) | Is a ~43 min **cold** reindex acceptable? | `ASSUMPTION` | Phase 5 tuning | narrowed 2026-08-22 — warm rebuilds are 37 s |
-| [OQ-18](#oq-18) | Can a Russian question reach an English codebase? | **measured 2026-09-10** | Phase 5 gate | **Translation works and the 0.8b mechanism equals the human ceiling (66%); the 80% gate is still missed at 68%** |
+| [OQ-18](#oq-18) | Can a Russian question reach an English codebase? | **measured 2026-09-10** | Phase 5 gate | **Translation works and the 0.8b mechanism equals the human ceiling; the shipped path composes to 71% and the 80% gate is still missed** |
 | [OQ-19](#oq-19) | Should the Claude integration move to the Claude Agent SDK? | `TO VERIFY` (on trigger) | none — trigger-based | open |
 | [OQ-20](#oq-20) | Can `agy --json-schema` reliably return a valid ExecutionPlan? | measured 2026-08-24 | P6-T5 / Phase 8 | **answered NO — 75% vs a 90% gate; the ladder promoted Claude** |
 | [OQ-21](#oq-21) | When does ORACLE's MCP server need the 2026-07-28 spec? | `UNKNOWN` | none — watch item | monitoring |
@@ -586,13 +586,42 @@ ceiling; this is the first number a running system can actually produce.
 **`Settings.translate_queries` stays `True`**, now on evidence: 61% → 66% overall, and **56% → 64%
 on Russian**, which is where it was aimed.
 
-**2 · The gate is still missed.** Best arm 68% against 80%. The 2026-08-24 baseline was 61%, so the
-gap narrowed from 19 points to 12. **The Phase 5 recall criterion remains unmet.**
+**2 · No row of this table is the shipped path, and the composition is 71%.** `retrieve()` picks per
+query — Russian loses its lexical terms to the script rule and runs `dense_mt`, English runs a
+fusion — so every arm above averages over two languages the product never treats alike:
 
-**3 · The winning arm is not the lever this question opened, and the two have never been composed.**
-`rrf_w2` — weighted RRF, *no translation* — takes 68%, beating both translation arms. **There is no
-`rrf_w2_mt` arm.** Composing them is the obvious next experiment and it is nearly free: the forward
-pass is cached in `D:/ORACLE/scratch/oq18-vectors-bge-m3.npz`, so a re-score is seconds, not hours.
+| | overall | RU (25) | EN (13) |
+|---|---|---|---|
+| dense | 60.5% | 56.0% | 69.2% |
+| **dense_mt** | 65.8% | **64.0%** | 69.2% |
+| rrf / gated | 60.5% | 48.0% | 84.6% |
+| **rrf_w2** | 68.4% | 56.0% | **92.3%** |
+
+**Shipped (RU → `dense_mt`, EN → `gated`): 71.1%**, better than any single arm. **Best available
+composition: 73.7%** (RU → `dense_mt`, EN → `rrf_w2`) — a +2.6 point change to the English fusion
+alone. **The gate is still missed**, and the 2026-08-24 baseline was 61%.
+
+⚠ **73.7% is a ceiling, not a promise**: `rrf_w2` was measured *ungated* while production gates its
+input, and weighting RRF is precisely what [RAG.md §5](RAG.md#5-hybrid-retrieval) refused —
+*"tuning RRF's weights would have forfeited the property the algorithm was chosen for"*. **That is
+evidence for reopening the decision with an ADR, not licence to change it.**
+
+**3 · The `gated` arm does not measure the gate the product ships.** It scores identically to plain
+`rrf` on every column, which is the gate never closing rather than the gate working. The eval uses
+`BM25.answerable()` — true when *any* term is discriminating — so *"где хранится секрет jwt"* opens
+it on the borrowed Latin `jwt`. Production's `discriminating_terms` also drops minority-script terms
+and demands ≥40% question coverage, taking the gate from 38-of-38 to **11 of 38**.
+**Ported 2026-09-10** and measured on the real corpus: the eval's gate now opens on **13 of 38** —
+**0 of 25 Russian**, 13 of 13 English (the two-query gap from production's 11 is document frequency
+counted through its own postings rather than the live FTS index). Constants pinned by
+`tests/test_eval_gate_matches_production.py`. The `gated` arm's true score is therefore **65.8%**,
+not the 60.5% this run printed; the shipped composition is unchanged, because it already routes
+Russian through `dense_mt`.
+
+**Still unmeasured: `rrf_w2_mt`** — weighted fusion over the *translated* probe. It is the one
+combination the composition cannot derive, being a new ranking rather than a choice among existing
+ones. The cached forward pass would have made it seconds, but the tree has moved since the run, so
+it now costs the full six hours: fold it into the next run rather than firing one for it.
 
 **4 · Naive fusion hurts translation, and the gate that should prevent that does nothing.**
 `rrf_mt` (58%) is worse than `dense_mt` (66%) *and* than plain `dense` (61%). The breakdown says
