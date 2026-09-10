@@ -281,3 +281,11 @@
 [2m  9728/19257 chunks  1.35 chunks/s  elapsed 7198s  eta 7051s[0m
 [2m  9984/19257 chunks  1.33 chunks/s  elapsed 7493s  eta 6960s[0m
 [2m  10240/19257 chunks  1.30 chunks/s  elapsed 7862s  eta 6923s[0m
+[2m  10496/19257 chunks  1.29 chunks/s  elapsed 8166s  eta 6816s[0m
+[2m  10752/19257 chunks  1.27 chunks/s  elapsed 8443s  eta 6679s[0m
+[2m  11008/19257 chunks  1.27 chunks/s  elapsed 8673s  eta 6499s[0m
+[2m  11264/19257 chunks  1.27 chunks/s  elapsed 8903s  eta 6318s[0m
+[2m  11520/19257 chunks  1.27 chunks/s  elapsed 9076s  eta 6095s[0m
+[2m  11776/19257 chunks  1.27 chunks/s  elapsed 9302s  eta 5909s[0m
+[2m  12032/19257 chunks  1.25 chunks/s  elapsed 9614s  eta 5773s[0m
+[2m  12288/19257 chunks  1.24 chunks/s  elapsed 9889s  eta 5608s[0m

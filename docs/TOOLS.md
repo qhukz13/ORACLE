@@ -206,6 +206,17 @@ and simply absent from the catalogue. If I want that, I use Explorer.
 | `term.open` | T1 | 3 | **built.** ConPTY via `pywinpty`. Lives in the toolhost, so a runaway shell dies with HALT. Waits for a *measured* readiness condition — input sent before the shell is reading is swallowed silently ([OQ-09](OPEN_QUESTIONS.md#oq-09)) |
 | `term.read` | T0 | 3 | **built.** A reader thread drains the PTY continuously; ANSI is stripped for the model and kept for the UI |
 | `term.write` | **T2, always confirmed** | 3 | **built.** Typing into a live shell = full user privilege. Declares its own `term.write` capability, **not** `proc.spawn`: a spawn is an argv the allowlist can inspect, and a line of shell input is not. One line per call, so an approval cannot cover a script |
+
+> **Three shipped tools have no row above, and the omission is deliberate.**
+> `fs.stat` (T0) reads metadata and nothing else — the `fs.*` rows cover its shape.
+> `term.input` (T1) and `term.resize` (T1) are **hidden internals**: `term.input` carries the
+> *human's* keystrokes from the terminal dock, which is why it is T1 where `term.write` — the
+> *agent* typing — is T2 and confirmed every time. Asking someone to approve their own
+> keystrokes is not a control, it is a way to teach them to click Approve. The separation only
+> holds while the model cannot reach it, so both are `hidden` with no intent routing, and two
+> tests enforce exactly that:
+> `test_executor.py::test_hidden_tools_are_unreachable_from_the_model` and
+> `test_tool_tiers_match_docs.py::test_the_exempted_terminal_internals_are_actually_hidden`.
 | `term.close` | T1 | 3 | **built** |
 
 ### `know.*` — knowledge
