@@ -547,7 +547,7 @@ trace_id: unchanged — stamps every event of one causal chain, across all of th
 ```
 
 The execution tree the UI renders **is** a query over this: tasks by `root_id`, joined to their
-events. No parallel bookkeeping (see [UI.md §6b](UI.md#6b-the-execution-tree--phase-11)).
+events. No parallel bookkeeping (see [UI.md §6b](UI.md#6-task-inspector)).
 
 ## 7. End-to-end example
 

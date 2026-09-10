@@ -1175,7 +1175,7 @@ process, and attaching to a stranger would leave the shell with no daemon and th
 loop against a server that will never speak the protocol — a failure that looks like ORACLE being
 broken. So it sends a real `GET /health` and requires ORACLE's own `{"status":"ok"}`. That is
 hand-rolled rather than an HTTP dependency: the shell holds zero business logic
-([ADR-0007](#adr-0007--the-shell-holds-no-business-logic)) and a client here would be the largest
+([ADR-0007](#adr-0007--clients-are-peers-of-one-local-api)) and a client here would be the largest
 thing in the crate.
 
 **Consequences.** OQ-11 stays resolved and its measurement stands; what changed is the question,

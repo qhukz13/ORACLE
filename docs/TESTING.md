@@ -210,6 +210,13 @@ catch something:
 - **`tests/test_eval_corpus_cache.py`** — a corpus loaded from the eval's cache must fingerprint
   identically to the one saved. Everything else about that cache fails loudly; this one fails as a
   plausible recall number six hours later.
+- **`tests/test_doc_links.py`** — every internal markdown link must resolve. This repo navigates by
+  cross-reference, and a renamed heading breaks every inbound link at once while both documents
+  still read perfectly. Found five on 2026-09-11, two written that day, including one *inside an
+  ADR* citing another ADR by a title it never had.
+- **`tests/test_claude_invocation_matches_docs.py`** — the documented Claude invocation must be the
+  argv the adapter builds. It was not, in both directions, for eighteen days; the egress preview
+  renders the argv rather than the document, so nothing unsafe shipped and nothing revealed it.
 
 The shared shape is worth naming: **a test earns its place when the defect it catches is silent on
 the machine of the person who would notice it.**

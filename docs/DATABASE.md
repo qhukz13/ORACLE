@@ -54,7 +54,7 @@ to a compressed archive rather than dropped.
 
 **Reconciled against source 2026-08-28.** The pre-build sketch here had four tables —
 `turns`, `tasks`, `steps`, `approvals` — and three of them were never built as tables,
-because [ADR-0010](DECISIONS.md#adr-0010--events-are-the-source-of-truth) already gives
+because [ADR-0010](DECISIONS.md#adr-0010--event-sourced-runtime) already gives
 each of them a home:
 
 | Sketch table | Where the concept actually lives |

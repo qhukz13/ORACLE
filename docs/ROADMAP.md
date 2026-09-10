@@ -369,7 +369,7 @@ steps produce identical event shapes. **Risk:** DSL creep — the litmus stands.
 **Goal.** The UI represents the supervisor honestly, and the knowledge becomes visible:
 
 1. The **execution tree** (root → plan → tasks → attempts → events) in the center stage and
-   inspector ([UI.md §6b](UI.md#6b-the-execution-tree--phase-11)).
+   inspector ([UI.md §6b](UI.md#6-task-inspector)).
 2. ~~The orbit updated so the core is ORACLE and orbiting nodes are
    projects/task-groups/agents/collections.~~ **Done and undone, 2026-09-10:** built exactly as
    specified, run against live data, and cut for failing

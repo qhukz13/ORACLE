@@ -11,7 +11,7 @@
 `oracled` as an autostart service, and the shell attaching to a running daemon instead of
 supervising a sidecar.**
 
-**Phase:** [13 — residency, boot & the briefing](ROADMAP.md#phase-13--residency-boot--the-briefing-residency-arc) · **Scope:** Residency arc
+**Phase:** [13 — residency, boot & the briefing](ROADMAP.md#phase-13--residency-boot--the-briefing--residency-arc) · **Scope:** Residency arc
 **Status:** `READY` · **Set:** 2026-09-10 · **Blocked on:** nothing
 
 ### Done 2026-09-10
