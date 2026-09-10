@@ -89,9 +89,9 @@ slot (`continue ORACLE`) is carried by a deterministic string match, not by prom
  P0–P6  foundation                        done
  P7–P9  supervisor arc                    done
  P10    pipelines                         done
- P11    execution vis & advanced UI       views complete — T2 (orbit) BUILT AND CUT (ADR-0029); queue shipped
- P12    project state & the continue loop  T1–T5 built; ONE HUMAN CLICK from its DoD
- P13    residency, boot & the briefing    next
+ P11    execution vis & advanced UI       DONE — every view built; T2 (orbit) built and CUT (ADR-0029)
+ P12    project state & the continue loop  T1–T5 built and the loop has run; DoD needs a human
+ P13    residency, boot & the briefing    health phase + attach done; autostart written, not installed
  P14 mobile · P15 voice · P16 tiers (GPU-conditional) · P17 hardening
 ```
 
@@ -102,13 +102,25 @@ branch (the P12-T4 stopgap is gone; one selection model app-wide), `KnowledgeHea
 a real wire (`POST /api/v1/knowledge/reindex`, T1, through the gate). UI.md corrected in place
 where its §16/§20 predated the views that exist.
 
-### The caveat that still matters most
+### The caveat that mattered most, and what replaced it
 
-**`tasks` is 0 rows.** It always has been. Everything that renders supervisor activity still
-renders fixtures: [OQ-14](OPEN_QUESTIONS.md#oq-14) unanswerable, the execution tree's acceptance
-unjudgeable, `TaskTree.test.tsx` green on a hand-written shape. **One human click ends this** —
-approve the T3 card a `continue ORACLE` produces (daemon, Ollama and the dev UI are all up for
-it), or run `oracle-selfcheck` (local, no egress, six steps, one card).
+**`tasks` was 0 rows for the whole project until 2026-09-10.** That single fact made everything
+that renders supervisor activity render fixtures instead, and this section said so for weeks. It is
+resolved: a real `continue ORACLE` graph ran, and its rows are what
+[OQ-14](OPEN_QUESTIONS.md#oq-14) was finally judged against, what the agent queue renders, and what
+`TaskTree.recorded.test.tsx` replays through the real store reducer instead of a hand-written shape.
+
+**What replaced it is smaller and sharper: nothing has yet run *to completion*.** The graph that
+ran ended with two delegations expired and three tasks skipped, which is what
+[ADR-0028](DECISIONS.md#adr-0028--a-dispatched-approval-does-not-expire) was written to stop — and
+that fix has unit coverage but has never been watched end to end. P12's Definition of Done is
+*"say continue Asterim, walk away, come back to a completed or gated graph"*, and the walk-away
+half is untested.
+
+**It needs a human, which is the point.** The graph stops at a T3 egress card, and an agent
+approving its own egress is precisely the control this project exists to keep. Either approve the
+card a `continue ORACLE` produces, or run `oracle-selfcheck` — local, no egress, six steps, one
+card.
 
 ### Branch
 

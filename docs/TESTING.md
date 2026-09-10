@@ -184,6 +184,8 @@ Stated so nobody assumes coverage that doesn't exist:
 
 ```bash
 make check      # ruff · mypy --strict (core, policy, tools) · pytest · vitest · security suite
+                # · cargo test (the Tauri shell — added 2026-09-10 with ADR-0030, and skipped
+                #   LOUDLY when cargo is absent rather than silently)
 make eval       # model fixture suites — on prompt/model change
                 # (or `uv run python scripts/eval_intent.py` / `eval_selection.py` —
                 # make is not installed on this machine)
@@ -191,6 +193,24 @@ make eval       # model fixture suites — on prompt/model change
 
 `make check` must be green before any commit. The security suite is part of it from Phase 2, not a
 separate optional step — a gate that has to be remembered is not a gate.
+
+### Two rules that exist because the failure is invisible where it is written
+
+Both are ordinary pytest files, and both would look like pedantry to anyone who did not watch them
+catch something:
+
+- **`tests/test_powershell_scripts.py`** — every `.ps1` must begin with a UTF-8 BOM. Windows
+  PowerShell 5.1 reads a script without one as cp1252, so an em dash inside a string literal
+  smuggles in a quote character and the file dies with *"the string is missing the terminator"*.
+  PowerShell 7 parses the same file cleanly, which is what everyone developing this uses, and the
+  script that breaks runs **at logon** where nobody is watching. Measured both ways: non-ASCII in a
+  comment survives as mojibake, non-ASCII in a string does not.
+- **`tests/test_eval_corpus_cache.py`** — a corpus loaded from the eval's cache must fingerprint
+  identically to the one saved. Everything else about that cache fails loudly; this one fails as a
+  plausible recall number six hours later.
+
+The shared shape is worth naming: **a test earns its place when the defect it catches is silent on
+the machine of the person who would notice it.**
 
 There is deliberately no `make perf`: performance numbers come from `scripts/measure_graph.py` (and
 now `scripts/measure_observation.py`) run by hand, and the target stays absent until there is a perf
