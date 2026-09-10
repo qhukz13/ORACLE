@@ -19,6 +19,7 @@ import pytest
 from oracle.rag.chunking import Chunk
 from oracle.rag.collections import ContentKind, Document
 from oracle.rag.retrieval import (
+    LEXICAL_WEIGHT,
     MAX_PER_FILE,
     Retrieved,
     _diversify,
@@ -168,6 +169,38 @@ class TestFusion:
         scores = rrf([["a", "b", "c"], ["c", "b", "a"]])
         assert scores["a"] > scores["b"]
         assert scores["c"] > scores["b"]
+
+    def test_an_unweighted_call_is_exactly_the_old_behaviour(self) -> None:
+        """ADR-0027 added weights. A call that supplies none must be bit-identical to before it,
+        or the change is not a change — it is a rewrite wearing one."""
+        lists = [["b", "a", "x"], ["b", "c", "y"]]
+        assert rrf(lists) == rrf(lists, weights=[1.0, 1.0])
+
+    def test_a_down_weighted_list_still_votes_but_stops_outvoting(self) -> None:
+        """The whole mechanism, in one assertion (ADR-0027).
+
+        `x` is first in the lexical list and nowhere in the dense one; `a` is second in dense and
+        absent from lexical. Unweighted, the lexical first-place beats the dense second-place and
+        `x` outranks `a`. Halve the lexical list and `a` wins — which is what "BM25 scored 0.00 on
+        every cross-language fixture and still returned thirty results" is asking for.
+        """
+        dense = ["b", "a"]
+        lexical = ["x", "b"]
+
+        flat = rrf([dense, lexical])
+        assert flat["x"] > flat["a"]
+
+        weighted = rrf([dense, lexical], weights=[1.0, LEXICAL_WEIGHT])
+        assert weighted["a"] > weighted["x"]
+        # Down-weighted is not discarded: `x` still scores, because a gated lexical list is
+        # evidence, just not an equal authority.
+        assert weighted["x"] > 0
+
+    def test_agreement_still_wins_when_the_lexical_list_is_down_weighted(self) -> None:
+        """Down-weighting must not break the property RRF is *for*: a chunk both retrievers
+        agree on should still beat one that only leads a single list."""
+        weighted = rrf([["b", "a"], ["b", "x"]], weights=[1.0, LEXICAL_WEIGHT])
+        assert weighted["b"] == max(weighted.values())
 
     def test_rrf_of_one_list_preserves_its_order(self) -> None:
         scores = rrf([["a", "b", "c"]])

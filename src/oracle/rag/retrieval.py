@@ -51,6 +51,19 @@ MIN_DF_CEILING = 5
 #: identically, and 60% starts dropping English questions that BM25 does answer.
 MIN_QUESTION_COVERAGE = 0.40
 
+#: How much a lexical ranking counts against a dense one inside RRF.
+#:
+#: `MEASURED 2026-09-10` ([OQ-18](../../../docs/OPEN_QUESTIONS.md#oq-18),
+#: [ADR-0027](../../../docs/DECISIONS.md#adr-0027--rrf-is-weighted-against-the-lexical-list)).
+#: Unweighted RRF scored 84.6% on the English fixtures; weighting dense 2:1 over lexical scored
+#: **92.3%**, and the composed shipped path went 71.1% → 73.7%. The mechanism is not mysterious:
+#: BM25 scores **0.00** on every cross-language query and still returns thirty ranked results, so
+#: an equal vote hands a good dense ranking a peer opinion made of noise.
+#:
+#: RAG.md §5 chose RRF partly *because* it has no tuned weights, and this is the measurement that
+#: reopened it. One number, one place, and a switch to turn it off — see `Settings.weight_lexical`.
+LEXICAL_WEIGHT = 0.5
+
 BOOST_SAME_PROJECT = 1.30
 BOOST_RECENT = 1.15
 BOOST_ANCHOR_MATCH = 1.20
@@ -164,17 +177,24 @@ def discriminating_terms(
     return kept
 
 
-def rrf(rankings: list[list[str]], k: int = RRF_K) -> dict[str, float]:
+def rrf(
+    rankings: list[list[str]], k: int = RRF_K, weights: list[float] | None = None
+) -> dict[str, float]:
     """Reciprocal Rank Fusion over lists of chunk ids.
 
-    RRF needs no score normalisation between two incomparable scoring systems and no
-    tuned weights — it is robust by construction, which is the entire reason it is here
-    rather than a weighted blend of a cosine and a BM25 score.
+    RRF needs no score *normalisation* between two incomparable scoring systems — that property is
+    untouched and is still the reason it is here rather than a blend of a cosine and a BM25 score.
+
+    It was also chosen for needing no tuned **weights**, and that half was reopened by measurement
+    on 2026-09-10 (ADR-0027). `weights` defaults to 1.0 per list, so an unweighted call is exactly
+    the old behaviour; the caller supplies `LEXICAL_WEIGHT` for the lexical list and nothing else.
+    One weight, derived from a number, is not the sliding scale the original objection was about.
     """
+    ws = weights or [1.0] * len(rankings)
     scores: dict[str, float] = defaultdict(float)
-    for ranking in rankings:
+    for weight, ranking in zip(ws, rankings, strict=True):
         for rank, chunk_id in enumerate(ranking):
-            scores[chunk_id] += 1.0 / (k + rank + 1)
+            scores[chunk_id] += weight / (k + rank + 1)
     return scores
 
 
@@ -222,8 +242,13 @@ def retrieve(
     limit: int = TOP_K,
     now: datetime | None = None,
     translator: Callable[[str], str | None] | None = None,
+    lexical_weight: float = LEXICAL_WEIGHT,
 ) -> Retrieved:
     """The full pipeline: two retrievers, fusion, boosts, diversity, top-k.
+
+    `lexical_weight` is how much the BM25 ranking counts against the dense one — injected like
+    `translator` rather than read from config, so this module stays settings-free and a caller can
+    roll the 2026-09-10 change back (ADR-0027) by passing `1.0`.
 
     `translator` adds a **second dense probe** for a question written in a script the
     corpus is not (OQ-18, `rag/translate.py`). It is a plain callable returning `None`
@@ -270,11 +295,18 @@ def retrieve(
 
     by_id = {h.chunk_id: h for h in (*dense, *translated, *lexical)}
     rankings = [[h.chunk_id for h in dense]]
+    weights = [1.0]
     if translated:
         rankings.append([h.chunk_id for h in translated])
+        # A translated probe is a *dense* opinion, so it carries a dense list's weight. Note the
+        # measured case had no translated probe: `rrf_w2` fused two lists, and this is three. The
+        # dense family therefore ends up 2:1 against lexical in aggregate here rather than 1:1,
+        # which is the same direction the measurement pointed but a step past what it proved.
+        weights.append(1.0)
     if lexical:
         rankings.append([h.chunk_id for h in lexical])
-    fused = rrf(rankings)
+        weights.append(lexical_weight)
+    fused = rrf(rankings, weights=weights)
 
     scored = [
         replace(hit, score=_boosted(hit, fused[cid], project=project, question=question, now=now))

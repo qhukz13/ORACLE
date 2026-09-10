@@ -33,6 +33,7 @@ Format per record: Decision · Context · Options · Chosen · Why · Trade-offs
 | [0024](#adr-0024--a-project-is-a-first-class-persistent-entity) | A project is a first-class persistent entity | accepted 2026-08-26 |
 | [0025](#adr-0025--oracle-is-a-resident-service-the-window-is-a-client) | ORACLE is a resident service; the window is a client | accepted 2026-08-26 |
 | [0026](#adr-0026--the-local-tier-ladder-is-capability-shaped-and-gpu-conditional) | The local tier ladder is capability-shaped and GPU-conditional | accepted 2026-08-26, **conditions 0004** |
+| [0027](#adr-0027--rrf-is-weighted-against-the-lexical-list) | RRF is weighted against the lexical list | accepted 2026-09-10 |
 
 ---
 
@@ -915,3 +916,64 @@ becomes a planner-ladder candidate above deterministic templates — **evaluated
 is stated, the tier phase carries an `ASSUMPTION` marker and is not scheduled. The
 `LLMProvider` seam already accommodates a second provider (LM Studio, llama.cpp) without touching
 callers, so no refactor is pre-emptively required.
+
+---
+
+## ADR-0027 — RRF is weighted against the lexical list
+
+**Context.** [RAG.md §5](RAG.md#5-hybrid-retrieval) chose Reciprocal Rank Fusion partly because it
+needs **no tuned weights**, and said so explicitly when the fusion gate was designed:
+*"Tuning RRF's weights would have forfeited the property the algorithm was chosen for; dropping a
+list that is provably noise does not."* That was the right call on the evidence available: the gate
+(dropping minority-script terms, requiring 40% question coverage) was measured at +8 recall@5 and
++12 cross-language, and weighting was never measured at all.
+
+[OQ-18](OPEN_QUESTIONS.md#oq-18)'s 2026-09-10 run measured it. On the 38-fixture set:
+
+| arm | overall r@5 | EN (13) |
+|---|---|---|
+| `rrf` — unweighted | 60.5% | 84.6% |
+| `rrf_w2` — dense weighted 2:1 over lexical | **68.4%** | **92.3%** |
+
+Composed into the path the product actually runs — Russian down `dense_mt`, English down a fusion —
+that is **71.1% → 73.7%**.
+
+**Why it works is not mysterious.** BM25 scores **0.00** on every one of the 25 cross-language
+fixtures and *still returns thirty ranked results*. Unweighted RRF treats that as a peer opinion, so
+a good dense ranking is diluted by noise that had nothing to say. The gate already removes the worst
+of it — it now opens on 13 of 38 queries rather than 38 — but a list that survives the gate is still
+not an equal authority on a question it answers less well.
+
+**Options.**
+(a) Leave RRF unweighted and accept 71.1%.
+(b) Weight the lexical list at `0.5` against each dense list.
+(c) Gate harder — raise `MIN_QUESTION_COVERAGE` until the weak lexical lists stop being admitted.
+(d) Learn weights per query class.
+
+**Chosen.** (b), with the weight injected rather than configured.
+
+**Why.** (c) was tried in effect and the plateau is already documented in
+`MIN_QUESTION_COVERAGE`'s comment — 30%, 40% and 50% score identically and 60% starts dropping
+English questions BM25 *does* answer, so there is no headroom in the gate. (d) is a model, with a
+training set, a drift problem and no evidence that a per-query decision beats one number. (a) is
+defensible and is what this ADR overturns, on the grounds that the original objection was to a
+*sliding scale of tuned parameters* — and one weight, derived from a measurement, with a rollback,
+is not that. The property RRF was really chosen for, **no score normalisation between incomparable
+systems**, is untouched: this changes how much a rank counts, never how a score is compared.
+
+**Trade-offs, and the honest limits of the evidence.**
+
+* **The measured case had two lists; production can have three.** `rrf_w2` fused dense + lexical.
+  When a translated probe is present the dense *family* ends up 2:1 against lexical in aggregate
+  rather than 1:1. That is the direction the measurement points, and a step past what it proved.
+* **`rrf_w2` was measured ungated**, and production gates its input. So 73.7% is a ceiling on the
+  composed gain, not a promise.
+* **It is not yet verified in production shape.** The eval that would settle both caveats needs a
+  full corpus pass; it is scheduled rather than skipped, and this ADR should be revisited against
+  its result. If the composed number does not move, revert — the rollback is passing `1.0`.
+
+**Consequences.** `rrf()` takes optional `weights`, defaulting to 1.0 per list, so an unweighted
+call is exactly the old behaviour. `retrieve()` takes `lexical_weight`, injected like `translator`
+so `rag/retrieval.py` stays settings-free. RAG.md §5's "no tuned weights" sentence is amended rather
+than deleted — the reasoning was sound and the measurement is what changed, and a reader who finds
+the old sentence should find the number that overturned it beside it.

@@ -376,8 +376,16 @@ in `rag.retrieval.discriminating_terms` (`has_lexical_purchase` is the boolean f
    100% of its question and still fuses. Terms absent from the corpus are excluded from the
    denominator: a word BM25 cannot answer is not a word BM25 declined to answer.
 
-Tuning RRF's weights would have forfeited the property the algorithm was chosen for; dropping a list
-that is provably noise does not. Rules 2 and 3 together are worth **+8 points of recall@5 and +12 on
+~~Tuning RRF's weights would have forfeited the property the algorithm was chosen for; dropping a list
+that is provably noise does not.~~ **Amended 2026-09-10 by measurement —
+[ADR-0027](DECISIONS.md#adr-0027--rrf-is-weighted-against-the-lexical-list).** The reasoning above
+was right about the gate and wrong to close the question: weighting had never been measured. It has
+now. Dense weighted **2:1** over lexical takes the English fixtures from 84.6% to **92.3%** and the
+composed shipped path from 71.1% to **73.7%**, because BM25 scores **0.00** on all 25 cross-language
+fixtures and still returns thirty ranked results for RRF to treat as a peer. The property RRF was
+really chosen for — **no score normalisation between incomparable systems** — is untouched; what
+changed is how much a rank counts. One weight (`LEXICAL_WEIGHT`), from a number, with a rollback,
+is not the sliding scale the original objection was about. Rules 2 and 3 together are worth **+8 points of recall@5 and +12 on
 the cross-language column** to `bge-m3`, cost `e5-base` nothing, and take the gate from opening on
 38 queries out of 38 to 11 — which is also 69 ms off `bge-m3`'s p95.
 
