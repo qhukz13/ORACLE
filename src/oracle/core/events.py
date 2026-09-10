@@ -61,6 +61,11 @@ CRITICAL_TYPES: Final[frozenset[str]] = frozenset(
         "system.shutdown",
         "error",
         "system.degraded",
+        # The boot health phase's report (ROADMAP P13). Critical for the same reason
+        # `system.degraded` above is, and it is that event's boot-time superset: it names which
+        # capability is missing, and a client that misses it renders a healthy-looking ORACLE
+        # that cannot reason.
+        "system.health",
     }
 )
 
@@ -86,11 +91,41 @@ KNOWN_TYPES: Final[frozenset[str]] = CRITICAL_TYPES | frozenset(
         "delegate.event",
         "log.entry",
         "system.metrics",
+        # --- Registered 2026-09-11, after a parity check found nine emitted types absent from
+        # this set. `is_known()` below, whose comment says it exists to catch exactly this, has
+        # never had a caller — so the registry drifted freely for as long as it has existed.
+        # `tests/test_event_types_registered.py` is the enforcement it never got.
+        #
+        # These sit in the coalescable half **deliberately but not confidently**. Criticality
+        # governs backpressure to live subscribers, not persistence — the log keeps every event
+        # regardless, and a client that misses one recovers it by replaying from `since_seq`. On
+        # that reading none of these is unrecoverable, so shedding them under load is safe. If
+        # any turns out to drive a live decision a replay cannot repair, it belongs in
+        # CRITICAL_TYPES above, and this comment is the record of a judgement revisited rather
+        # than one never made.
+        "memory.written",
+        "memory.forgotten",
+        "memory.refused",
+        "memory.contradicted",
+        "memory.attempt_recorded",
+        "plan.descended",
+        "plan.rejected",
+        "graph.replan_exhausted",
     }
 )
 
 
 def is_known(event_type: str) -> bool:
+    """Is this one of ours?
+
+    **Nothing calls this, and that is the point of the test that now guards the set it reads.**
+    The comment above has always said `KNOWN_TYPES` catches typos "in our own code via
+    `is_known`", but no caller was ever written, so nine emitted types accumulated outside the
+    set without anything noticing. Enforcing at ingest is still wrong — forward compatibility
+    means a client may legitimately send a type this build has not heard of — so the check moved
+    to where it costs nothing and cannot be forgotten:
+    `tests/test_event_types_registered.py`.
+    """
     return event_type in KNOWN_TYPES
 
 

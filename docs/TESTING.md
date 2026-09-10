@@ -214,6 +214,11 @@ catch something:
   cross-reference, and a renamed heading breaks every inbound link at once while both documents
   still read perfectly. Found five on 2026-09-11, two written that day, including one *inside an
   ADR* citing another ADR by a title it never had.
+- **`tests/test_event_types_registered.py`** — every event type ORACLE emits must be in
+  `KNOWN_TYPES`. That set's comment always said `is_known()` catches typos "in our own code";
+  `is_known()` has never had a caller, so nine emitted types accumulated outside the set. Nothing
+  broke, because nothing read it at runtime either — **a control that was never wired up degrades
+  silently into a comment.**
 - **`tests/test_claude_invocation_matches_docs.py`** — the documented Claude invocation must be the
   argv the adapter builds. It was not, in both directions, for eighteen days; the egress preview
   renders the argv rather than the document, so nothing unsafe shipped and nothing revealed it.

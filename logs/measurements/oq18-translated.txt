@@ -276,3 +276,8 @@
 [2m  8448/19257 chunks  1.40 chunks/s  elapsed 6020s  eta 7702s[0m
 [2m  8704/19257 chunks  1.40 chunks/s  elapsed 6227s  eta 7550s[0m
 [2m  8960/19257 chunks  1.39 chunks/s  elapsed 6453s  eta 7416s[0m
+[2m  9216/19257 chunks  1.38 chunks/s  elapsed 6663s  eta 7259s[0m
+[2m  9472/19257 chunks  1.37 chunks/s  elapsed 6908s  eta 7136s[0m
+[2m  9728/19257 chunks  1.35 chunks/s  elapsed 7198s  eta 7051s[0m
+[2m  9984/19257 chunks  1.33 chunks/s  elapsed 7493s  eta 6960s[0m
+[2m  10240/19257 chunks  1.30 chunks/s  elapsed 7862s  eta 6923s[0m
