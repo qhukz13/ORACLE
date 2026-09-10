@@ -16,7 +16,10 @@
 
 ## Where the project actually is
 
-Verified against source 2026-08-24, not against docs:
+Verified against source **2026-09-10**, not against docs. (The 2026-08-24 version of this table
+went stale in two rows that mattered — it called the memory subsystem *"planned only — 0 LOC"*
+for a fortnight after it shipped, and said bands 5–7 had no producers after two were wired.
+A status table nobody re-verifies is a status table that lies with authority.)
 
 | Subsystem | Status | Evidence |
 |---|---|---|
@@ -29,11 +32,13 @@ Verified against source 2026-08-24, not against docs:
 | Delegation: packet, egress preview, worktree, verification, Claude adapter | **implemented, live-verified** | `src/oracle/delegation/`, `integrations/` |
 | ORACLE's MCP server (delegate callback) | **implemented, live-verified** | `src/oracle/mcp/` |
 | Desktop UI: chat, palette, confirmations, terminal, delegation panel | **implemented** (127 UI tests) | `apps/desktop/` |
-| Context assembly bands 5–7 (memory/retrieval/history) | **partially implemented** — budget exists, no producers | `context/budget.py` |
-| Memory subsystem | **planned only** — 0 LOC | [MEMORY.md](MEMORY.md) |
+| Context assembly bands 5–7 (memory/retrieval/history) | **implemented** — band 5 `memory_items`, band 6 select-as-context (2026-09-10), band 7 history. Band 6 is *pinned* documents, not search: retrieval stays off the interactive path | `context/budget.py`, `router/pipeline.py` |
+| Memory subsystem | **implemented** — facts, preferences, attempts, restrictive write policy, Memory view | `src/oracle/memory/` (5 modules), `tests/security/test_memory_writes.py` |
 | AntigravityAdapter | **planned only** — contract verified, adapter unbuilt | [OQ-05](OPEN_QUESTIONS.md#oq-05) |
-| Task graph, planner, multi-worker supervision | **new work** — this roadmap | [ORCHESTRATION.md](ORCHESTRATION.md), [PLANNER.md](PLANNER.md) |
-| Pipelines, mobile, voice, orbit view | **deferred as before** | below |
+| Task graph, planner, multi-worker supervision | **implemented** (P7 done; P8's code and deterministic acceptance done, one live supervised run outstanding) | `src/oracle/orchestration/`, `tests/test_reference_scenario.py` |
+| Knowledge graph view (UI.md §11b) | **implemented 2026-09-10** — canvas map, retrieval traces, hulls, select-as-context | `apps/desktop/src/components/KnowledgeGraph.tsx`, `src/oracle/rag/graph.py` |
+| Pipelines | **implemented** (P10, 2026-08-26) | `src/oracle/pipelines/` |
+| Mobile, voice, orbit view | **deferred as before** | below |
 
 **Needs refactor** (narrow, named): `DelegationService` becomes the runner for one task kind
 (P7) · Handoff Packet gains the `TaskSpec` superset (P8) · `AgentCaps` grows into the capability
@@ -211,6 +216,14 @@ untouched and remain the default until P8 wires intent to graphs.
 
 ## Phase 8 — Planner integration & multi-worker  **[Supervisor arc]**
 
+> **State 2026-09-10: built, acceptance all but one criterion.** The planner ladder,
+> `ExecutionPlan` validation and repair, replanning with lineage, agent selection and the
+> injection fixtures are implemented, and the reference scenario runs deterministically
+> (`tests/test_reference_scenario.py`). **Outstanding: the one supervised live run** — the same
+> blocker as [P12-T5](#phase-12--project-state--the-continue-loop--residency-arc), because
+> `tasks` is still 0 rows. Not marked done, because the criterion that is missing is the one
+> that would tell us whether any of it works outside a fixture.
+
 **Goal.** "Continue development on X" produces a validated `ExecutionPlan` from the planner, a
 graph approval, scheduled workers with roles, verification, bounded replanning, and a report — the
 [ORCHESTRATION.md §7](ORCHESTRATION.md#7-end-to-end-example) scenario, live.
@@ -254,6 +267,15 @@ approval card shows estimates; track spend per root task.
 ---
 
 ## Phase 9 — Memory & context engine  **[Supervisor arc]**
+
+> **State 2026-09-10: substantially complete.** `src/oracle/memory/` ships facts, preferences,
+> attempts and the restrictive write policy, with MEMORY.md's rules asserted in
+> `tests/security/test_memory_writes.py`. Bands 5 and 7 have producers; band 6 gained one on
+> 2026-09-10 (select-as-context — a *pin*, not a search, so retrieval stays off the interactive
+> path). **The recall criterion is met through its own second branch**: "≥ 80% on the fixture
+> set, **or the gate re-set with a written argument**" — [OQ-18](OPEN_QUESTIONS.md#oq-18) is
+> that argument, resolved 2026-09-10 at 71% composed with the shortfall stated rather than
+> moved. Whether that closes the phase is the owner's call, not an agent's.
 
 **Goal.** The context bands stop being empty: facts, preferences, attempts retrieval into band 5;
 retrieval into band 6 for `answer`/`reason` calls; history summarisation into band 7. Plus the
@@ -327,6 +349,15 @@ steps produce identical event shapes. **Risk:** DSL creep — the litmus stands.
 ---
 
 ## Phase 11 — Execution visualisation & advanced UI  **[Capability arc]**
+
+> **State 2026-09-10.** Of the four items below: the **knowledge graph (3) is done in full** —
+> canvas map, retrieval traces, collection hulls, select-as-context, with
+> [OQ-22](OPEN_QUESTIONS.md#oq-22) resolved on all four measurements and
+> [ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered)
+> confirmed. The **timeline and global search (4) shipped 2026-08-28**. The **execution tree (1)**
+> is built but its acceptance cannot be judged, and the **orbit (2)** and **agent queue** are
+> blocked — all three on the same thing: `tasks` is **0 rows** until P12-T5's approval click.
+> **The only unblocked work left in this phase is notifications.**
 
 **Goal.** The UI represents the supervisor honestly, and the knowledge becomes visible:
 
