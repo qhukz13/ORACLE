@@ -1183,6 +1183,31 @@ not a rounding error. Whether some config kinds should be embeddable costs a rei
 should not be attempted before the contamination question above is settled — otherwise the two
 changes land together and neither is attributable.
 
+#### A third face of it, measured 2026-09-10: the corpus moves *during* a run
+
+Self-indexing does not only bias the score, it makes a long measurement **unrepeatable**.
+`corpus_fingerprint()` hashes every embedded chunk's text so a saved vector checkpoint can never be
+reused against a different corpus — a good rule. But the corpus is a live working tree that contains
+this repository, so *any commit invalidates it*. The 2026-09-10 verification run reached 28%
+(5,376 of 19,191 vectors) and its checkpoint was already dead, killed by a docs commit an hour in
+that took the semantic chunk count from 19,212 to 19,191:
+
+```
+stored fp    f740705a003bf55278ce21778a63b187af72f8014eece5f0e21dfdc64ffa50e2
+today  fp    10251e03ce2ecebd3a3bf663f6efc234d19aa5ac2c9d5b6360c7c31bf18b8ff4
+```
+
+A six-hour run that forbids committing for six hours is not a run anybody will do twice.
+`--corpus-cache` (`scripts/eval_embeddings.py`) fixes the mechanics by freezing the walk, and it is
+worth noting **it does not resolve this question** — it makes each run internally consistent, which
+is a precondition for measuring the contamination trade above rather than an answer to it.
+
+The same run also lost two fixtures outright: `entitlementGuard.ts` and `rbacGuard.ts` were deleted
+in the *Asterim* repo, so `lex-entitlement-guard` and `ru-workspace-permissions` became unreachable.
+The eval printed that and scored them as misses anyway, against its own comment; it now drops them
+and prints the denominator. **A fixture set that lives in other people's working trees decays**, and
+that is the same ratchet from the other direction.
+
 ---
 
 ### OQ-27

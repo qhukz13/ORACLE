@@ -37,28 +37,58 @@ the knowledge map respectively.
 
 ## What remains
 
-### 1. P11's agent queue — the last unbuilt item in this phase
+### 1. ~~P11's agent queue~~ — **done 2026-09-10**
 
-The only §-spec'd view still missing now that the orbit is not coming. It has real data to render
-for the first time (`tasks` is non-zero, delegations run, attempts and outcomes exist).
+`AgentQueue.tsx` + `queue.ts`, in the sidebar, replacing the ad-hoc `WAITING ON ME` list it
+duplicated. Verified against the live daemon: six DONE rows off the real `continue ORACLE` run,
+newest-first, `failed` and `skipped` kept as different words.
+[UI.md §8 — as built](UI.md#8-agent-queue) records three deviations from the sketch (no `skip` verb
+exists; `[review]` navigates rather than decides; two lines, not one) and the two non-obvious
+mappings the tests pin: `TaskStatus.WAITING` is `NEXT`, and a delegated task must not appear twice.
 
-### 2. ADR-0027's verification — **waiting on a running job, do not restart it**
+**With this, P11's view list is complete.**
 
-The OQ-18 corpus run re-started 2026-09-10 14:29 and re-embeds from scratch (~0.9 chunks/s,
-19,212 chunks, ETA ~20:30). It writes `logs/measurements/oq18-translated.json`; the completion marker
-*is* that file, and `scripts/run_oq18_eval.cmd` exits early if it exists.
+### 2. ADR-0027's verification — **stopped and rescheduled 2026-09-10 16:20**
 
-**What to compare, and the pre-committed rollback:** the previous complete pass measured
-`dense 61% · rrf 61% · rrf_w2 68% · gated 61%`, so the weighting is worth **+7pp on `rrf`**. The
-open question is whether it carries through the *fusion gate* — compare the new `gated` against that
-`61%`. **If the composed number does not move, revert ADR-0027** (the rollback is one line: pass
-`1.0` as `lexical_weight`). The gate is recall@5 ≥ 80%; neither number reaches it, and ADR-0027 was
-never claimed to.
+The run was killed at 28% and its scheduled task disabled. **The 2h it had spent was already
+worthless** and stopping is not what made it so: `corpus_fingerprint()` hashes every embedded
+chunk's text, ORACLE indexes `C:/Projects`, and ORACLE *is* in `C:/Projects` — so the OQ-14 commit
+an hour into the run moved the corpus under it. Measured, not inferred:
 
-> Two operational facts, both learned the hard way and both still true: heavy CPU work during the run
-> corrupts its `chunks/s` numbers *and* slows it, and **any repo edit invalidates the checkpoint** for
-> the *next* attempt, because `corpus_fingerprint()` hashes every embedded chunk's text and ORACLE
-> indexes itself. The run in flight is unaffected — it read the corpus at 14:29.
+```
+checkpoint     5376 / 19191 vectors   complete=False
+stored fp    f740705a003bf55278ce21778a63b187af72f8014eece5f0e21dfdc64ffa50e2
+today  fp    10251e03ce2ecebd3a3bf663f6efc234d19aa5ac2c9d5b6360c7c31bf18b8ff4
+REUSABLE     False
+```
+
+**Fixed, so the next run is not hostage to the next commit.** `--corpus-cache` freezes the
+walked-and-chunked corpus to an 8 MB `.json.gz` and reads it thereafter; `run_oq18_eval.cmd` passes
+it. The eval was checkpointing the *vectors* and leaving the *corpus* free to move, which solved one
+half of a two-half problem. This also makes runs weeks apart comparable, which they never were.
+
+**Two fixture answer documents vanished** — `Asterim/apps/server/src/middleware/entitlementGuard.ts`
+and `rbacGuard.ts` are staged deletions in the Asterim repo, done outside ORACLE. So
+`lex-entitlement-guard` and `ru-workspace-permissions` are unreachable. The eval printed that and
+then scored them as misses anyway, which its own comment says not to do ("measures the walker, not
+the model"); it now drops them from the scored set and prints the denominator.
+
+**The like-for-like baseline, computed before the run rather than argued after it.** The previous
+complete pass listed misses per arm, so rescoring over the 36 still-reachable fixtures is exact:
+
+| arm | was (n=38) | like-for-like (n=36) |
+|---|---|---|
+| `dense` | 60.5% | **61.1%** |
+| `rrf_w2` | 68.4% | **69.4%** |
+| `gated` | 60.5% | **61.1%** |
+
+**The pre-committed decision stands: compare the new `gated` against 61.1%. If it does not move,
+revert [ADR-0027](DECISIONS.md#adr-0027--rrf-is-weighted-against-the-lexical-list)** — the rollback
+is one line, pass `1.0` as `lexical_weight`. The gate is recall@5 ≥ 80% and neither number reaches
+it; ADR-0027 never claimed it would.
+
+> Restoring the two Asterim files would restore the 38-case set. That is the owner's call in
+> another repository, not something to do from here.
 
 ### 3. [OQ-26](OPEN_QUESTIONS.md#oq-26) — still open
 

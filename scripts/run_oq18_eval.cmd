@@ -63,6 +63,19 @@ REM
 REM The 45-minute ExecutionTimeLimit stays, but on the sleep's merits rather than the hang's:
 REM the original PT6H meant a firing killed by anything held the slot for six hours while
 REM every retry was ignored.
+REM
+REM --- Why --corpus-cache, added 2026-09-10 --------------------------------------
+REM The checkpoint was solving the wrong half of the problem. The 2026-09-10 attempt
+REM reached 28% (5,376 of 19,191 vectors) and its .npz was ALREADY unusable, because
+REM `corpus_fingerprint()` hashes every embedded chunk's text and this corpus contains
+REM this repository. A docs commit an hour into the run took the semantic chunk count
+REM from 19,212 to 19,191, so the saved vectors were keyed to a corpus that no longer
+REM existed on disk. Measured, not inferred: stored f740705a..., today 10251e03....
+REM
+REM So a run was hostage to every commit for its whole six hours, which is not a way to
+REM work. --corpus-cache freezes the walked-and-chunked corpus to an 8 MB .json.gz on
+REM first use and reads it thereafter. Deleting that file is how you deliberately
+REM re-walk; nothing else moves the corpus any more.
 REM ---------------------------------------------------------------------------
 
 cd /d "C:\Projects\ORACLE"
@@ -81,6 +94,7 @@ echo === OQ-18 corpus run, attempt started %DATE% %TIME% === >> logs\measurement
 ".venv\Scripts\python.exe" -u scripts\eval_embeddings.py ^
   --models bge-m3 ^
   --translations logs/measurements/oq18-translations.json ^
+  --corpus-cache D:/ORACLE/scratch/oq18-corpus.json.gz ^
   --save-vectors D:/ORACLE/scratch/oq18-vectors-bge-m3.npz ^
   --load-vectors D:/ORACLE/scratch/oq18-vectors-bge-m3.npz ^
   --out logs/measurements/oq18-translated.json ^

@@ -89,7 +89,7 @@ slot (`continue ORACLE`) is carried by a deterministic string match, not by prom
  P0–P6  foundation                        done
  P7–P9  supervisor arc                    done
  P10    pipelines                         done
- P11    execution vis & advanced UI       IN PROGRESS — T1/T3/T4/T5 done; T2 (orbit) BUILT AND CUT (ADR-0029)
+ P11    execution vis & advanced UI       views complete — T2 (orbit) BUILT AND CUT (ADR-0029); queue shipped
  P12    project state & the continue loop  T1–T5 built; ONE HUMAN CLICK from its DoD
  P13    residency, boot & the briefing    next
  P14 mobile · P15 voice · P16 tiers (GPU-conditional) · P17 hardening

@@ -363,6 +363,8 @@ steps produce identical event shapes. **Risk:** DSL creep — the litmus stands.
 > **Superseded 2026-09-10.** P12-T5's click happened, `tasks` stopped being 0 rows, notifications
 > shipped, the knowledge graph shipped, and the orbit (2) was unblocked, built, measured and **cut**
 > ([ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)). Item 2 below is closed, not pending.
+> The **agent queue** shipped the same day ([UI.md §8](UI.md#8-agent-queue)), which closes item 4
+> and with it the phase's view list.
 
 **Goal.** The UI represents the supervisor honestly, and the knowledge becomes visible:
 

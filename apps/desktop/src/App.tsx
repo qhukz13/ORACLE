@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OracleClient } from "./client";
 import { CommandPalette, type PipelineEntry } from "./components/CommandPalette";
 import { GlobalSearch } from "./components/GlobalSearch";
+import { AgentQueue } from "./components/AgentQueue";
 import { ConfirmationCenter } from "./components/ConfirmationCenter";
 import { DelegationPanel } from "./components/DelegationPanel";
 import { Briefing, toBriefing } from "./components/Briefing";
@@ -560,18 +561,21 @@ export default function App() {
               onRegister={registerProject}
             />
 
-            {/* The only sidebar item allowed to demand attention (docs/UI.md#4). */}
-            <h2 className={waiting > 0 ? "attn" : ""}>
-              WAITING ON ME {waiting > 0 && <span className="count">{waiting}</span>}
-            </h2>
-            <ul className="tree">
-              {waiting === 0 && <li className="muted">nothing</li>}
-              {s.approvals.map((a) => (
-                <li key={a.approvalId} className="attn">
-                  {a.tool} <span className="tier-chip">{a.tier}</span>
-                </li>
-              ))}
-            </ul>
+            {/* §8. This replaced a `WAITING ON ME` list that rendered `s.approvals` and nothing
+                else — which is this component's BLOCKED bucket under a second name. The queue is
+                the only sidebar item allowed to demand attention (docs/UI.md#4), and it does so
+                on the same condition the old heading did: something is blocked. */}
+            <AgentQueue
+              graphs={s.graphs}
+              delegations={s.delegations}
+              approvals={s.approvals}
+              onCancelTask={cancelTask}
+              onReview={() => setInspector(false)}
+              onMonitor={(id) => {
+                setSelection({ kind: "task", id });
+                setInspector(true);
+              }}
+            />
           </nav>
         )}
 

@@ -498,6 +498,40 @@ DONE      indexed Obsidian (161 docs)     2m ago
 
 `BLOCKED` items always sort to the top and mirror into the Confirmation Center.
 
+### As built  `P11, 2026-09-10` — in the sidebar, and it replaced something
+
+`AgentQueue.tsx` over `queue.ts` (the bucketing is pure and tested apart from the DOM). It lives in
+the **sidebar**, where §8 offers the choice, and it **replaced the ad-hoc `WAITING ON ME` list that
+used to sit there** — that list rendered `approvals` and nothing else, which is this component's
+`BLOCKED` bucket under a second name. Two renderings of one fact in one panel is what
+[OQ-14](OPEN_QUESTIONS.md#oq-14) had just cost the orbital view, so it was not going to survive the
+same week. The command bar keeps its own `N waiting on you`: that is a different surface, and §3's
+measurement showed it is the one carrying the fact.
+
+**Three deviations, each because the alternative would be a lie:**
+
+| §8 says | Built as | Why |
+|---|---|---|
+| `[skip]` on a `NEXT` row | `[cancel]` | `graph.cancel` is the scheduler's only per-task verb. On a task that has not started it finishes the row as `cancelled` and skips its dependents — so "skip" would make this row and the task tree call one event two different things. |
+| `[review]` | navigates, does not decide | §9's rule is that the safety surface shows the real action and never a paraphrase. A one-line queue row *is* a paraphrase. |
+| one line per row | two | The sidebar is 240–320 px. On one line the label — the only column carrying what is actually happening — is the one that truncates. |
+
+**Two mappings that are not obvious, and are asserted directly:**
+
+- **`TaskStatus.WAITING` belongs in `NEXT`.** The scheduler's `waiting` means *waiting on its
+  dependencies*: nothing is happening to it. §8's `WAITING` bucket means *an external agent has it
+  right now*. The words are near-opposites, and reading the status as the bucket name would file an
+  idle task under active work.
+- **A delegated task arrives twice, under one id** — once from the graph as `running`, once from the
+  delegation service. Two rows would claim ORACLE is doing the work locally *and* that Claude has
+  it. The live delegation wins, because it is the row that can name the adapter and offer
+  `[monitor]`; when it ends, the id goes back to the graph. This is the same collision
+  `TaskTree.recorded.test.tsx` exists for, and the queue's test folds that same recording.
+
+`DONE` keeps six rows, newest-first. The first live run got the *selection* right and the *order*
+wrong — it kept the six most recent and then listed them by task id, so the oldest of the six sat at
+the top of a bucket whose only question is "what just happened".
+
 ---
 
 ## 9. Confirmation Center  `BUILT 2026-08-21`

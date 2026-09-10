@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import gzip
 import hashlib
 import json
 import math
@@ -791,6 +792,136 @@ def load_vectors(path: str, fingerprint: str) -> tuple[np.ndarray, bool] | None:
     return np.asarray(data["vectors"]), complete
 
 
+#: Bumped when the cache's shape changes. A stale-shaped cache is refused, not adapted:
+#: this file's whole history is of quietly-wrong reuse.
+CORPUS_CACHE_VERSION = 1
+
+
+def save_corpus_cache(path: str, docs: list[Doc], chunks: list[Chunk]) -> None:
+    """Freeze the walked-and-chunked corpus so a later run measures the same thing.
+
+    **This exists because the corpus contains this repository.** `corpus_fingerprint()` hashes
+    every embedded chunk's text, ORACLE indexes `C:/Projects`, and ORACLE lives in `C:/Projects` —
+    so committing anything at all during a multi-hour run moves the corpus under it and makes the
+    vector checkpoint unusable. That is not hypothetical: the 2026-09-10 run reached 28% and its
+    checkpoint was already dead, because a docs commit an hour in took the semantic chunk count
+    from 19,212 to 19,191.
+
+    A cache makes the run *reproducible* rather than merely restartable, which is what an eval
+    wanted anyway — two runs a week apart were never comparing the same corpus.
+
+    **This is a post-chunking snapshot and does not keep document bodies.** `chunk_doc` delegates
+    to the shipped chunker, so what comes back are production `Chunk`s over production
+    `Document`s — the annotation on this module's `Chunk` is a convenient lie that the
+    `type: ignore` at `chunk_doc` records. Nothing after chunking reads a document body, so
+    keeping them would double the file to preserve something unused. Re-chunking means deleting
+    the cache and re-walking, which is what `--corpus-cache`'s help says.
+    """
+    doc_index: dict[int, int] = {}
+    doc_rows: list[dict[str, Any]] = []
+    chunk_rows: list[dict[str, Any]] = []
+    for c in chunks:
+        key = id(c.doc)
+        if key not in doc_index:
+            doc_index[key] = len(doc_rows)
+            doc_rows.append(
+                {
+                    "collection": c.doc.collection,
+                    "project": c.doc.project,
+                    "path": c.doc.path,
+                    "abs_path": str(c.doc.abs_path),
+                    "kind": str(getattr(c.doc.kind, "value", c.doc.kind)),
+                    "size": getattr(c.doc, "size", 0),
+                    "mtime_ns": getattr(c.doc, "mtime_ns", 0),
+                }
+            )
+        chunk_rows.append(
+            {
+                "doc": doc_index[key],
+                "ordinal": c.ordinal,
+                "anchor": c.anchor,
+                "text": c.text,
+                "links": list(getattr(c, "links", ())),
+                "tags": list(getattr(c, "tags", ())),
+                "meta": dict(getattr(c, "meta", {})),
+            }
+        )
+
+    payload = {
+        "version": CORPUS_CACHE_VERSION,
+        "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        # The walk's own doc list, kept only for the corpus stats line — hence no bodies.
+        "walk": [
+            {"collection": d.collection, "project": d.project, "path": d.path, "kind": d.kind}
+            for d in docs
+        ],
+        "docs": doc_rows,
+        "chunks": chunk_rows,
+    }
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = str(p) + ".tmp"
+    with gzip.open(tmp, "wt", encoding="utf-8") as fh:
+        json.dump(payload, fh)
+    os.replace(tmp, p)  # atomic, for the same reason `save_vectors` is
+    mb = Path(path).stat().st_size / 1e6
+    print(f"{D}  froze the corpus to {path} ({mb:.0f} MB){X}")
+
+
+def load_corpus_cache(path: str) -> tuple[list[Doc], list[Chunk]] | None:
+    """The frozen corpus, or a loud None. Never a quiet adaptation of a stale shape."""
+    from oracle.rag.chunking import Chunk as ShippedChunk
+    from oracle.rag.collections import ContentKind, Document
+
+    f = Path(path)
+    if not f.exists():
+        return None
+    with gzip.open(f, "rt", encoding="utf-8") as fh:
+        payload = json.load(fh)
+    if payload.get("version") != CORPUS_CACHE_VERSION:
+        print(f"{R}  {path} is a v{payload.get('version')} cache, not v{CORPUS_CACHE_VERSION}{X}")
+        return None
+
+    shipped_docs = [
+        Document(
+            collection=d["collection"],
+            project=d["project"],
+            path=d["path"],
+            abs_path=Path(d["abs_path"]),
+            kind=ContentKind(d["kind"]),
+            size=d["size"],
+            mtime_ns=d["mtime_ns"],
+        )
+        for d in payload["docs"]
+    ]
+    chunks: list[Chunk] = [
+        ShippedChunk(  # type: ignore[list-item]
+            doc=shipped_docs[c["doc"]],
+            ordinal=c["ordinal"],
+            anchor=c["anchor"],
+            text=c["text"],
+            links=tuple(c["links"]),
+            tags=tuple(c["tags"]),
+            meta=c["meta"],
+        )
+        for c in payload["chunks"]
+    ]
+    # Bodies are not in the cache (see `save_corpus_cache`); these exist for the stats line.
+    walk = [
+        Doc(
+            collection=w["collection"],
+            project=w["project"],
+            path=w["path"],
+            abs_path=Path(w["path"]),
+            kind=w["kind"],
+            text="",
+        )
+        for w in payload["walk"]
+    ]
+    print(f"{G}  corpus frozen {payload['created']} — {len(walk)} docs, {len(chunks)} chunks{X}")
+    return walk, chunks
+
+
 def keep_system_awake() -> None:
     """Ask Windows not to *idle*-sleep while this measurement runs.
 
@@ -1024,6 +1155,14 @@ def main() -> int:
         "than scoring stale vectors — a silently wrong reuse here is exactly the class of "
         "error this question has already been bitten by four times.",
     )
+    ap.add_argument(
+        "--corpus-cache",
+        default="",
+        help="freeze the walked corpus to a .json.gz on first use and read it thereafter. "
+        "The corpus contains this repository, so without this a single commit during a "
+        "multi-hour run invalidates the vector checkpoint — see `save_corpus_cache`. Delete "
+        "the file to re-walk.",
+    )
     ap.add_argument("--out", default="")
     args = ap.parse_args()
 
@@ -1038,10 +1177,16 @@ def main() -> int:
 
     print(f"{B}corpus{X}")
     t0 = time.perf_counter()
-    docs = load_corpus()
-    chunks: list[Chunk] = []
-    for d in docs:
-        chunks.extend(chunk_doc(d))
+    cached_corpus = load_corpus_cache(args.corpus_cache) if args.corpus_cache else None
+    if cached_corpus is not None:
+        docs, chunks = cached_corpus
+    else:
+        docs = load_corpus()
+        chunks = []
+        for d in docs:
+            chunks.extend(chunk_doc(d))
+        if args.corpus_cache:
+            save_corpus_cache(args.corpus_cache, docs, chunks)
     walk_s = time.perf_counter() - t0
 
     by_kind = Counter(d.kind for d in docs)
@@ -1082,6 +1227,17 @@ def main() -> int:
     ]
     if unreachable:
         print(f"{R}  fixtures whose expected source is not in the corpus: {unreachable}{X}")
+        # Scoring them anyway is the silent-zero the comment above rejects, and it was doing
+        # exactly that: `unreachable` was printed and then every arm was scored over all 38
+        # cases regardless. Two files deleted in another repo on 2026-09-10 would have moved
+        # every number in the table for a reason that has nothing to do with retrieval. The
+        # denominator is part of the measurement, so it is printed too.
+        dropped = set(unreachable)
+        cases = [c for c in cases if c["id"] not in dropped]
+        print(f"{Y}  scoring {len(cases)} reachable fixtures; the {len(dropped)} above are not{X}")
+        print(
+            f"{D}    recall is over {len(cases)}, so this run is not comparable to a 38-case one{X}"
+        )
     else:
         print(f"{G}  all {len(cases)} fixture sources present in the corpus{X}")
 

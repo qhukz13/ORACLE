@@ -918,3 +918,59 @@ button.tt-id:hover { text-decoration: underline; border: none; }
   flex: none;
   padding: 2px 6px;
 }
+
+/* ---------------------------------------------------------------- agent queue (UI.md §8)
+   §8 sketches one line per row. The sidebar is 240–320px, so a row that is bucket + label +
+   status + age + action on one line would truncate the label — the one column that carries
+   what is actually happening. Two lines instead, with the label owning the first: the
+   information is the spec's, the wrapping is not. */
+.queue { list-style: none; margin: 0; padding: 0; }
+.q-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 0 6px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+}
+.q-row:last-child { border-bottom: none; }
+.q-bucket {
+  grid-row: 1;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--fg-2);
+}
+/* The one bucket allowed to demand attention, and it is the same amber the approval card and
+   the command bar use — one colour for "a person has to do something". */
+.q-blocked .q-bucket { color: var(--st-wait); }
+.q-row.bad .q-detail { color: var(--st-err); }
+.q-label {
+  grid-row: 1;
+  grid-column: 2 / span 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-1);
+}
+.q-blocked .q-label { color: var(--st-wait); }
+.q-detail {
+  grid-row: 2;
+  grid-column: 2;
+  font-size: 10px;
+  color: var(--fg-2);
+}
+.q-age {
+  grid-row: 2;
+  grid-column: 3;
+  font-size: 10px;
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}
+.q-act {
+  grid-row: 2;
+  grid-column: 1;
+  justify-self: start;
+  font-size: 10px;
+  padding: 0 4px;
+}
