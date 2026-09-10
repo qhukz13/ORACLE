@@ -38,7 +38,8 @@ A status table nobody re-verifies is a status table that lies with authority.)
 | Task graph, planner, multi-worker supervision | **implemented** (P7 done; P8's code and deterministic acceptance done, one live supervised run outstanding) | `src/oracle/orchestration/`, `tests/test_reference_scenario.py` |
 | Knowledge graph view (UI.md §11b) | **implemented 2026-09-10** — canvas map, retrieval traces, hulls, select-as-context | `apps/desktop/src/components/KnowledgeGraph.tsx`, `src/oracle/rag/graph.py` |
 | Pipelines | **implemented** (P10, 2026-08-26) | `src/oracle/pipelines/` |
-| Mobile, voice, orbit view | **deferred as before** | below |
+| Mobile, voice | **deferred as before** | below |
+| Orbit view | **built and cut 2026-09-10** — failed OQ-14's own test against real data | [ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut) |
 
 **Needs refactor** (narrow, named): `DelegationService` becomes the runner for one task kind
 (P7) · Handoff Packet gains the `TaskSpec` superset (P8) · `AgentCaps` grows into the capability
@@ -108,11 +109,11 @@ parallel executor.
 and its resume pointer lives on the project row. Both before mobile and voice because those are
 *additional clients* of a loop that does not yet close — and because a phone is most useful exactly
 when the desktop is unattended, which is only true once ORACLE keeps running unattended. P12 also
-carries an unblock the capability arc needs: `tasks` is **0 rows**, so P11's orbit, timeline and
-queue all render activity that has never happened, and the first real `continue` run is what
-produces it. The orbit keeps its go/no-go test ([OQ-14](OPEN_QUESTIONS.md#oq-14)) and its old
-reasons; what changes is that it can finally be judged against real data instead of a picture we
-drew ourselves.
+carries an unblock the capability arc needs: `tasks` was **0 rows**, so P11's orbit, timeline and
+queue all rendered activity that had never happened, and the first real `continue` run is what
+produced it. The orbit kept its go/no-go test ([OQ-14](OPEN_QUESTIONS.md#oq-14)) until it could be
+judged against real data instead of a picture we drew ourselves — and then that judgement deleted it
+([ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)).
 
 ---
 
@@ -358,13 +359,21 @@ steps produce identical event shapes. **Risk:** DSL creep — the litmus stands.
 > is built but its acceptance cannot be judged, and the **orbit (2)** and **agent queue** are
 > blocked — all three on the same thing: `tasks` is **0 rows** until P12-T5's approval click.
 > **The only unblocked work left in this phase is notifications.**
+>
+> **Superseded 2026-09-10.** P12-T5's click happened, `tasks` stopped being 0 rows, notifications
+> shipped, the knowledge graph shipped, and the orbit (2) was unblocked, built, measured and **cut**
+> ([ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)). Item 2 below is closed, not pending.
 
 **Goal.** The UI represents the supervisor honestly, and the knowledge becomes visible:
 
 1. The **execution tree** (root → plan → tasks → attempts → events) in the center stage and
    inspector ([UI.md §6b](UI.md#6b-the-execution-tree--phase-11)).
-2. The orbit updated so the core is ORACLE and orbiting nodes are
-   projects/task-groups/agents/collections ([UI.md §3](UI.md#3-the-core-orbital-view--phase-11)).
+2. ~~The orbit updated so the core is ORACLE and orbiting nodes are
+   projects/task-groups/agents/collections.~~ **Done and undone, 2026-09-10:** built exactly as
+   specified, run against live data, and cut for failing
+   [OQ-14](OPEN_QUESTIONS.md#oq-14)'s test
+   ([ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut),
+   [UI.md §3](UI.md#3-the-state-indicator--the-orbital-view-was-cut)).
 3. The **knowledge graph** *(added 2026-08-24 from the owner's design references)* — an
    interactive map of every indexed document across the Obsidian vaults, project docs and PDFs:
    collection-coloured clusters, wikilink and (optional) semantic edges, focus mode, retrieval
@@ -375,8 +384,9 @@ steps produce identical event shapes. **Risk:** DSL creep — the litmus stands.
 4. Timeline, agent queue, global search, notifications as previously specified.
 
 **Why late, still.** Amplifiers, not foundations — and now informed by real multi-agent event
-data. The orbit keeps its go/no-go test (OQ-14) and its deterministic layout (ADR-0013; port
-Asterim's `dagColumns` longest-path ranking for the tree). The knowledge graph opens with the
+data. Scheduling the orbit late is what let its go/no-go test (OQ-14) run against real state rather
+than a mockup, and the test cut it; ADR-0013's deterministic layout survived the cut and moved to the
+map (port Asterim's `dagColumns` longest-path ranking for the tree). The knowledge graph opens with the
 [OQ-22](OPEN_QUESTIONS.md#oq-22) measurements — offline layout cost, canvas-vs-SVG at corpus
 scale, semantic-edge readability — *before* the view is built on them, per sequencing rule 6.
 
@@ -416,7 +426,8 @@ index and could start earlier if the phase is split — it shares no code with t
 > sending 2,820 characters of them. Fixed and pinned.
 >
 > **What remains is one human click.** `tasks` is still 0 rows, so the orbit's go/no-go, the
-> execution tree's acceptance and `TaskTree`'s fixture are all still waiting. One acceptance item
+> execution tree's acceptance and `TaskTree`'s fixture are all still waiting. *(All three landed on
+> 2026-09-10; the orbit's go/no-go came back "no" — [ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut).)* One acceptance item
 > is knowingly outstanding: the intent eval ([OQ-25](OPEN_QUESTIONS.md#oq-25)), which now has its
 > first real evidence — the label routes, the project slot does not.
 

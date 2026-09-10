@@ -6,7 +6,8 @@
  * A registry cannot have per-button rules, which is the point of it.
  *
  * The stage ids are the views that exist, not the four names UI.md §16 was written with
- * (`Orbit / Chat / Timeline / Tasks`): Orbit is P11-T2 and gated on OQ-14. The timeline
+ * (`Orbit / Chat / Timeline / Tasks`): Orbit held a hotkey-less slot here for one day while
+ * OQ-14 was measured against real data, and was cut (ADR-0029). The timeline
  * slot was the flat event table and said "Events" for as long as that was true; since
  * 2026-08-28 evening it is §7's grouped, filterable timeline and the label caught up.
  * §16 is corrected in place alongside this file — a keybinding doc that names views the

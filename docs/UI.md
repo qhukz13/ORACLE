@@ -12,15 +12,16 @@
 ## 1. Visual philosophy
 
 The reference point is a **mission console**: dark, dense, quiet until something needs attention. The
-Jarvis influence is in the *language* — a luminous core, orbiting contexts, status conveyed by light
-— not in the literal chrome. Concretely:
+Jarvis influence is in the *language* — status conveyed by light, calm until it is not — not in the
+literal chrome. (It was once in the chrome too: a luminous core with orbiting contexts. That view was
+built, tested and cut — §3.) Concretely:
 
 | Principle | What it means in practice |
 |---|---|
 | **Every pixel reports state** | If an element doesn't answer a question I actually have, it's deleted. |
 | **Calm by default** | Idle = still and dim. Motion means something happened. An interface that is always animating can't signal anything. |
 | **Density over spaciousness** | This is a tool for someone reading logs and diffs, not a landing page. Tight leading, small type, real information per screen. |
-| **The centre earns its place** | The orbital view ships in P11 with an explicit test: cover every label and you must still be able to say what ORACLE is doing. If it fails, it gets cut. |
+| **The centre earns its place** | Held to it. The orbital view shipped in P11 with an explicit test — cover every label and you must still be able to say what ORACLE is doing — failed it, and was cut ([ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)). The principle costs nothing when it agrees with you. |
 | **Never colour alone** | Every status carries icon + label + colour. Required for accessibility and for glanceability. |
 | **The terminal is first-class** | Not a hidden debug panel. It's where trust is built: I can see the actual commands. |
 
@@ -42,7 +43,7 @@ telemetry · a spinning globe · progress bars that don't map to real progress.
 │ ▾ Projects    │            CENTER STAGE                  │  Task #128        │
 │   ● Asterim   │                                          │  ─────────────    │
 │   ○ SCRAPSHIFT│      ┌──────────────────────────┐        │  status  running  │
-│   ○ GameRecs  │      │  Orbit │ Chat │ Timeline │        │  started 03:41    │
+│   ○ GameRecs  │      │  Chat │ Tasks │ Timeline │        │  started 03:41    │
 │               │      └──────────────────────────┘        │  project Asterim  │
 │ ▾ Tasks    3  │                                          │  agent   claude   │
 │   ▸ Active  1 │         (view switches here)             │                   │
@@ -71,75 +72,102 @@ telemetry · a spinning globe · progress bars that don't map to real progress.
 | Inspector | 300–420 px, resizable | `Ctrl+I` | context-sensitive; auto-opens on selection |
 | Dock | 4 states | `Ctrl+\`` | terminal / logs / problems |
 
-**Center stage is switchable, not fixed.** `Ctrl+1..4` → Orbit · Chat · Timeline · Tasks; from
-Phase 11, `Ctrl+5` → Knowledge graph (§11b). When a
-conversation starts, ORACLE **auto-switches to Chat** and the orbit demotes to a 40 px core indicator
-in the command bar. This is the resolution of "beautiful centrepiece vs. useful interface": the orbit
-is the ambient/idle view, chat is the working view, and the transition is automatic.
+**Center stage is switchable, not fixed.** `Ctrl+1..4` → Chat · Tasks · Timeline · Memory;
+`Ctrl+5` → Knowledge graph (§11b). When a conversation starts, ORACLE **auto-switches to Chat**.
 
-> **As built — P11-T5, 2026-08-28.** The switcher exists (`ViewTabs`, a real tablist with
-> arrow-key roving) over the stages that exist: **Chat · Tasks · Timeline · Memory · Briefing ·
-> Knowledge**, with `Ctrl+1..4` on the first four (§16 has the corrected table and the reason).
-> The auto-switch to Chat on a new conversation is implemented and is the one stage change the
-> app makes for you (§21 rule 6); the briefing's once-only first-paint takeover (§7b) is the
-> documented exception. Orbit still owns a slot when it lands (P11-T2, gated on
-> [OQ-14](OPEN_QUESTIONS.md#oq-14)).
+This paragraph used to end differently. It read: *"the orbit demotes to a 40 px core indicator in the
+command bar… the orbit is the ambient/idle view, chat is the working view"*, and called that the
+resolution of "beautiful centrepiece vs. useful interface". The resolution turned out to be simpler —
+the 40 px core indicator was the whole of what the orbit was worth, so only it remains (§3,
+[ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)).
+
+> **As built — P11-T5, 2026-08-28; orbit slot removed 2026-09-10.** The switcher exists (`ViewTabs`,
+> a real tablist with arrow-key roving) over the stages that exist: **Chat · Tasks · Timeline ·
+> Memory · Briefing · Knowledge**, with `Ctrl+1..4` on the first four (§16 has the corrected table
+> and the reason). The auto-switch to Chat on a new conversation is implemented and is the one stage
+> change the app makes for you (§21 rule 6); the briefing's once-only first-paint takeover (§7b) is
+> the documented exception. Orbit held a seventh, hotkey-less slot for one day while OQ-14 was
+> measured, and no longer does.
 
 ---
 
-## 3. The core (orbital view) — **Phase 11**
+## 3. The state indicator — **the orbital view was cut**
+
+> **The orbit is gone.** It was built at Phase 11, tested against live data on 2026-09-10, and
+> deleted the same day under [ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut). This section
+> used to describe it in loving detail; what follows is what survived, and why the rest did not.
 
 ### What it must communicate
 
-Only these, at a glance, from across the room:
+Unchanged, and still the reason this section exists. Only these, at a glance, from across the room:
 
 1. What is ORACLE doing right now (state)
 2. What is it working on (active context)
 3. Does it need me (waiting for approval)
 4. What went wrong (error)
 
-### The core itself
+### Why the picture lost to the sentence
 
-A ring with a centre pulse. State is encoded by **colour + motion + label**, never colour alone:
+[OQ-14](OPEN_QUESTIONS.md#oq-14) pre-committed the design to a test — *cover every label and you must
+still be able to say what ORACLE is doing* — and the orbit failed it in a way worth writing down,
+because it is a trap any "situational awareness" view can fall into.
 
-| State | Colour | Motion | Centre label |
+It did not fail by being unreadable. With every label covered it still said three true things: a
+state colour, the absence of a pulse, and two red dots. It failed because all three were **already on
+screen in words**, in the chrome drawn around it — `IDLE` in the command bar, `WAITING ON ME  nothing`
+and `ORACLE  ACTIVE  ✗2` in the sidebar. The orbit re-encoded what the frame already said and gave up
+the names and the counts to do it. Question 2 it never answered at all: rings of projects and
+collections show *what exists*, not what is being worked on.
+
+The measurements — a dead size channel, and label overlap at realistic density — are in the ADR.
+
+### The state vocabulary — this part survived
+
+State is encoded by **colour + motion + label**, never colour alone. The orbit's centre was one place
+this was rendered; the command bar was the other, and the command bar is the one that stayed:
+
+| State | Colour | Motion | Label |
 |---|---|---|---|
 | `idle` | slate 600 | still, faint 6 s breath | `IDLE` |
 | `understanding` | cyan 400 | fast inner shimmer | `THINKING` |
 | `retrieving` | cyan 400 | ring sweep | `SEARCHING` |
 | `planning` | blue 400 | segmented ring assembling | `PLANNING` |
-| `awaiting_approval` | **amber 400** | slow 1 s pulse, ring gap | `NEEDS YOU` |
+| `awaiting_approval` | **amber 400** | slow 1 s pulse | `NEEDS YOU` |
 | `executing` | blue 500 | rotating arc, speed ∝ activity | `RUNNING` |
-| `delegating` | violet 400 | outbound particles toward a node | `DELEGATED` |
+| `delegating` | violet 400 | outbound particles | `DELEGATED` |
 | `summarizing` | teal 400 | contracting ring | `WRAPPING UP` |
 | `error` | red 500 | single sharp flash, then static | `ERROR` |
 | `halted` | red 700 | fully static, cross-hatched | `HALTED` |
 
-`awaiting_approval` is the only state permitted to be visually loud. It should be impossible to miss
-and impossible to confuse with `executing`.
+Two rules in that table are load-bearing and are asserted in the command bar's tests:
 
-### Nodes and orbits
+- **`awaiting_approval` is the only state permitted to be visually loud**, and it outranks whatever
+  else is happening. It is the one state where the machine has stopped and is waiting for a person,
+  so showing `RUNNING` over a blocked graph would be a lie of omission.
+- **`halted` and `error` are different words.** One is a policy stop, the other is a failure.
 
-Nodes are contexts: projects, tasks, agents, collections, processes.
+### Where questions 2 and 4 are answered instead
 
-- **Ring = category.** Ring 1 (innermost): active tasks. Ring 2: projects. Ring 3: agents and
-  collections. Ring 4: ambient processes (docker, watchers).
-- **Angle = `hash(node.id)`, deterministic.** Asterim sits at the same angle today and next month.
-  Stability is what makes the view readable; this is why there is no force simulation
-  ([TECH_STACK.md](TECH_STACK.md#visualisation-svg--deterministic-layout-not-a-graph-library)).
-- **Radius = recency/attention** — a node touched in the last minute pulls inward.
-- **Size = magnitude** (task count, index size). **Opacity = staleness.**
-- **Edges appear only during actual data flow**, and fade after 2 s. A permanently drawn graph is
-  wallpaper; an edge that appears when ORACLE reads from Obsidian is information.
+Not by a picture of the state, but by the views that can carry names, counts and times:
 
-Node badge: count (open tasks), state dot, and a one-word status. Hover → tooltip with the last event.
-Click → Inspector. Double-click → focus that context (filters the whole UI to it).
+| Question | Answered by |
+|---|---|
+| what is it doing | command bar state (§2) |
+| what is it working on | **Tasks** — the graph, with objectives and dependencies (§11b) |
+| does it need me | the approval card (§7), plus `WAITING ON ME` in the sidebar (§4) |
+| what went wrong | the failed task's own row and its evidence (§11b) |
 
-### Cost and honesty rules
+### What the deletion did not take with it
 
-- Idle: **< 5% CPU**; animation pauses entirely when the window is unfocused or `prefers-reduced-motion` is set.
-- Rotation is slow — one revolution per 90 s. Fast rotation reads as "busy" and would lie.
-- **No decorative nodes.** If there is nothing orbiting, the ring is empty and that is the honest answer.
+- **The stable-angle layout rule** (ring = category, angle = `hash(node.id)`, radius = recency) was
+  never what failed, and it still governs the knowledge map — where the nodes are *documents*, there
+  are 1420 of them, and position is the only channel that could carry that
+  ([ADR-0013](DECISIONS.md#adr-0013--deterministic-svg-orbit-no-force-simulation),
+  [ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered)).
+- **The honesty rules** below, which apply to every animated surface in the app:
+  - Idle: **< 5% CPU**; animation pauses when the window is unfocused or `prefers-reduced-motion` is set.
+  - **No decorative nodes.** If there is nothing to show, the view is empty and that is the honest answer.
+  - Motion must not imply activity that is not happening.
 
 ---
 
@@ -314,17 +342,19 @@ Rules, inherited and extended:
 - Per-row cancel for anything running; the graph card's approve/deny state mirrors into the
   Confirmation Center like every approval.
 
-In the **orbital view**, a root task is one node on the tasks ring; its workers appear as child
-glyphs while running (`ORACLE → Asterim → Claude·coder / Claude·tester / AGY·review`, the
-replan brief's picture). Selecting any of them opens this tree in the inspector. The orbit still
-answers "what is ORACLE doing"; the tree answers "how, and with what evidence".
+This was written as the *orbital view's* companion: a root task would be one node on the tasks ring,
+its workers child glyphs while running (`ORACLE → Asterim → Claude·coder / Claude·tester / AGY·review`,
+the replan brief's picture), with the orbit answering "what is ORACLE doing" and the tree answering
+"how, and with what evidence". The orbit was cut (§3), so the tree answers both — which is the
+outcome [ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut) argues it was always better placed
+to do, since it can carry the objective and the dependency.
 
 ### What was built  `P7-T3, 2026-08-25` — the list, not the tree
 
 `TaskTree.tsx` is the *plain* version of the above: a list per graph, with dependencies, status,
-and a cancel button per stoppable row. The orbital view, the longest-path layout and the
-superseded-attempt lineage stay Phase 11; this exists because until it did, a running graph was
-visible only by reading the `tasks` table by hand.
+and a cancel button per stoppable row. The longest-path layout and the superseded-attempt lineage
+stay Phase 11; the orbital view is not coming (§3). This exists because until it did, a running graph
+was visible only by reading the `tasks` table by hand.
 
 Three of the rules above are already load-bearing and are enforced by tests, not by intention:
 
@@ -350,8 +380,9 @@ Two of the deferred pieces above have since landed: the **longest-path column as
 collapsed under its replacement. And the tree moved **into its own Tasks stage** (`Ctrl+2`) with a
 stated empty state, instead of sitting above every view — which had been invisible in practice
 only because `tasks` has been 0 rows. Task rows now also participate in the app-wide selection:
-clicking a task id opens it in the inspector's task branch (§6). The orbital drawing and OQ-14's
-go/no-go remain where they were — waiting on the first real graph.
+clicking a task id opens it in the inspector's task branch (§6). OQ-14's go/no-go was run on
+2026-09-10 against exactly this data and the orbital drawing lost to it
+([ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)).
 
 ## 7. Activity timeline
 
@@ -630,8 +661,9 @@ Backed by hybrid retrieval (P5) for notes/files and direct queries for the rest.
 
 ### What it must answer
 
-The graph earns its place the same way the orbit does — by answering questions the list view
-cannot. The four it exists for:
+The graph earns its place the same way the orbit was asked to — by answering questions the list view
+cannot. The orbit could not, and was cut (§3); this one is held to the same standard. The four
+questions it exists for:
 
 1. **Shape** — how is my knowledge actually organised? Where are the hubs and the clusters?
 2. **Neglect** — what is orphaned, stale, or was never indexed?
@@ -639,8 +671,9 @@ cannot. The four it exists for:
 4. **Use** — what did ORACLE just retrieve to answer me, and from where?
 
 If, after real use, it answers none of these better than search does, it gets cut and an ADR
-records that — the same honesty gate as the orbit ([OQ-14](OPEN_QUESTIONS.md#oq-14) applies to
-both, per view).
+records that — the same honesty gate as the orbit's, which was applied and did cut it
+([OQ-14](OPEN_QUESTIONS.md#oq-14) → [ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)).
+The gate is not decorative; it has a body count of one.
 
 **Struck from question 1: "the bridges between a vault and a project".**  `MEASURED 2026-08-26`
 Across every edge configuration measured for [OQ-22](OPEN_QUESTIONS.md#oq-22) — every `k`, every
@@ -664,7 +697,7 @@ between a graph and a scatter of dots.
 
 | Element | Source | Encoding |
 |---|---|---|
-| **Node = document** | `knowledge.db` documents (~1,330 today; design ceiling 10k) | colour = **collection** (each vault/project/doc-set gets a stable token-derived hue) · size = link degree · opacity = staleness (same semantics as the orbit) |
+| **Node = document** | `knowledge.db` documents (~1,330 today; design ceiling 10k) | colour = **collection** (each vault/project/doc-set gets a stable token-derived hue) · size = link degree · opacity = staleness |
 | **Explicit edge** | the `links` table (`[[wikilinks]]`, already extracted at index time) | solid, dim by default |
 | **Semantic edge** | k-nearest-neighbour over document embeddings, thresholded, capped per node — computed offline with the index, never live | fainter, dashed; **on by default** at k=4 / thr=0.85, with the knob exposed over the useful 0.80–0.90 band (`MEASURED 2026-08-26`, see above — off by default is a scatter of dots on this corpus). Inferred similarity is still a suggestion: that is discharged by the *encoding*, not by absence |
 | **Retrieval edge** | episodic: documents co-cited in one answer (event log) | appears only in trace mode, below |
@@ -784,7 +817,7 @@ the full corpus within the incremental-index budget · first paint < 1 s from ca
 
 ### Accessibility
 
-The orbit's rule, unchanged: **a full list-view equivalent**, not alt text — a searchable,
+The rule written for the orbit, which outlived it: **a full list-view equivalent**, not alt text — a searchable,
 sortable table (document · collection · in/out links · modified · staleness) with the same
 filters and the same actions, toggled by a control and default for screen readers. Focus mode's
 neighbourhood is enumerable from the inspector as a list. Colour never carries meaning alone:
@@ -896,7 +929,7 @@ under even that on `--bg-2` and `--bg-3`, which are exactly the surfaces cards a
 | `--m-quick` | 160 ms | ease-out | panels, tooltips |
 | `--m-normal` | 240 ms | ease-in-out | view transitions |
 | `--m-slow` | 400 ms | ease-in-out | dock resize |
-| `--m-ambient` | 90 s | linear | orbit rotation |
+| `--m-ambient` | 90 s | linear | *(unused — this was the orbit's rotation; §3)* |
 
 Rules: motion communicates causality (a new node animates *from* the thing that created it) · nothing
 loops except the core state indicator · **`prefers-reduced-motion` disables all ambient motion and
@@ -928,14 +961,15 @@ hotkey so it works when the window isn't focused — which is exactly when I'd n
 
 > **`Ctrl+1..4`, corrected 2026-08-28 (P11-T5).** This table originally read
 > `Orbit / Chat / Timeline / Tasks`, written before Memory and the Briefing existed as views.
-> Orbit still cannot be bound — it is P11-T2, gated on [OQ-14](OPEN_QUESTIONS.md#oq-14) — so
+> Orbit could not be bound — it was P11-T2, gated on [OQ-14](OPEN_QUESTIONS.md#oq-14), and that
+> gate cut it ([ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)) — so
 > the keys bind to the four primary stages that exist:
 > **1 Chat · 2 Tasks · 3 Timeline · 4 Memory**. (For a few hours that third tab said
 > **Events**, because the timeline slot held only a flat event table and labelling it Timeline
 > would have claimed a view that was not there; §7's grouped timeline was built the same
 > evening and the label caught up.) Briefing and Knowledge are tabs without digits — the
-> briefing has its own arrival affordance (§7b) and index health is a maintenance view. When
-> Orbit lands it takes a digit and this table changes again, with the date attached.
+> briefing has its own arrival affordance (§7b) and index health is a maintenance view. Orbit
+> never took a digit; it took a hotkey-less seventh tab for one day and then was deleted.
 > The AltGr guard matters: `Ctrl+Alt+digit` types characters on some layouts, so the binding
 > requires Alt **up**.
 
@@ -966,8 +1000,12 @@ Non-negotiable, and cheap if done from P4 rather than retrofitted.
 - Semantic landmarks (`banner`, `navigation`, `main`, `complementary`, `contentinfo`).
 - `aria-live="polite"` for agent state changes; `aria-live="assertive"` **only** for approval requests
   and errors.
-- **The orbit has a full list-view equivalent**, not a token alt-text — same data, same actions,
-  toggled by a control and used automatically by screen readers.
+- **Every visualisation has a full list-view equivalent**, not a token alt-text — same data, same
+  actions, toggled by a control and used automatically by screen readers. (Written for the orbit;
+  it now binds the knowledge graph, §11b. Worth noting what the orbit's own test found here: with
+  labels covered it still had colour and motion, and a screen-reader user has neither — so its
+  accessible name had to carry the whole state anyway, which is a hint that the words were doing
+  the work.)
 - xterm.js screen-reader mode available behind a setting.
 - All status conveyed redundantly (icon + text + colour).
 - `prefers-reduced-motion` and `prefers-contrast` respected.
@@ -985,7 +1023,7 @@ One codebase, three layouts. Breakpoints are about *available space*, not device
 | ≥ 1600 | Full: sidebar + center + inspector + dock |
 | 1200–1600 | Inspector becomes an overlay drawer |
 | 900–1200 | Sidebar collapses to icon rail; dock overlays |
-| < 900 (mobile) | Single column, bottom tab bar: **Chat · Tasks · Approvals · System**. No orbit, no terminal input (read-only log view). See [MOBILE.md](MOBILE.md). |
+| < 900 (mobile) | Single column, bottom tab bar: **Chat · Tasks · Approvals · System**. No terminal input (read-only log view). See [MOBILE.md](MOBILE.md). |
 
 Mobile is not a shrunken desktop: it is the *approve, observe, ask* subset. Composing a complex plan
 on a phone is not a use case; approving one at a bus stop is — and even then, T3 is desktop-only.
@@ -1003,7 +1041,6 @@ AppShell
 │   └── TreeSection ×4 (Projects · Tasks · Agents · Knowledge) → TreeNode
 ├── CenterStage
 │   ├── ViewTabs
-│   ├── OrbitView      → CoreVisual · OrbitRing ×4 → OrbitNode · FlowEdge   [P11]
 │   ├── ExecutionTree  → TaskNode (tree) · AttemptRow · EvidenceLink        [P11]
 │   ├── KnowledgeGraph → GraphCanvas · FocusRing · CollectionHull           [P11]
 │   │                    · GraphListView (a11y equivalent) · TraceOverlay
@@ -1021,8 +1058,8 @@ AppShell
 
 > **As built — P11-T5, 2026-08-28.** `ViewTabs` ships as drawn; the stages behind it are the
 > ones that exist (Chat · Tasks · Timeline · Memory · Briefing · Knowledge — two of which are
-> views this chart predates), and `CenterStage` as a component is folded into the app shell
-> until Orbit gives it a second consumer. `TimelineView` shipped the same evening
+> views this chart predates), and `CenterStage` as a component is folded into the app shell.
+> `OrbitView` was on this chart and is not any more (§3). `TimelineView` shipped the same evening
 > (`components/Timeline.tsx`, §7). `TasksView` is `TaskTree` in its own stage;
 > `KnowledgeHealth` (index health, not the §11b graph) is mounted as the Knowledge stage; the
 > inspector's task branch is the first slice of `TaskInspector`. Approvals and delegations stay

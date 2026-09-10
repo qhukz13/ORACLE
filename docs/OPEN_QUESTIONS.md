@@ -25,7 +25,7 @@ doc, delete the marker.
 | [OQ-11](#oq-11) | Does the Tauri sidecar die with the shell? | ~~`TO VERIFY`~~ | Phase 0 | **RESOLVED 2026-08-21 — yes, via Job Object** |
 | [OQ-12](#oq-12) | Is taint escalation tolerable in daily use? | `ASSUMPTION` | Phase 5+ tuning | open |
 | [OQ-13](#oq-13) | What approval rate causes prompt fatigue? | `ASSUMPTION` | Phase 3+ tuning | open |
-| [OQ-14](#oq-14) | Does the orbital view earn its place? | `UNKNOWN` | Phase 11 go/no-go | open |
+| [OQ-14](#oq-14) | Does the orbital view earn its place? | `CUT` | [ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut) | resolved |
 | [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | `EXPERIMENT NEEDED` | UX quality, not a phase | open |
 | [OQ-16](#oq-16) | Does `connect_read_pipe` work anywhere on Windows? | `UNKNOWN` | none — worked around | monitoring |
 | [OQ-17](#oq-17) | Is a ~43 min **cold** reindex acceptable? | `ASSUMPTION` | Phase 5 tuning | narrowed 2026-08-22 — warm rebuilds are 37 s |
@@ -474,15 +474,24 @@ should move to "auto + undo" instead.
 ---
 
 ### OQ-14
-**Does the orbital view earn its place?** `UNKNOWN` · Phase 11 go/no-go
+**Does the orbital view earn its place?** `CUT` · resolved 2026-09-10 by
+[ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)
 
-The design commits to a test rather than to the feature: cover every label and it must still be
-possible to say what ORACLE is doing
-([UI.md §3](UI.md#3-the-core-orbital-view--phase-11), [ROADMAP P11](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc)).
+**No.** It was built minimally, run against live data, and cut the same day.
 
-**Resolve at Phase 11.** If it fails, delete it and record an ADR saying so. Deleting a centrepiece
-that does not work is a success, not a failure — and deciding this *after* months of real event data
-is exactly why it is scheduled late.
+The test was: cover every label and you must still be able to say what ORACLE is doing. With the
+labels covered the view still carried three facts — a state colour, the absence of a pulse, and two
+red dots. All three were, at that same moment, written in words in the chrome around it: `IDLE` in
+the command bar, `WAITING ON ME  nothing` and `ORACLE  ACTIVE  ✗2` in the sidebar. The fourth
+question, *what is it working on*, it never answered: it shows what exists, not what is being worked
+on.
+
+Two supporting measurements are in the ADR — the size channel is dead when task counts and document
+counts share one scale (radii came out `3.2, 3.7, 5.8, 11px` at live data), and at 14 nodes the
+positions hold but 14 of 91 label pairs overlap.
+
+ADR-0013's stable-angle layout was not what failed, and it still governs the knowledge map. What
+failed was the premise that a picture of the state beats the sentence next to it.
 
 ---
 

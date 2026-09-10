@@ -1,9 +1,12 @@
 /**
  * The app shell — docs/UI.md#2-layout.
  *
- * Command bar, workspace sidebar, centre stage, dock. Deliberately NOT the orbital
- * view: that is Phase 9, and building the decorative centrepiece before the functional
- * shell is the classic way this kind of project dies at 80%.
+ * Command bar, workspace sidebar, centre stage, dock. This deliberately went first and the
+ * orbital centrepiece went last, on the theory that building the decorative centre before the
+ * functional shell is the classic way this kind of project dies at 80%. The orbit did eventually
+ * get built, failed OQ-14's test against real data, and was deleted (ADR-0029) — so the shell is
+ * all there ever was, and the state it shows in words is what the orbit was going to show in
+ * colour.
  *
  * Everything rendered here comes from the event stream. There is no optimistic
  * mutation and no local truth — most importantly for approvals, where clicking
@@ -55,8 +58,7 @@ const STATE_LABEL: Record<string, string> = {
  *  turn-only selector is exactly the bug a second selection model produces. */
 type Selection = { kind: "turn" | "task"; id: string } | null;
 
-/** Ctrl+digit → stage, for the four primary views (docs/UI.md §16, corrected in place:
- *  Orbit takes a slot when it exists — it is P11-T2, gated on OQ-14). */
+/** Ctrl+digit → stage, for the four primary views (docs/UI.md §16, corrected in place). */
 const STAGE_KEYS: Record<string, Stage> = {
   "1": "chat",
   "2": "tasks",

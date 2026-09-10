@@ -221,9 +221,14 @@ Everything the supervisor arc ships — task graphs, planning, replanning, verif
 exercised **by tests and fixtures only**.
 
 This bears directly on the vision, because the vision's payload is *visualisation of activity*: the
-orbit, the execution tree, the timeline and the briefing all render supervisor activity that has
-never happened. Building them first would mean judging them against a picture we drew ourselves —
-which is the explicit reason [OQ-14](OPEN_QUESTIONS.md#oq-14) is still open.
+orbit, the execution tree, the timeline and the briefing all render supervisor activity that had
+never happened. Building them first would have meant judging them against a picture we drew
+ourselves — which is the explicit reason [OQ-14](OPEN_QUESTIONS.md#oq-14) waited for real data.
+
+It waited, the data arrived, and the first thing it did was delete the picture on the cover
+([ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)). That is the discipline working, not
+failing: the vision's claim was never "there is an orbit", it was "you can see what it is doing",
+and the orbit turned out to be the least informative way of saying so.
 
 **The vision's own first milestone is the fix.** "Continue Asterim" — resolve, read state, plan,
 dispatch one worker, verify, report — is exactly the run that populates `tasks` with real evidence,

@@ -19,7 +19,7 @@ Format per record: Decision · Context · Options · Chosen · Why · Trade-offs
 | [0010](#adr-0010--event-sourced-runtime) | Event-sourced runtime | accepted |
 | [0011](#adr-0011--deterministic-pre-router-before-the-model) | Deterministic pre-router before the model | accepted |
 | [0012](#adr-0012--git-worktree-delegation-with-a-vendor-neutral-fallback) | Git-worktree delegation with a vendor-neutral fallback | accepted |
-| [0013](#adr-0013--deterministic-svg-orbit-no-force-simulation) | Deterministic SVG orbit, no force simulation | accepted |
+| [0013](#adr-0013--deterministic-svg-orbit-no-force-simulation) | Deterministic SVG orbit, no force simulation | **scoped** — the orbit itself was cut ([0029](#adr-0029--the-orbital-view-is-cut)); the layout rule governs the knowledge map |
 | [0014](#adr-0014--embeddings-on-cpu-gpu-reserved-for-the-router) | Embeddings on CPU, GPU reserved for the router | accepted |
 | [0015](#adr-0015--intent-shaped-tools-no-general-shell) | Intent-shaped tools, no general shell | accepted |
 | [0016](#adr-0016--mvp-excludes-the-interesting-parts) | MVP excludes the interesting parts | accepted |
@@ -385,6 +385,14 @@ CSS variables and accessible via the DOM, which WebGL forfeits.
 **Consequences.** `d3-scale`/`d3-shape` as pure maths helpers only; no `d3-selection`. The orbit ships
 at Phase 11 with an explicit test: **cover every label and you must still be able to say what ORACLE is
 doing.** If it fails, it gets cut, and that outcome is recorded as an ADR rather than quietly ignored.
+
+> **Outcome, 2026-09-10.** It failed and it was cut
+> ([ADR-0029](#adr-0029--the-orbital-view-is-cut)). The *layout* decision above was not what failed —
+> the measurement confirmed the stable angle does its job, with no node collisions at realistic
+> density — and it still governs the knowledge map
+> ([ADR-0023](#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered)). What failed
+> was the premise that the picture beats the sentence beside it. This ADR stays accepted, scoped to
+> the map.
 
 ---
 
@@ -766,7 +774,8 @@ is discharged by *encoding* (fainter, dashed) rather than by absence. Recorded i
 [UI.md §11b](UI.md#11b-the-knowledge-graph--phase-11) and
 [the dev log](../logs/development/2026-08-26-oq22-knowledge-graph.md); this ADR had gone two weeks
 still telling a reader the opposite. The view inherits the orbit's go/no-go honesty gate: if it does not answer
-questions the list cannot, it is cut, and that outcome gets an ADR.
+questions the list cannot, it is cut, and that outcome gets an ADR. The gate is not ceremonial —
+applied to the orbit itself, it cut it ([ADR-0029](#adr-0029--the-orbital-view-is-cut)).
 
 ---
 
@@ -1057,3 +1066,65 @@ time:
 **Consequences.** P12's Definition of Done becomes achievable as written. The 180-second TTL keeps
 its original meaning for the case it was written for, and `DEFAULT_TTL_S`'s comment now says which
 case that is.
+
+---
+
+## ADR-0029 — The orbital view is cut
+
+**Context.** [ADR-0013](#adr-0013--deterministic-svg-orbit-no-force-simulation) chose a deterministic
+SVG orbit for the centrepiece and, unusually, pre-committed to a test rather than to the feature —
+[OQ-14](OPEN_QUESTIONS.md#oq-14): *cover every label and you must still be able to say what ORACLE is
+doing; if it fails, delete it and record an ADR saying so.* It was built minimally at Phase 11 and
+run against live data on 2026-09-10.
+
+**Options.** (a) Keep it. (b) Keep it but demote it to an ambient/idle screen. (c) Cut it.
+
+**Chosen.** (c) — cut. `Orbit.tsx`, `graph/orbit.ts`, their tests, styles and the `orbit` stage are
+deleted. ADR-0013's layout reasoning survives in the knowledge map, which uses the same stable-angle
+principle for a job that needs it.
+
+**Why.** It failed its own test, and it failed it in a specific way: *what survives the labels being
+covered is already on screen in words.* Measured with the view open on real data — one tracked
+project, two failed tasks, two collections:
+
+| §3's question | what the orbit says with labels covered | what the surrounding chrome said at that moment |
+|---|---|---|
+| what is it doing | core fill `--st-idle` | `IDLE`, in the command bar |
+| does it need me | no pulse | `WAITING ON ME  nothing`, in the sidebar |
+| what went wrong | two small `--st-err` dots | `ORACLE  ACTIVE  ✗2`, in the sidebar |
+| what is it working on | three dots in rings 2–3 | — the orbit shows *what exists*, not what is being worked on |
+
+Three of the four questions were answered in words, permanently, by the frame drawn *around* the
+orbit. The orbit re-encoded them as colour and gave up the names and counts to do it. The fourth it
+does not answer at all: a project with zero open tasks and a 1412-document collection are not things
+ORACLE is working on, they are things that exist.
+
+Two further measurements, because "it would be better at scale" is the obvious defence:
+
+- **The size channel is dead.** Magnitude is shared between task counts and document counts, so at
+  live data the radii were `3.2px, 3.7px, 5.8px, 11px` — the collection with 1412 documents took the
+  whole scale and every task and project collapsed onto the floor. Splitting the scale per ring would
+  fix it and would also mean node size no longer compares across rings, which was its only reason to
+  exist.
+- **Position holds up; labels do not.** At a realistic 14 nodes (an 11-task graph plus a project plus
+  two collections) no two nodes collide — closest pair 9.1px for 6px nodes, so the hash angle does its
+  job. But 14 of 91 label pairs overlap and one label runs off the canvas, because `place()` has no
+  collision avoidance. An earlier draft of this ADR claimed the label layer *collapses* at that
+  density; it was measured instead of assumed, and 15% of pairs is degradation, not collapse. The
+  distinction does not change the outcome, and the number is recorded rather than the adjective.
+
+Option (b) was the tempting one — it is a nice picture and an idle screen asks less of it. It was
+rejected because an ambient view that must be *decoded* is worse than a sentence, and because keeping
+it would mean maintaining a second rendering of the state vocabulary that the command bar already
+renders. Two places to update when a state is added is how the `dependsOn` defect happened.
+
+**Trade-offs.** UI.md §3 loses the centrepiece it was written around, and §3 is the section a reader
+is most likely to have formed a picture from. That is the cost of pre-committing to a test: the
+picture was never the deliverable, and the section is rewritten to say what replaced it.
+
+**Consequences.** OQ-14 resolves `CUT`. The stage list loses `orbit`; no hotkey is freed because it
+never had one. `d3-scale`/`d3-shape` are now unreferenced by the app. The state vocabulary
+(`NEEDS YOU` outranking everything, `HALTED` distinct from `ERROR`) was the genuinely load-bearing
+part of the work and lives on in the command bar, which is where it was already being read from.
+ADR-0013's stable-angle argument is upheld by the measurement above and still governs the knowledge
+map ([ADR-0023](#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered)).

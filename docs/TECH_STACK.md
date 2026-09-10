@@ -324,7 +324,7 @@ See [ADR-0007](DECISIONS.md#adr-0007--clients-are-peers-of-one-local-api).
 | **Zustand + a WS event reducer** | Nearly all state is server-pushed events; a single event-sourced store mirrors the backend exactly | Redux Toolkit (ceremony), TanStack Query (built for request/response, not push) |
 | **Radix primitives** | Accessible dialog/menu/tooltip behaviour we would otherwise get wrong | MUI/AntD (opinionated visuals fight the design), hand-rolled (a11y bugs) |
 | **xterm.js** | The only serious web terminal | — |
-| **Hand-written SVG for the orbital view** | see below | — |
+| **Hand-written SVG for the orbital view** | see below — the orbital view was cut ([ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)); the reasoning carried over to the knowledge map, which is canvas ([ADR-0023](DECISIONS.md#adr-0023--the-knowledge-graph-is-simulated-then-frozen-canvas-rendered)) | — |
 
 ### Visualisation: SVG + deterministic layout, not a graph library
 

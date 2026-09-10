@@ -366,9 +366,10 @@ The sidebar mock in [UI.md §4](UI.md#4-sidebar) already draws it:
   - Asterim          2 tasks  branch main +3
 ```
 
-Every number in that line comes from this document. The execution tree, the orbit, the timeline and
-the agent queue are all *renderings of state*, and three of the four are currently blocked on the
-fact that no state has ever been produced ([current_state.md §11](current_state.md)).
+Every number in that line comes from this document. The execution tree, the timeline and the agent
+queue are all *renderings of state* — as was the orbit, until it was measured against real state and
+cut ([ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)), which is the outcome this section's
+argument was always open to.
 
 Building the views first produces components that are green against fixtures and dead against the
 running app — which has already happened once, to `TaskTree`, whose `after {deps}` line rendered a

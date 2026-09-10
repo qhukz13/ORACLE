@@ -113,7 +113,7 @@ Regressions here are silent and cumulative, so they are asserted:
 | Incremental index, one file | < 5 s |
 | WS event fan-out | < 20 ms |
 | Global search | ~~p95 < 300 ms~~ — **not reachable as written; measured 504–1,467 ms warm.** See the note below |
-| Orbit view, idle | < 5% CPU |
+| ~~Orbit view, idle~~ | ~~< 5% CPU~~ — the orbit was cut ([ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)). The budget still binds any animated surface. |
 | Knowledge-graph layout, cold (1.4k docs) | < 10 min — **measured 27.8 s** offline, **34 s** in the daemon (1,455 docs / 3,737 edges, 2026-09-09) |
 | Knowledge-graph document-vector backfill, one-time | no budget — **measured 88 s** (1,455 docs); paid once, then `store.put()` maintains it |
 | Knowledge-graph layout, peak RSS | < 500 MB — **measured 121 MB** |

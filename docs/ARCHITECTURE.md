@@ -370,4 +370,4 @@ tests/             46 files, ~558 tests; tests/security/ is the merge gate
 | **ExecutionPlan** | The planner's structured output: tasks, roles, dependencies. Data, validated before use; never authority ([PLANNER.md](PLANNER.md)). |
 | **Role** | A named job with an expected output shape (`coder`, `reviewer`, `planner`, …), held by an agent per the capability registry. |
 | **Egress preview** | The exact payload leaving the machine, shown before it leaves. |
-| **Node** | A UI object in the orbital view: a project, task, agent, collection or process. |
+| **Node** | A UI object in a visualisation. In the knowledge map (the only one left) a node is a document; in the orbital view, which was cut ([ADR-0029](DECISIONS.md#adr-0029--the-orbital-view-is-cut)), it was a project, task, agent, collection or process. |

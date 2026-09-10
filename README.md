@@ -47,7 +47,9 @@ a real ConPTY inside a Job Object that the HALT key can kill.
 
 What is not there yet: **a persistent notion of a project** (a project is still a directory name —
 [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md)), **residency** (nothing starts ORACLE at boot, and
-nothing tells you what happened overnight), the knowledge-graph and orbital views, mobile, and voice.
+nothing tells you what happened overnight), the knowledge-graph view, mobile, and voice. The orbital
+view is not on that list: it was built, measured against real data and deleted
+([ADR-0029](docs/DECISIONS.md#adr-0029--the-orbital-view-is-cut)).
 
 And the caveat that outranks the others: **the supervisor arc has never run for real.** `tasks` is
 0 rows and `memory_facts` is 0 rows — everything Phases 7–9 ship is exercised by tests and fixtures

@@ -105,8 +105,10 @@ from an invented string.
 
 ## 3. State machine
 
-The runtime's states are exactly what the UI renders in the core visualisation — one vocabulary, no
-translation layer. See [UI.md](UI.md#3-the-core-orbital-view--phase-11).
+The runtime's states are exactly what the UI renders in the command bar — one vocabulary, no
+translation layer. See [UI.md §3](UI.md#3-the-state-indicator--the-orbital-view-was-cut). (That
+section used to describe an orbital core rendering the same vocabulary; the orbit was cut, the
+vocabulary was not — it was the part that turned out to be load-bearing.)
 
 ```
         ┌──────────────────────── halted ◀──── HALT (from any state)
