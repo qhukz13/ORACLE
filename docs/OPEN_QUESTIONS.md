@@ -21,7 +21,7 @@ doc, delete the marker.
 | [OQ-07](#oq-07) | Is the memory subsystem dual- or quad-channel? | **RESOLVED 2026-09-10** | CPU-fallback planning | **Dual — 2 DIMMs in B1/D1, 2 of 4 channels. The CPU fallback is ~half the bandwidth the design assumed; two slots are free** |
 | [OQ-08](#oq-08) | Does FTS5 `unicode61` handle Russian acceptably? | ~~`TO VERIFY`~~ | Phase 5 | **RESOLVED 2026-08-22 — yes; no stemmer, no camelCase split** |
 | [OQ-09](#oq-09) | `pywinpty` on Python 3.12 + ConPTY behaviour | ~~`TO VERIFY`~~ | Phase 3 | **RESOLVED 2026-08-21 — works; readiness must be measured, not slept** |
-| [OQ-10](#oq-10) | Is there a text-only Qwen3.5 quant? | `TO VERIFY` | Phase 1 | open |
+| [OQ-10](#oq-10) | Is there a text-only Qwen3.5 quant? | **RESOLVED 2026-09-10** | Phase 1 | **No — all 64 Ollama tags are multimodal. The tower is real but only ~10% (~86 MB) of the 0.8b router, not the "several hundred MB" assumed** |
 | [OQ-11](#oq-11) | Does the Tauri sidecar die with the shell? | ~~`TO VERIFY`~~ | Phase 0 | **RESOLVED 2026-08-21 — yes, via Job Object; the *question* superseded 2026-09-10 by [ADR-0030](DECISIONS.md#adr-0030--the-shell-attaches-to-a-resident-daemon-and-only-owns-one-it-started)** |
 | [OQ-12](#oq-12) | Is taint escalation tolerable in daily use? | `ASSUMPTION` | Phase 5+ tuning | open |
 | [OQ-13](#oq-13) | What approval rate causes prompt fatigue? | `ASSUMPTION` | Phase 3+ tuning | open |
@@ -428,15 +428,40 @@ looks alive while quietly ignoring you.
 ---
 
 ### OQ-10
-**Is there a text-only Qwen3.5 quant?** `TO VERIFY` · affects **Phase 1**
+**Is there a text-only Qwen3.5 quant?**
+**RESOLVED 2026-09-10 — no, and for the model ORACLE actually runs the prize is far smaller than
+this question assumed.**
 
-Published Ollama sizes (`2b` = 2.7 GB, `4b` = 3.4 GB) are larger than a text-only model of that
-parameter count implies, because the family is multimodal and the tags include a vision tower. ORACLE
-needs no vision. A text-only build could free several hundred MB of VRAM — which at 3.5 GB usable is
-the difference between 8k and 16k context.
+**The premise was right.** The router model carries a vision tower it will never use, confirmed
+from its own metadata rather than inferred from the download size:
 
-**Check.** Look for text-only tags in the Ollama library; failing that, evaluate a text-only GGUF from
-the community or build one. Fold into [OQ-01](#oq-01).
+```
+qwen3.5:0.8b   capabilities: ['completion', 'vision', 'tools', 'thinking']
+               text    24 blocks x 1024
+               vision  12 blocks x  768   -> ~86M params
+qwen3.5:2b     text    24 blocks x 2048
+               vision  24 blocks x 1024   -> ~303M params
+```
+
+**The magnitude was not.** This question estimated "several hundred MB" freed. That holds for `2b`
+(~303M params, ~13% of 2.3B) and is roughly **ten times too high for `0.8b`**, which is the model
+the router actually uses: ~86M of 873M, about **10%** — call it 86 MB at Q8_0 against a 1,036 MB
+file, with 1,109 MB resident in VRAM.
+
+**And there is nothing to switch to.** All **64** tags in the Ollama library — every size, every
+quantisation, every MLX and NVFP4 hardware variant — accept "Text, Image input". There is no
+text-only, no-vision or base-text tag anywhere in the family (checked 2026-09-10).
+
+**So the remaining path is the fallback this question already named:** a community text-only GGUF,
+or building one. For ~86 MB on the model in use, that is a poor trade — it buys a fraction of what
+a smaller quantisation would, at the cost of leaving the tags ORACLE's own preflight checks.
+Revisit only if the router moves up to `2b` or larger, where ~300 MB starts to matter against
+3.5 GB of usable VRAM.
+
+> Worth noting what this does *not* claim. Whether 86 MB is "the difference between 8k and 16k
+> context" was not measured — that depends on the KV-cache geometry, not the tower — so the
+> original framing is neither confirmed nor denied, only made irrelevant by the absence of any
+> text-only build to compare against.
 
 ---
 
