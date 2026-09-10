@@ -32,6 +32,7 @@ import { GraphCard } from "./components/GraphCard";
 import { Inspector } from "./components/Inspector";
 import { KnowledgeGraph } from "./components/KnowledgeGraph";
 import { KnowledgeHealth } from "./components/KnowledgeHealth";
+import { Notifications } from "./components/Notifications";
 import { MemoryView } from "./components/MemoryView";
 import { PipelineCard } from "./components/PipelineCard";
 import { ProjectList, toProjects } from "./components/ProjectList";
@@ -329,6 +330,39 @@ describe("no serious or critical accessibility violations", () => {
           failures: [],
         }}
         onReindex={() => {}}
+      />,
+    );
+    expect(await violations(container)).toEqual([]);
+  });
+
+  it("notifications", async () => {
+    // A live region that steals focus is worse than no notification: the Confirmation Center is
+    // where an approval gets decided, and yanking focus mid-sentence is how people approve by
+    // accident. `role="log"` + `aria-live="polite"` announces without interrupting.
+    const { container } = render(
+      <Notifications
+        events={[
+          {
+            v: 1,
+            seq: 1,
+            ts: "2026-09-10T10:00:00Z",
+            type: "task.finished",
+            trace_id: "tr_1",
+            payload: { source: "graph", status: "failed", summary: "3 tests red" },
+          },
+        ] as never}
+        approvals={
+          [
+            {
+              approvalId: "ap_1",
+              tool: "fs.write",
+              tier: "T2",
+              decision: "confirm",
+              rule: "outside the workspace",
+            },
+          ] as never
+        }
+        onOpen={() => {}}
       />,
     );
     expect(await violations(container)).toEqual([]);

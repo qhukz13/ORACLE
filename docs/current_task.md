@@ -122,8 +122,11 @@ verified against the real corpus at 1,564 documents / 3,465 edges.
   unenforced because nothing schedules anything.
 - **The visual references for the UI vision were never attached**; UI.md §1/§14/§15 remain
   `TO VERIFY` against them.
-- **P11 remainder beyond the graph:** T2 orbit (blocked on OQ-14 → blocked on the click above) · the
-  agent queue (needs live task data) · notifications.
+- **P11 remainder beyond the graph:** T2 orbit (blocked on OQ-14 → blocked on the click above) ·
+  the agent queue (needs live task data). ~~Notifications~~ **built 2026-09-10** (UI.md §12) —
+  ⚠ not yet seen firing on a real event: task toasts need `tasks` to be non-zero and an approval
+  toast needs a live T2 call. 12 component tests plus the axe audit; the live trigger is
+  outstanding. **With that, Phase 11 has no unblocked work left.**
 - The fossil `phase6-integration` branch can be deleted at leisure.
 
 ## Operational notes

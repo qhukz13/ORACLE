@@ -20,6 +20,8 @@ import { Briefing, toBriefing } from "./components/Briefing";
 import type { BriefingData } from "./components/Briefing";
 import { ProjectList, toObservation, toProjects } from "./components/ProjectList";
 import type { Observation, ProjectRow, ProjectsData } from "./components/ProjectList";
+import { Notifications } from "./components/Notifications";
+import type { Toast } from "./components/Notifications";
 import { MemoryView, toFacts } from "./components/MemoryView";
 import type { MemoryFact } from "./components/MemoryView";
 import { KnowledgeGraph, toTraces } from "./components/KnowledgeGraph";
@@ -571,6 +573,16 @@ export default function App() {
           </nav>
         )}
 
+        {/* UI.md §12. Outside the stage so a toast is not clipped by a view's overflow, and
+            so switching stages never loses one. */}
+        <Notifications
+          events={s.events}
+          approvals={s.approvals}
+          onOpen={(t: Toast) => {
+            if (t.kind === "approval") setInspector(false);
+            else setStage("tasks");
+          }}
+        />
         <main className="stage">
           {/* The safety surface is not a tab. Approvals and running delegations stay
               visible on every stage — a card that can be hidden behind a view switch is

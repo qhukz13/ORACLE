@@ -862,3 +862,59 @@ button.tt-id:hover { text-decoration: underline; border: none; }
 .kgraph-sel .muted {
   flex: 1;
 }
+
+/* ---------------------------------------------------------------- toasts
+   docs/UI.md §12: bottom-right, max 3 stacked, then a "+N" collapse. Above the dock
+   but never over the command bar — a toast that covers the input is a toast that
+   stops you answering it. */
+.toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(420px, 90vw);
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 6px;
+  font-size: 12px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 45%);
+  pointer-events: auto;
+}
+.toast-completed { border-left-color: var(--st-ok); }
+.toast-failed { border-left-color: var(--st-err); }
+.toast-approval { border-left-color: var(--st-wait); }
+.toast-more { border-left-color: var(--line); justify-content: space-between; }
+.toast-glyph {
+  flex: none;
+  font-size: 13px;
+}
+.toast-completed .toast-glyph { color: var(--st-ok); }
+.toast-failed .toast-glyph { color: var(--st-err); }
+.toast-approval .toast-glyph { color: var(--st-wait); }
+.toast-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.toast-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.toast-x {
+  flex: none;
+  padding: 2px 6px;
+}

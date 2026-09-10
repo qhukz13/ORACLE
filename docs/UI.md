@@ -799,6 +799,20 @@ chat where it can cite) · no second data pipeline — every node, edge and fail
 
 ## 12. Notifications
 
+> **AS BUILT — 2026-09-10.** `apps/desktop/src/components/Notifications.tsx`, mounted outside the
+> stage so a toast is never clipped by a view's overflow and survives a stage switch. Derived from
+> the event log and the open-approval list, never stored — the log already holds every one of these
+> facts and a second copy would only get a chance to disagree. Dismissal is the sole local state,
+> because "I have seen this" is a fact about the reader.
+>
+> **The degradation row was already built** as the sticky banner in `App.tsx`, which is what §12
+> asks for — a model being offline is a standing condition, not an event, and does not want a thing
+> that slides in and leaves.
+>
+> ⚠ **Not yet seen firing on a real event.** Task toasts need `tasks` to be non-zero (P12-T5's
+> click) and an approval toast needs a live T2 call. Covered by 12 component tests and the axe
+> audit; the live trigger is outstanding and is recorded rather than assumed.
+
 Toasts, bottom-right, max 3 stacked, then a "+N" collapse.
 
 | Kind | Duration | Sound |
