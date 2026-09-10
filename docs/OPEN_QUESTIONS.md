@@ -37,7 +37,7 @@ doc, delete the marker.
 | [OQ-23](#oq-23) | Does a failure-carrying prompt produce a *different* plan? | `EXPERIMENT NEEDED` | nothing — replanning ships bounded | opened 2026-08-25 |
 | [OQ-24](#oq-24) | Does observing every project fit the glance budget? | **RESOLVED 2026-08-28** — no: 1.7–2.7 s warm for 8 rows; the sidebar observes lazily, per selected row | — | measured by `scripts/measure_observation.py` |
 | [OQ-25](#oq-25) | Did adding the `continue` label move intent accuracy? | **RESOLVED 2026-08-28** — 97.1% at eleven labels (was 93.3% at ten); the slot fails only for the name `ORACLE`, which the deterministic fallback carries | — | eval re-run with 4 `continue` cases |
-| [OQ-26](#oq-26) | Should a document be findable by its filename? | `EXPERIMENT NEEDED` | — | **Opened by OQ-18: config is never embedded and `rel_path` is UNINDEXED, so no document can be found by name** |
+| [OQ-26](#oq-26) | What does indexing ourselves cost the measurement? | `EXPERIMENT NEEDED` | — | **48% of top-5 lexical slots go to ORACLE's own writing about the eval, and it grows with every dev log** |
 
 ---
 
@@ -638,10 +638,13 @@ That argues for language-aware fusion — which the `gated` arm was supposed to 
 identical to plain `rrf`. **The gate is not doing its job**, and that is worth fixing before another
 fusion variant is added.
 
-**5 · `en-relay-dockerfile` is unanswerable by construction — see [OQ-26](#oq-26).** It misses in
-every arm because `Dockerfile.relay` classifies as `CONFIG` (never embedded, RAG.md §2) *and*
-because a filename is not searchable. **Kept as a true negative rather than reclassified**: marking
-it `kind: lexical` would move the failure into a currently-clean bucket without making it findable.
+**5 · `en-relay-dockerfile` — corrected 2026-09-10, see [OQ-26](#oq-26).** First read as
+structurally unanswerable, on the claim that a filename is not searchable. **That was wrong**: the
+chunker prepends the path into the chunk text, so it is indexed as `asterim asterim dockerfile
+relay …` and ranks **12th**. It misses because ORACLE's own writing about this eval outranks it —
+**48% of top-5 lexical slots go to ORACLE documents** for a fixture set with zero answers in ORACLE.
+Dense genuinely cannot reach it (`CONFIG` is never embedded, RAG.md §2), so it stays a lexical
+question. Kept as a true negative rather than reclassified.
 
 **Not comparable to earlier runs.** `chunks_per_s` was 0.88 against 2.52 on 2026-08-29 because the
 machine was in use (the eval got 13.65 of 24 cores while ORT was configured for 24); recall is
@@ -1119,39 +1122,53 @@ renaming the row — not more prompt work.
 ---
 
 ### OQ-26
-**Should a document be findable by its filename — and should config be findable at all?**
-`EXPERIMENT NEEDED` · **opened 2026-09-10 by [OQ-18](#oq-18)'s resolution** · blocks nothing today,
-but it is a whole class of question the product currently cannot answer
+**What does indexing ourselves cost the measurement, and should config be embeddable?**
+`EXPERIMENT NEEDED` · **opened 2026-09-10 by [OQ-18](#oq-18), and immediately rewritten** ·
+blocks nothing; it is a measurement-integrity question that gets worse with time
 
-`en-relay-dockerfile` — *"where do we configure the relay Dockerfile"* — misses in **every one of
-OQ-18's eight arms**, and the file is present and indexed. Two independent structural reasons, and
-neither is a ranking problem:
+**This question was opened on a false premise and the correction is the more useful half.** It
+originally claimed `en-relay-dockerfile` was unanswerable because *"a filename is not searchable"* —
+`chunks_fts` declares `rel_path UNINDEXED`. That is true of the column and irrelevant in practice:
+the chunker prepends the ancestry prefix into the chunk **text**, so `Dockerfile.relay` is indexed
+as `asterim asterim dockerfile relay …`, with `dockerfile` at df 0.2% and `relay` at 1.7%. Measured:
+it ranks **12th**, not absent. `eval_embeddings.py`'s own comment on `ANSWER_KEY` had already said
+so — *"It is not structural. It is fourth, behind the fixture file and two documents about the
+fixture file"* — five lines above the constant being read. **Check the comment before opening the
+question.**
 
-1. **Config is never embedded.** `classify()` maps anything starting with `Dockerfile` to
-   `ContentKind.CONFIG`, and `CONFIG.embeddable` is `False`. The reasoning in
-   [RAG.md §2](RAG.md#2-what-gets-indexed) is sound — an embedding of a `tsconfig.json` matches
-   everything and means nothing — but it is applied by *suffix class*, and a Dockerfile is much
-   closer to a script than to a key-value file. This one opens with four lines of English prose
-   explaining what the relay is.
-2. **A filename is not searchable.** `chunks_fts` declares `rel_path UNINDEXED`, and
-   `identifiers()` explodes identifiers out of the chunk **text**, never the path. So no query can
-   match a document by what it is called.
+#### What is real: the corpus contains our writing about the corpus
 
-Together they mean **ORACLE cannot answer "where is X configured" for any config file, and cannot
-find any document by name.** A person asking "where's the dockerfile" is asking the most ordinary
-question there is about a repository.
+`ANSWER_KEY` drops `ORACLE/tests/fixtures/` from a ranking before scoring, deliberately keeping
+ORACLE's prose in, because *"`docs/RAG.md` quoting a fixture question is a real document a real
+query could really want, and pretending otherwise would be scoring against a corpus nobody has"*.
+That is a considered position. What it never had is a price. `MEASURED 2026-09-10`:
 
-**What to measure, cheaply, before changing anything:**
+- **92 of 190 top-5 lexical slots — 48% — are ORACLE's own documents**, for a fixture set where
+  **zero** answers live in ORACLE.
+- Excluding ORACLE's prose moves lexical recall@5 from **26% → 29%** and makes `en-relay-dockerfile`
+  land in the top 5. Excluding all of ORACLE takes it to 32%.
+- The top two hits for *"where do we configure the relay Dockerfile"* were
+  `logs/development/2026-09-10-oq18-resolved.md` — **written the same day, about this very eval** —
+  and an earlier OQ-18 log.
 
-* How many documents are `CONFIG` — measured 2026-09-10 on the eval corpus: **182 of 1,738**, and
-  9,285 of 27,967 chunks are lexical-only. That is not a rounding error.
-* Whether adding `rel_path` to the FTS index (or feeding path components into `ident`) fixes
-  `en-relay-dockerfile` without degrading the lexical bucket, which currently scores a clean 1.00.
-  This is the cheap half and it needs no re-embedding.
-* Whether *some* config kinds should be embeddable — Dockerfile, `.env.example`, CI YAML — and
-  whether that reopens the "an embedding of a tsconfig matches everything" problem RAG.md §2 was
-  protecting against. This half costs a reindex and should not be attempted first.
+**The concerning part is not the level, it is the ratchet.** Every dev log written about a
+measurement adds documents that quote that measurement's queries verbatim, so the corpus gets
+harder to retrieve from *because we measured it and wrote it up*. Nothing in the current scheme
+bounds that, and the effect is invisible in the numbers — it looks like retrieval getting worse.
 
-The order matters: the filename fix is free and testable against the existing cached vectors; the
-embedding-policy change is an ADR and a rebuild. **Do the free one, re-score, and see whether the
-second is still needed.**
+**A distinction worth testing before changing anything:** `docs/RAG.md` is genuine documentation a
+real query might want; `logs/development/2026-09-10-oq18-resolved.md` exists *because of* the
+measurement and nothing else. Excluding only the latter was measured and moves recall@5 not at all
+(26%), so the cheap version buys nothing and the useful version overturns a deliberate decision.
+That is the trade to resolve, with numbers now attached to both sides.
+
+#### And the half that is still open: should config be embeddable?
+
+`classify()` maps anything starting with `Dockerfile` to `ContentKind.CONFIG`, and
+`CONFIG.embeddable` is `False`. [RAG.md §2](RAG.md#2-what-gets-indexed)'s reasoning is sound — an
+embedding of a `tsconfig.json` matches everything — but it is applied by *suffix class*, and a
+Dockerfile is closer to a script than to a key-value file; this one opens with four lines of English
+prose. **182 of 1,738 documents** are config, and 9,285 of 27,967 chunks are lexical-only, so it is
+not a rounding error. Whether some config kinds should be embeddable costs a reindex to answer and
+should not be attempted before the contamination question above is settled — otherwise the two
+changes land together and neither is attributable.

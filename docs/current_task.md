@@ -7,8 +7,9 @@
 
 ## Task
 
-**OQ-18 resolved, P11-T3 done, and retrieval reaches chat. Next up: OQ-18's two cheap
-follow-ups (compose the levers; fix the `gated` arm), then OQ-26's free half.**
+**OQ-18's follow-ups done, and OQ-26 rewritten on a measured premise. Next up: the two
+decisions this leaves — the RRF-weighting ADR, and what to do about the eval indexing our own
+writing about the eval.**
 
 **Phase:** [11 — execution visualisation & advanced UI](ROADMAP.md#phase-11--execution-visualisation--advanced-ui--capability-arc) · **Scope:** Capability arc
 **Status:** `READY` · **Set:** 2026-09-09 · **Blocked on:** nothing
@@ -51,25 +52,32 @@ verified against the real corpus at 1,564 documents / 3,465 edges.
   go/no-go), the execution tree's acceptance criteria, `TaskTree`'s fixture, and the sidebar
   counters. Start the daemon and UI, type `continue ORACLE` in the command bar, approve the T3
   `confirm_strong` card. `oracle-selfcheck` is the cheaper first fill — local, no egress, ~5 min.
-- ~~OQ-18~~ **RESOLVED 2026-09-10.** Translation works and the 0.8b mechanism *equals* the human
-  ceiling (66% r@5, 64% RU); `Settings.translate_queries` confirmed `True` on evidence. **The 80%
-  gate is still missed at 68%**, so Phase 5's recall criterion stays unmet — said plainly rather
-  than moved. [OQ-18](OPEN_QUESTIONS.md#oq-18) ·
-  [dev log](../logs/development/2026-09-10-oq18-resolved.md). Scheduled task unregistered.
-  **Two cheap follow-ups it handed us, both nearly free because the forward pass is cached in
-  `D:/ORACLE/scratch/oq18-vectors-bge-m3.npz` — a re-score is seconds, not six hours:**
-  1. **Compose the two levers.** `rrf_w2` (68%, no translation) beats both translation arms (66%),
-     and **there is no `rrf_w2_mt` arm** — the two things that each help have never been measured
-     together. Add the arm and re-score.
-  2. **The `gated` arm does nothing.** It scores 61%, identical to plain `rrf`, though it exists to
-     be the language-aware fusion that the breakdown says is needed (BM25 scores **0.00** on
-     cross-language queries and dilutes a good dense ranking). Fix the gate before adding variants.
-- **Global search misses its budget, measured for the first time on 2026-09-09**: warm 504–1,467 ms
-  against **p95 < 300 ms**, cold 7,932 ms. The previous session could not measure it (`know.*` was
-  refusing). Wants its own task — profile before optimising; the cold number smells like model load.
-- **The reindex is still unfired** — 57% of live rows exceed the 1200-char cap. `POST
-  /api/v1/knowledge/reindex` is verified live. Full rebuild ~1 h synchronous. Note it will also
-  repopulate `document_vectors` as it goes, which makes the graph's one-time 88 s backfill free.
+- ~~OQ-18~~ **RESOLVED 2026-09-10, follow-ups done.** Translation works and the 0.8b mechanism
+  *equals* the human ceiling; `Settings.translate_queries` confirmed `True` on evidence.
+  **The shipped path composes to 71.1%** — no printed arm is the shipped path, which the first
+  writeup got wrong and the correction is recorded. **The 80% gate is still missed**, so Phase 5's
+  recall criterion stays unmet. [OQ-18](OPEN_QUESTIONS.md#oq-18) ·
+  [dev log](../logs/development/2026-09-10-oq18-resolved.md).
+  **The `gated` arm was measuring a gate the product replaced two weeks earlier** — ported, and the
+  eval now opens on 13 of 38 fixtures (0 of 25 Russian) instead of 38 of 38, with the constants
+  pinned by `tests/test_eval_gate_matches_production.py`.
+- **A +2.6 point retrieval win is available, and it needs an ADR, not a commit.** The best
+  composition is **73.7%** — Russian → `dense_mt`, English → **`rrf_w2`** (RRF weighted 2:1 toward
+  dense) — against today's 71.1%. But [RAG.md §5](RAG.md#5-hybrid-retrieval) refused weight tuning
+  deliberately (*"would have forfeited the property the algorithm was chosen for"*) and gated the
+  input instead, measured at +8/+12. **That decision now has evidence against it and should be
+  reopened properly.** Two caveats: `rrf_w2` was measured *ungated*, so 73.7% is a ceiling; and
+  `rrf_w2_mt` — weighted fusion over the *translated* probe — is still unmeasured and is the one
+  combination the composition cannot derive. Fold it into the next full run.
+- **[OQ-26](OPEN_QUESTIONS.md#oq-26): the eval indexes our writing about the eval, and it ratchets.**
+  `MEASURED 2026-09-10`: **92 of 190 top-5 lexical slots (48%) are ORACLE documents**, for a fixture
+  set with **zero** answers in ORACLE — the top two hits for one query were OQ-18 dev logs, one
+  written the same day about that run. Excluding ORACLE's prose is worth +3 points of lexical
+  recall@5 and finds `en-relay-dockerfile`. **But keeping it in is a deliberate decision**
+  (*"pretending otherwise would be scoring against a corpus nobody has"*), and excluding *only* the
+  measurement artifacts — `logs/development/` — was measured and buys nothing. So the cheap version
+  is useless and the useful version overturns a considered call. Both sides now have numbers; the
+  decision does not.
 - ~~ORACLE cannot retrieve from a chat turn.~~ **FIXED 2026-09-10.** `know.search` was never in
   `ARG_BUILDERS`, so for intent `search` the router had exactly one candidate (`fs.list`) and — per
   ADR-0017, which builds the enum from candidates — could not spell `know.search`. Added with a new
