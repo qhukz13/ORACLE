@@ -29,7 +29,7 @@ doc, delete the marker.
 | [OQ-15](#oq-15) | Can routed-turn latency get under ~1.5 s? | **RESOLVED 2026-09-10** | UX quality, not a phase | **No — ~585 ms of every turn is an Ollama toll paid warm. Prompt size is free, so the few-shot costs nothing; `/api/generate` is slower** |
 | [OQ-16](#oq-16) | Does `connect_read_pipe` work anywhere on Windows? | `UNKNOWN` | none — worked around | monitoring |
 | [OQ-17](#oq-17) | Is a ~43 min **cold** reindex acceptable? | `ASSUMPTION` | Phase 5 tuning | narrowed 2026-08-22 — warm rebuilds are 37 s |
-| [OQ-18](#oq-18) | Can a Russian question reach an English codebase? | **measured 2026-09-10** | Phase 5 gate | **Translation works and the 0.8b mechanism equals the human ceiling; the shipped path composes to 71% and the 80% gate is still missed** |
+| [OQ-18](#oq-18) | Can a Russian question reach an English codebase? | **measured 2026-09-11** | Phase 5 gate | **Translation works and the 0.8b mechanism equals the human ceiling. The shipped path (gated+weighted) measures 69.4% over 36 reachable fixtures; the 80% gate is still missed. [ADR-0027 verified](DECISIONS.md#adr-0027--rrf-is-weighted-against-the-lexical-list): +2.8 points** |
 | [OQ-19](#oq-19) | Should the Claude integration move to the Claude Agent SDK? | `TO VERIFY` (on trigger) | none — trigger-based | open — **trigger checked 2026-09-10 and not fired**: flags survive v2.1.251; the *stream* half is still only covered by fixtures |
 | [OQ-20](#oq-20) | Can `agy --json-schema` reliably return a valid ExecutionPlan? | measured 2026-08-24 | P6-T5 / Phase 8 | **answered NO — 75% vs a 90% gate; the ladder promoted Claude** |
 | [OQ-21](#oq-21) | When does ORACLE's MCP server need the 2026-07-28 spec? | `UNKNOWN` | none — watch item | monitoring |
@@ -870,6 +870,34 @@ a number, a decomposition, and a named next step.
 never embedded. No dense probe of any quality can retrieve it; the lexical half is what should, and
 the script rule turns that half off for the queries around it. A fixture set that includes it is
 measuring fusion and dense retrieval with one number.
+
+---
+
+#### ADR-0027's verification `2026-09-11` — the shipped arm measured at last
+
+The four cells, one run, 36 reachable fixtures:
+
+| | ungated | gated |
+|---|---|---|
+| **unweighted** | `rrf` 63.9% | `gated` 66.7% |
+| **weighted** | `rrf_w2` 69.4% | **`gated_w2` 69.4%** ← ships |
+
+**+2.8 points for the weighting on the path that ships**, so
+[ADR-0027](DECISIONS.md#adr-0027--rrf-is-weighted-against-the-lexical-list) stands and the
+pre-committed revert does not fire. The gate is still missed — 69.4% against 80% — which is what
+keeps this question open.
+
+Two things worth carrying forward
+([dev log](../logs/development/2026-09-11-adr0027-verified.md)):
+
+- **The gate and the weight are substitutes, not complements.** Each helps alone; together they
+  land on the same number as weighting alone. Both fix BM25 noise entering the fusion as an equal
+  opinion, and the weight fixes it more thoroughly.
+- **A cross-run comparison would have been meaningless here.** Of three arms with a rescored
+  baseline, two were unchanged and `gated` had drifted **+5.6 points** between runs — twice
+  ADR-0027's entire effect. `gated` is also the only one of the three that consults
+  `bm25.answerable()`, and the corpus moved underneath it. Hypothesis, not measurement, but it is
+  why the verdict was taken within a single run.
 
 ---
 

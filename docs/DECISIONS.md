@@ -991,6 +991,39 @@ the old sentence should find the number that overturned it beside it.
 
 ---
 
+> ### Verified 2026-09-11 — the arm that actually ships was measured, and it stands
+>
+> This ADR was accepted on a **ceiling estimate**: `rrf_w2` (weighted but *ungated*) scored 68%
+> against `rrf`'s 61%. Neither is the shipped path, which is gated **and** weighted. A run measuring
+> all four cells in one pass settles it:
+>
+> | | ungated | gated |
+> |---|---|---|
+> | **unweighted** | `rrf` 63.9% | `gated` 66.7% |
+> | **weighted** | `rrf_w2` 69.4% | **`gated_w2` 69.4%** ← ships |
+>
+> *(dense-only 61.1%; 36 reachable fixtures; bge-m3; corpus frozen at 1,766 docs / 28,590 chunks.)*
+>
+> **`gated_w2` 69.4% vs `gated` 66.7% — the weighting is worth +2.8 points on the path that
+> ships.** ADR-0027 stands, and the pre-committed revert does not fire.
+>
+> **Two things this run showed that the ceiling estimate could not.**
+>
+> *The gate and the weight are not additive.* Each helps alone — gating lifts unweighted fusion by
+> 2.8 points, weighting lifts it by 5.5 — but together they land on the same 69.4% as weighting
+> alone. Both fix the same failure, which is BM25 noise entering the fusion as an equal opinion;
+> once the weight is applied the gate has little left to prevent **on this fixture set**.
+>
+> *Whether the gate still changes any individual query is unverified.* `rrf_w2` and `gated_w2`
+> score identically, and equal totals can hide different queries — but the eval records one
+> `misses` list rather than one per arm, so the artifact cannot answer it. Recorded as a gap
+> rather than resolved by assuming the obvious reading.
+>
+> **The gate is still missed:** 69.4% against Phase 5's recall@5 ≥ 80%. ADR-0027 never claimed
+> otherwise, and [OQ-18](OPEN_QUESTIONS.md#oq-18) remains the open question about the rest.
+
+---
+
 ## ADR-0028 — A dispatched approval does not expire
 
 **Context.** `core/approvals.py` gives every request a 180-second TTL, and states its reasoning:

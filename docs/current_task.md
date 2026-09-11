@@ -47,47 +47,22 @@ wins.
 - Acceptance still open: reboot → online with nobody starting it · closing the window does not stop
   work · boot animation ≤ ~400 ms.
 
-### 2. ADR-0027's verification — **stopped and rescheduled 2026-09-10 16:20**
+### 2. ~~ADR-0027's verification~~ — **done 2026-09-11, and it stands**
 
-The run was killed at 28% and its scheduled task disabled. **The 2h it had spent was already
-worthless** and stopping is not what made it so: `corpus_fingerprint()` hashes every embedded
-chunk's text, ORACLE indexes `C:/Projects`, and ORACLE *is* in `C:/Projects` — so the OQ-14 commit
-an hour into the run moved the corpus under it. Measured, not inferred:
+The run completed at 04:00 against the frozen corpus. **`gated_w2` 69.4% vs `gated` 66.7%: the
+weighting is worth +2.8 points on the path that ships**, so the pre-committed revert does not fire.
+[ADR-0027 verified](DECISIONS.md#adr-0027--rrf-is-weighted-against-the-lexical-list) ·
+[dev log](../logs/development/2026-09-11-adr0027-verified.md) ·
+`uv run python scripts/oq18_verdict.py` re-reads the verdict from the artifact.
 
-```
-checkpoint     5376 / 19191 vectors   complete=False
-stored fp    f740705a003bf55278ce21778a63b187af72f8014eece5f0e21dfdc64ffa50e2
-today  fp    10251e03ce2ecebd3a3bf663f6efc234d19aa5ac2c9d5b6360c7c31bf18b8ff4
-REUSABLE     False
-```
+**The comparison was taken within one run, and that mattered more than it sounded.** Of the three
+arms with a rescored cross-run baseline, two were unchanged and `gated` had drifted **+5.6 points**
+between runs — twice ADR-0027's whole effect. A cross-run reading would not have been wrong so much
+as meaningless.
 
-**Fixed, so the next run is not hostage to the next commit.** `--corpus-cache` freezes the
-walked-and-chunked corpus to an 8 MB `.json.gz` and reads it thereafter; `run_oq18_eval.cmd` passes
-it. The eval was checkpointing the *vectors* and leaving the *corpus* free to move, which solved one
-half of a two-half problem. This also makes runs weeks apart comparable, which they never were.
-
-**Two fixture answer documents vanished** — `Asterim/apps/server/src/middleware/entitlementGuard.ts`
-and `rbacGuard.ts` are staged deletions in the Asterim repo, done outside ORACLE. So
-`lex-entitlement-guard` and `ru-workspace-permissions` are unreachable. The eval printed that and
-then scored them as misses anyway, which its own comment says not to do ("measures the walker, not
-the model"); it now drops them from the scored set and prints the denominator.
-
-**The like-for-like baseline, computed before the run rather than argued after it.** The previous
-complete pass listed misses per arm, so rescoring over the 36 still-reachable fixtures is exact:
-
-| arm | was (n=38) | like-for-like (n=36) |
-|---|---|---|
-| `dense` | 60.5% | **61.1%** |
-| `rrf_w2` | 68.4% | **69.4%** |
-| `gated` | 60.5% | **61.1%** |
-
-**The pre-committed decision stands: compare the new `gated` against 61.1%. If it does not move,
-revert [ADR-0027](DECISIONS.md#adr-0027--rrf-is-weighted-against-the-lexical-list)** — the rollback
-is one line, pass `1.0` as `lexical_weight`. The gate is recall@5 ≥ 80% and neither number reaches
-it; ADR-0027 never claimed it would.
-
-> Restoring the two Asterim files would restore the 38-case set. That is the owner's call in
-> another repository, not something to do from here.
+**One follow-up, cheap and concrete:** the eval writes a single `misses` list rather than one per
+arm, so whether `gated_w2` and `rrf_w2` miss the *same* queries — they score identically — cannot
+be answered from the artifact. Per-arm miss lists would make the next run of this question cheaper.
 
 ### 3. [OQ-26](OPEN_QUESTIONS.md#oq-26) — still open
 

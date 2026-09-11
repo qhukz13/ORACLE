@@ -1,0 +1,77 @@
+{
+  "corpus": {
+    "docs": 1766,
+    "chunks": 28590,
+    "semantic": 19257
+  },
+  "lexical_only": {
+    "recall@1": 0.16666666666666666,
+    "recall@5": 0.25,
+    "recall@10": 0.3055555555555556,
+    "r@5/crosslang": 0.0,
+    "r@5/semantic": 0.7,
+    "r@5/lexical": 1.0
+  },
+  "results": [
+    {
+      "name": "bge-m3",
+      "dim": 1024,
+      "dense": {
+        "recall@1": 0.3055555555555556,
+        "recall@5": 0.6111111111111112,
+        "recall@10": 0.7777777777777778,
+        "r@5/crosslang": 0.5833333333333334,
+        "r@5/semantic": 0.6,
+        "r@5/lexical": 1.0
+      },
+      "hybrid": {
+        "recall@1": 0.2777777777777778,
+        "recall@5": 0.6388888888888888,
+        "recall@10": 0.6944444444444444,
+        "r@5/crosslang": 0.5416666666666666,
+        "r@5/semantic": 0.8,
+        "r@5/lexical": 1.0
+      },
+      "lexical": {
+        "recall@1": 0.16666666666666666,
+        "recall@5": 0.25,
+        "recall@10": 0.3055555555555556,
+        "r@5/crosslang": 0.0,
+        "r@5/semantic": 0.7,
+        "r@5/lexical": 1.0
+      },
+      "chunks_per_s": 1.2586217784378473,
+      "query_ms_p50": 175.34674999842537,
+      "query_ms_p95": 298.8912999990134,
+      "load_s": 2.7309220999959507,
+      "model_mb": 2267.545531,
+      "index_mb": 78.876672,
+      "misses": [
+        "ru-feature-entitlement",
+        "en-relay-dockerfile",
+        "en-secrets-at-rest",
+        "ru-pairing-bruteforce",
+        "ru-air-gap",
+        "ru-kill-process-tree",
+        "ru-local-discovery",
+        "ru-terminal-reattach",
+        "ru-audit-trail",
+        "ru-symbol-extraction",
+        "ru-cross-validation",
+        "ru-nonlinearity",
+        "ru-model-degrades"
+      ],
+      "fusion": {
+        "dense": 0.6111111111111112,
+        "rrf": 0.6388888888888888,
+        "rrf_w2": 0.6944444444444444,
+        "gated": 0.6666666666666666,
+        "gated_w2": 0.6944444444444444,
+        "dense_xl": 0.6666666666666666,
+        "rrf_xl": 0.6666666666666666,
+        "dense_mt": 0.6388888888888888,
+        "rrf_mt": 0.6388888888888888
+      }
+    }
+  ]
+}
